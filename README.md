@@ -82,6 +82,7 @@ herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/
 .state/<slug>.json    # workspace_id, root_pane, agent, route
 .state/launch/<agent>.md / .mcp.json   # instructions and MCP config handed to the harness
 .state/cooldown/<harness>.json         # set when a harness hits a quota or auth limit
+.state/fm/            schemas handed to fm
 .state/daemon.log     # daemon output when it runs as the launchd service
 .runs/<id>.json       # one subagent run
 .queue/<agent>.jsonl  # prompts waiting for that agent to be idle
@@ -103,7 +104,7 @@ A prompt sent to a busy agent steers its current turn, and the answer it was wor
 
 Two known limitations:
 
-- While a trust or warning modal is up (codex's first run in a directory, for example), herdr can report the agent as idle. The daemon then types into the modal and the queued item is lost. Accept the modal once in that pane and resend.
+- While a trust or warning modal is up (codex's first run in a directory, for example), herdr can report the agent as idle. The daemon then types into the modal and the queued item is lost. When `fm` is available, the daemon holds the delivery (up to 8 retries, about 2 min) while fm reads a prompt in the pane, so accepting the modal lets it through. Without fm it is lost as before. I haven't seen this hold fire on a real modal: codex showed no trust prompt in the two fresh directories I tried.
 - Reading a claude pane's history once returned text without the latest reply, and it left the pane scrolled up. Harvesting and quota detection read panes the same way, so claude's quota detection is unverified. Only cursor's has been seen working on a real limit so far.
 
 ### Subagent lifecycle
@@ -166,6 +167,8 @@ These strings were checked against claude 2.1.304, codex 0.163.0 and cursor-agen
 
 A match writes `.state/cooldown/<harness>.json`, and routing skips that harness until the reset time plus a minute (or for an hour when no time is given). A subagent that failed this way is closed and its task re-queued on the next route, and its parent gets the new run id. A main agent restarts in a new pane on the next route, and the message it couldn't answer is delivered again with a note that the conversation is new. Text typed straight into the pane isn't re-sent. When no other route is available, the old agent keeps running. Delete the cooldown file to lift it early.
 
+For subagent runs, when none of the patterns match and `fm available` succeeds, the daemon asks Apple's on-device model to read the same 15 lines. It counts a quota or auth verdict only when the line fm cites sits in the last 12 rows of the pane (a narrow subagent pane wraps one message over several rows) and contains a failure word, and that cooldown lasts 10 minutes. Main agents never act on fm, because a misread would restart them and lose the conversation. Daemon log lines start `fm:`.
+
 ---
 
 ## Grok Bot compatibility
@@ -186,7 +189,7 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 - **A desktop UI that feels native to the Mac.** Federico Viticci's early look at his "Apple Bots" app sets a good bar: a global quick-entry window for messaging any bot, a menu bar item, and split views with one agent per pane. For herdbot that means a hotkey that queues a message to a bot, and a menu bar item showing which bots are up, which subagents are running, which harnesses are cooling down, and anything `blocked` and waiting on you. Blocked approvals should become notifications you can act on. The UI only reads the same files and calls the same herdr socket, so it can be built in either [gpui-kit](https://github.com/longbridge/gpui-kit) or SwiftUI. gpui-kit 0.8.0 builds on Zed snapshots that break their API, so it would be pinned to a git rev.
 - **pi code mode: verified on pi 1.2.0 (2026-10-20).** Three unisolated `deepseek-v4-flash` runs called `list_bots` from scripts and exited 0 in 5.48, 6.25, and 9.80 seconds; `kimi-k2.7-code` also passed in 13.08 seconds. Disabling global `rea` was unnecessary. Code mode is enabled; model-generated script errors were recovered within the gate.
 - **A durable harness on Pi Durable.** Earendil's [Pi Durable](https://earendil.com/posts/pi-durable/) (experimental, TypeScript) checkpoints every model call and tool call, so a new process picks up unfinished work after a crash. It also makes submissions exactly-once, lets a conversation fork without copying its transcript, and lets several clients watch and steer one conversation. Those cover herdbot's weakest spots, which are scraping pane text for status and quota errors, and losing an answer when a busy agent gets prompted. A `durable` harness, a small Node host per bot that runs in a herdr pane, would hand herdbot real status and results for pi-driven bots instead of screen reads. The API may still change, so this stays an experiment next to the pane-based harnesses.
-- **Apple's on-device model for light work.** macOS 27 ships `fm`, a command-line front end to Apple's Foundation Models. It runs on-device, costs nothing against any subscription, and `fm respond` can return JSON constrained to a schema. Good uses for it include picking a task class when a bot doesn't name one, deciding whether a pane tail shows a quota error, an approval prompt or a finished turn (a backstop for the string matching), and summarizing a subagent's output before it reaches the parent. It would be a fallback rather than a requirement, used only when `fm` exists and its terms have been accepted once with `sudo fm license`. Apple's session also shows a larger Private Cloud Compute model, but one hands-on report says macOS 27.0 rejects it, so that's unverified.
+- **More uses for Apple's on-device model.** `fm` now backs up quota and auth detection for subagents and holds deliveries behind modals. Picking a task class when a bot names none is not built; bots rarely omit it. Summarizing subagent output was left out on purpose: the parent gets the raw tail, which loses nothing, while on-device summaries of long output would.
 
 Open questions:
 
