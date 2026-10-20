@@ -8,6 +8,7 @@
 //! <slug>/BOT.local.md       local additions, appended after BOT.md, never overwritten
 //! <slug>/memory/ skills/    the bot's own files
 //! .state/<slug>.json        live herdr ids for the bot
+//! .state/cooldown/<h>.json  harness <h> hit a quota or auth failure; routing skips it until then
 //! .runs/<id>.json           one subagent run
 //! .queue/<agent>.jsonl      prompts waiting for <agent> to go idle (daemon flushes)
 //! ```
@@ -145,6 +146,9 @@ pub struct BotState {
     pub workspace_id: String,
     pub root_pane: String,
     pub agent: String,
+    /// Route the main agent was started on ("harness:model[:effort]").
+    #[serde(default)]
+    pub route: String,
 }
 
 pub fn load_state(slug: &str) -> Option<BotState> {
@@ -179,6 +183,9 @@ pub struct Run {
     pub pane_closed: bool,
     #[serde(default)]
     pub notified_blocked: bool,
+    /// The task as given, so a run can be re-queued on another route.
+    #[serde(default)]
+    pub prompt: String,
 }
 
 pub fn run_path(id: &str) -> PathBuf {

@@ -1,5 +1,6 @@
 //! One loop, three jobs: deliver queued prompts to idle agents, watch subagent runs, fire
-//! schedules. It also re-imports the Grok Bot roster when that file changes.
+//! schedules. It also re-imports the Grok Bot roster when that file changes, and cools down
+//! a harness whose agent just hit a subscription quota or auth failure.
 
 use std::collections::HashMap;
 use std::fs;
@@ -7,8 +8,8 @@ use std::time::Duration;
 
 use herdr_client::Client;
 
-use crate::home::{self, Result};
-use crate::{grok, run};
+use crate::home::{self, Result, Run};
+use crate::{cooldown, grok, run};
 
 const TICK: Duration = Duration::from_secs(2);
 /// After a delivery, give the agent this long to pick it up before delivering again.
@@ -28,12 +29,16 @@ pub async fn run() -> Result<()> {
     let mut delivered_at: HashMap<String, i64> = HashMap::new();
     let mut last_fired: HashMap<String, i64> = load_fired();
     let mut roster_seen = None;
+    let mut main_status: HashMap<String, String> = HashMap::new();
     loop {
-        if let Err(e) = flush_queues(&herdr, &mut delivered_at).await {
+        if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut main_status).await {
             eprintln!("queue: {e}");
         }
         if let Err(e) = watch_runs(&herdr).await {
             eprintln!("runs: {e}");
+        }
+        if let Err(e) = watch_bots(&herdr, &mut main_status).await {
+            eprintln!("bots: {e}");
         }
         if let Err(e) = fire_schedules(&mut last_fired, started) {
             eprintln!("schedules: {e}");
@@ -51,7 +56,11 @@ pub async fn run() -> Result<()> {
     }
 }
 
-async fn flush_queues(herdr: &Client, delivered_at: &mut HashMap<String, i64>) -> Result<()> {
+async fn flush_queues(
+    herdr: &Client,
+    delivered_at: &mut HashMap<String, i64>,
+    main_status: &mut HashMap<String, String>,
+) -> Result<()> {
     for entry in fs::read_dir(home::queue_dir())?.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
@@ -90,6 +99,11 @@ async fn flush_queues(herdr: &Client, delivered_at: &mut HashMap<String, i64>) -
                 .agent_prompt(&agent, &texts.join("\n\n"), None)
                 .await?;
             delivered_at.insert(agent.clone(), home::now());
+            // A reply can come back inside one tick (a quota notice does), so count the
+            // delivery as the start of a turn for `watch_bots`.
+            if home::load_state(&agent).is_some() {
+                main_status.insert(agent.clone(), "working".into());
+            }
             println!("delivered {} message(s) to {agent}", texts.len());
         }
         fs::remove_file(taken)?;
@@ -120,18 +134,26 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                 r.pane_closed = true;
             }
             ("running", Some("blocked")) if !r.notified_blocked => {
-                home::enqueue(
-                    &r.parent_agent,
-                    &format!(
-                        "[subagent {} \"{}\" is blocked]\nIt is waiting for an approval in herdr pane {}. Shane must answer it there.",
-                        r.id, r.description, r.pane
-                    ),
-                )?;
-                r.notified_blocked = true;
+                // claude's limit screen offers choices, so a quota hit can show up as blocked.
+                let text = run::tail(herdr, &r.agent, 60).await;
+                if !requeue_if_cooled(herdr, &mut r, &text).await? {
+                    home::enqueue(
+                        &r.parent_agent,
+                        &format!(
+                            "[subagent {} \"{}\" is blocked]\nIt is waiting for an approval in herdr pane {}. Shane must answer it there.",
+                            r.id, r.description, r.pane
+                        ),
+                    )?;
+                    r.notified_blocked = true;
+                }
             }
             ("running", _) if settled && home::now() - r.started_at > HARVEST_AFTER => {
-                // Finished its turn without calling report_result: hand back what it printed.
                 let text = run::tail(herdr, &r.agent, 60).await;
+                if requeue_if_cooled(herdr, &mut r, &text).await? {
+                    home::save_run(&r)?;
+                    continue;
+                }
+                // Finished its turn without calling report_result: hand back what it printed.
                 r.status = "done".into();
                 r.result = Some(text.clone());
                 home::enqueue(
@@ -149,6 +171,93 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
             _ => continue,
         }
         home::save_run(&r)?;
+    }
+    Ok(())
+}
+
+/// If `tail` shows the run's harness out of quota or locked out, cool that harness down,
+/// close the run, re-queue its task on the next route and tell the parent. Returns whether
+/// it did.
+async fn requeue_if_cooled(herdr: &Client, r: &mut Run, tail: &str) -> Result<bool> {
+    let harness = r.route.split(':').next().unwrap_or_default();
+    let Some(c) = cooldown::detect(harness, tail, chrono::Local::now()) else {
+        return Ok(false);
+    };
+    cooldown::record(harness, &c)?;
+    println!("cooldown {harness}: {}", c.reason);
+    r.status = "failed".into();
+    let _ = herdr.pane_close(&r.pane).await;
+    r.pane_closed = true;
+    let note = if r.prompt.is_empty() {
+        "It predates re-queueing (no stored prompt); start it again if it is still needed."
+            .to_owned()
+    } else {
+        match run::spawn(
+            herdr,
+            &r.bot,
+            &r.parent_agent,
+            &r.class,
+            None,
+            &r.description,
+            &r.prompt,
+        )
+        .await
+        {
+            Ok(next) if next.status != "failed" => format!(
+                "Re-queued as subagent {} on {}; its result will follow.",
+                next.id, next.route
+            ),
+            Ok(next) => format!("Re-queueing failed: {}", next.result.unwrap_or_default()),
+            Err(e) => format!("Re-queueing failed: {e}"),
+        }
+    };
+    // Only the kind ("quota" / "auth") goes to the parent: the raw CLI line would sit in the
+    // parent's own pane and trip detection there.
+    let kind = c.reason.split(':').next().unwrap_or_default();
+    let summary = format!(
+        "{harness} hit a {kind} failure; it is skipped until {}.",
+        c.until_local()
+    );
+    r.result = Some(format!("{summary} {note}"));
+    home::enqueue(
+        &r.parent_agent,
+        &format!(
+            "[subagent {} \"{}\" stopped]\n{summary} {note}",
+            r.id, r.description
+        ),
+    )?;
+    Ok(true)
+}
+
+/// Cool down a main agent's harness when the turn it just finished hit a quota or auth
+/// failure. Only a working → settled change counts, so the scrollback a daemon restart finds
+/// is not re-read.
+// ponytail: cooldown only; the main agent keeps its pane. It moves to the next route the next
+// time `run::up` restarts it.
+async fn watch_bots(herdr: &Client, last: &mut HashMap<String, String>) -> Result<()> {
+    for slug in home::list_bots() {
+        let Some(state) = home::load_state(&slug) else {
+            continue;
+        };
+        let Some(status) = run::status(herdr, &state.agent).await else {
+            last.remove(&slug);
+            continue;
+        };
+        let was = last.insert(slug, status.clone());
+        if was.as_deref() != Some("working")
+            || !matches!(status.as_str(), "idle" | "done" | "blocked")
+        {
+            continue;
+        }
+        let harness = state.route.split(':').next().unwrap_or_default();
+        let tail = run::tail(herdr, &state.agent, 60).await;
+        if let Some(c) = cooldown::detect(harness, &tail, chrono::Local::now()) {
+            cooldown::record(harness, &c)?;
+            println!(
+                "cooldown {harness} (main agent {}): {}",
+                state.agent, c.reason
+            );
+        }
     }
     Ok(())
 }

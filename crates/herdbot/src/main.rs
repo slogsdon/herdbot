@@ -1,5 +1,6 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
+mod cooldown;
 mod daemon;
 mod grok;
 mod home;

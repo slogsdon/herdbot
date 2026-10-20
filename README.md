@@ -154,6 +154,19 @@ The routing table is in [`routing.toml`](routing.toml). Resolution order:
 3. `[classes.<subagent_type>]`: an ordered list of `harness:model[:effort]`. The first available harness wins. A harness counts as available when its binary is present and it has not hit a recent quota or auth failure.
 4. `[default]`
 
+**Quota and auth cooldown.** When a subagent settles or blocks, and when a main agent finishes a turn, the daemon scans the last 15 non-empty lines of its pane for its harness's failure text:
+
+| Harness | Quota | Auth |
+|---|---|---|
+| claude | a line starting `You've hit your … limit`; the reset time comes from `resets 12:30am` | `Please run /login`, `authentication_error` |
+| codex | a line starting `You've hit your usage limit`; the reset time comes from `try again at 3:45 PM` or `… at Oct 21st, 2026 3:45 PM` | `Your access token could not be refreshed`, `OAuth refresh token was rejected`, `api_key_expired` |
+| cursor | not detected (see below) | `Your stored authentication is invalid`, `Error: Authentication required`, ``run `cursor-agent login` to re-authenticate`` |
+| pi (opencode-go) | — | `api_key_expired` |
+
+The strings were checked against the installed CLIs on 2026-10-20: claude 2.1.304, codex 0.163.0, cursor-agent 2026.10.16. cursor's quota text comes from its server rather than the CLI, so cursor has no quota detection.
+
+A match writes `.state/cooldown/<harness>.json` (`{until, reason}`). `until` is the parsed reset time plus one minute, or one hour from now when the output gives no time. `route::available` skips the harness until then. A subagent that failed this way is closed, and its task is re-queued with the same class on the next route; its parent is told the new run id. A main agent only records the cooldown and keeps its pane. It moves to the next route the next time it is restarted. To lift a cooldown early, delete the file.
+
 Task classes are the recovered `SubagentType` values (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`, which Grok Bot handles through `custom`.
 
 All model IDs in `routing.toml` were listed by the installed CLIs on 2026-10-19. The choices of which model fits which task are **Assumptions** and are meant to be tuned.

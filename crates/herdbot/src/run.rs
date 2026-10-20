@@ -34,11 +34,11 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
             // Agent exited; restart it in a fresh pane of the same workspace.
             let pane = split(herdr, &state.root_pane, slug, None, &home::cwd(slug, &bot)).await?;
             let _ = herdr.pane_close(&state.root_pane).await;
-            let state = BotState {
+            let mut state = BotState {
                 root_pane: pane,
                 ..state
             };
-            start(
+            state.route = start(
                 herdr,
                 slug,
                 &bot,
@@ -49,7 +49,8 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
                 None,
                 None,
             )
-            .await?;
+            .await?
+            .to_string();
             home::save_state(slug, &state)?;
             return Ok(state);
         }
@@ -59,7 +60,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
     let created = herdr
         .workspace_create(&format!("🤖 {}", bot.name), &cwd, pane_env(slug, None))
         .await?;
-    let state = BotState {
+    let mut state = BotState {
         workspace_id: created["workspace"]["workspace_id"]
             .as_str()
             .ok_or("workspace.create: no id")?
@@ -69,9 +70,10 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
             .ok_or("workspace.create: no pane")?
             .to_owned(),
         agent: main_agent(slug),
+        route: String::new(),
     };
     home::save_state(slug, &state)?;
-    start(
+    state.route = start(
         herdr,
         slug,
         &bot,
@@ -82,7 +84,9 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         None,
         None,
     )
-    .await?;
+    .await?
+    .to_string();
+    home::save_state(slug, &state)?;
     Ok(state)
 }
 
@@ -215,6 +219,7 @@ pub async fn spawn(
         started_at: home::now(),
         pane_closed: false,
         notified_blocked: false,
+        prompt: prompt.to_owned(),
     };
     home::save_run(&run)?;
     let task = format!(

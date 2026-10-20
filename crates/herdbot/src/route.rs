@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 
 use toml::Value;
 
+use crate::cooldown;
 use crate::home::{self, Result};
 
 pub const DEFAULT_ROUTING: &str = include_str!("../../../routing.toml");
@@ -128,6 +129,15 @@ fn available(table: &Value, route: &Route) -> std::result::Result<(), String> {
     let bin = binary(&route.harness).ok_or("unknown harness")?;
     if !on_path(bin) {
         return Err(format!("{bin} not on PATH"));
+    }
+    if let Some(c) = cooldown::active(&route.harness) {
+        return Err(format!(
+            "cooling down until {} ({})",
+            c.until_local(),
+            // The kind only: this error reaches agents' panes, and the raw CLI line would trip
+            // detection there.
+            c.reason.split(':').next().unwrap_or_default()
+        ));
     }
     if route.harness == "pi" {
         let provider = table
