@@ -2,7 +2,7 @@
 
 A desktop app (Rust + [gpui-kit](https://github.com/longbridge/gpui-kit)) that lets you run a team of persistent bots. Grok Bot runs each bot in a cloud SandBox pod. Here each bot gets its own **herdr workspace**, and its subagents run in **herdr panes** that the bot opens itself. Every agent turn runs on a local harness (`claude`, `codex`, `pi`, or `cursor-agent`). A router picks the harness and model for each task.
 
-Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run -p herdr-client --example spike -- --agent pi`) verify the herdr lifecycle end to end. pi *model output* is unverified until the opencode-go key is rotated. The orchestrator, MCP bridge, and UI are next.
+Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run -p herdr-client --example spike -- --agent pi`) verify the herdr lifecycle end to end, including a real pi turn on opencode-go. The orchestrator, MCP bridge, and UI are next.
 
 ---
 
@@ -56,7 +56,7 @@ Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run
 |---|---|
 | `herdr-client` | Async NDJSON client for `herdr.sock`. Types generated from `herdr api schema` (JSON Schema → `typify`). Checks `protocol == 22` in `ping`. Subscribes with `events.subscribe`. |
 | `orchestrator` | Bot CRUD, router, subagent state machine, scheduler, store (`rusqlite`) |
-| `herdbot-mcp` | Stdio MCP server binary. It is registered with every harness, carries no state, and forwards calls to the orchestrator over `~/.herdbot/orch.sock`. |
+| `herdbot-mcp` | Stdio MCP server binary for claude, codex, and cursor (pi uses a `-e` extension instead; see §3). It is registered with each of them, carries no state, and forwards calls to the orchestrator over `~/.herdbot/orch.sock`. |
 | `app` | gpui-kit UI. Uses `crates/shell` and `examples/` as the shell reference. |
 
 ### herdr integration (verified this session)
@@ -65,6 +65,7 @@ Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run
 - **One request per connection.** The server closes the socket after replying, so `Client::call` dials for each request. Only `events.subscribe` stays open, streaming `{"event","data"}` lines.
 - **`agent.start` does not wait over the socket.** It returns `launch_pending: true` and the name is not promptable yet. The client polls `agent.get` until `interactive_ready` (the CLI hides this).
 - **Status events are per-pane.** `pane.agent_status_changed` needs a `pane_id`. Subscribe per subagent pane after the split. Global events: `pane.created`, `pane.agent_detected`, `pane.exited`, `pane.closed`.
+- **A fresh pane rejects `agent.start` with `agent_pane_busy`** until its shell reaches a prompt. The client retries inside the start deadline.
 - **`agent.prompt --wait` can report `agent_prompt_stalled`** when a turn finishes (or errors) inside herdr's 5 s activity gate. That is not a delivery failure. The orchestrator uses `report_result` plus status events, not the prompt wait.
 - Agent kinds `claude`, `codex`, `pi`, `cursor` exist. `cursor` aliases `cursor-agent` (from `agent-detection/remote/cursor.toml`).
 - Constraints:
@@ -105,10 +106,11 @@ Likely (from each harness's documented convention, not tested here): pi and curs
 | claude | `--model <id>` | — | `--mcp-config <json> --strict-mcp-config` |
 | codex | `-m <slug>` | `-c model_reasoning_effort=<lvl>` | `-c mcp_servers.herdbot.command=...` (Assumption: config-key syntax is unverified) |
 | cursor-agent | `--model <id>` | encoded in the model ID (`-high`, `-xhigh`) | `cursor-agent mcp` / `.cursor/mcp.json` in the workspace |
-| pi | `--provider opencode-go --model <id>` | `--thinking <lvl>` | Assumption: via pi's MCP/extension config. Verify. |
+| pi | `--no-extensions --provider opencode-go --model <id>` | `--thinking <lvl>` | `-e <path>/herdbot.ts` (MCP is unavailable under `--no-extensions`) |
 
 **pi guardrail** (verified in the spike):
-1. Always pass `--no-extensions -e builtin:mcp --provider opencode-go --model <id>`. Without `--no-extensions`, one of your pi extensions overrode the CLI model **at startup**, before any message, to `opencode-go/qwen3.8-max`. Later in the same session it switched to `openai-codex/gpt-6-astra`. Likely: that second switch was a failover after the opencode-go 401 (the qwen turn's error status wasn't checked). Which installed package does this hasn't been identified (`pi list` shows ~15). With the flags above, the session log shows the model held at `opencode-go/deepseek-v4-flash`. **Unverified:** whether `-e builtin:mcp` actually connects MCP servers under `--no-extensions`. The expired key blocks a tool-listing turn. If it doesn't, the pi guardrail and the herdbot-mcp bridge conflict, and pi needs a herdbot `-e` extension instead.
+1. Always pass `--no-extensions --provider opencode-go --model <id>`. Without `--no-extensions`, one of your pi extensions overrode the CLI model **at startup**, before any message, to `opencode-go/qwen3.8-max`. Later it switched to `openai-codex/gpt-6-astra`. Likely: that second switch was a failover after an opencode-go 401 (the qwen turn's error status wasn't checked). Which installed package does this hasn't been identified. With the flag, the 2026-10-20 run held `opencode-go/deepseek-v4-flash` for the whole session and answered `PONG`.
+   **`--no-extensions` also drops MCP.** Asked to list its tools, pi named only `read, bash, edit, write`. Your configured servers (`radius`, `rea`) did not load, and adding `-e builtin:mcp` didn't help. So for pi, the herdbot bridge ships as a **herdbot pi extension** (`-e <path>/herdbot.ts`) that registers the Task-family tools natively and calls the orchestrator socket. claude, codex, and cursor use the stdio MCP server.
 2. Reject any pi model not in the allowlist from `pi --list-models` (provider `opencode-go`), refreshed at startup.
 3. Audit at runtime: herdr reports the pi session file (`agent.agent_session.value`, a `.jsonl`). Tail it. Any `model_change` or assistant message whose `provider` is not `opencode-go` → stop the subagent and flag the bot. An assistant `stopReason: "error"` surfaces as a failed subagent.
 
@@ -133,8 +135,6 @@ All model IDs in `routing.toml` were listed by the installed CLIs on 2026-10-19.
 - herdr protocol `22`. The app refuses to start on a mismatch.
 
 ## 6. Open questions
-0. **Your opencode-go API key has expired** (pi got 401 `api_key_expired` on 2026-10-20). Rotate it in the OpenCode console before pi routes can work.
-1. Approve the MVP scope in §2.
-2. Where should bot workspaces live? (`~/Bots` is an Assumption.)
-3. One herdr session for all bots (`--session herdbot`), or the user's default session? A separate session keeps the user's own panes clean.
-4. Should approvals ever auto-allow per bot? Grok Bot has `ResolveGrokBotLocalToolPermission` plus "always allow".
+1. Where should bot workspaces live? (`~/Bots` is an Assumption.)
+2. One herdr session for all bots (`--session herdbot`), or the user's default session? A separate session keeps the user's own panes clean.
+3. Should approvals ever auto-allow per bot? Grok Bot has `ResolveGrokBotLocalToolPermission` plus "always allow".
