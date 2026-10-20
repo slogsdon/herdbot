@@ -30,34 +30,27 @@ Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run
 ## 3. Architecture
 
 ```
-┌──────────── herdbot (gpui-kit app) ────────────┐
-│ Sidebar: bots │ Bot view: transcript, tasks,   │
-│               │ subagent panes, approvals      │
-└───────┬────────────────────────────────────────┘
-        │ in-process
-┌───────▼────────── orchestrator ────────────────┐
-│ bot registry · router · subagent lifecycle ·   │
-│ scheduler · sqlite store                       │
-└───┬──────────────────────────┬─────────────────┘
-    │ NDJSON over UDS          │ UDS (local RPC)
-┌───▼──────────────┐   ┌───────▼──────────────────┐
-│ herdr server     │   │ herdbot-mcp (stdio MCP)  │◄── launched by each harness
-│ ~/.config/herdr/ │   │ Task, CheckSubagent, …   │
-│ herdr.sock       │   └──────────────────────────┘
-└───┬──────────────┘
-    │ workspace w<N> per bot
-    ├─ root pane: bot's main agent (claude|codex|pi|cursor)
-    ├─ split pane: subagent "<bot>-explore-1"
-    └─ split pane: subagent "<bot>-code-2"
+herdbot daemon ──── NDJSON/UDS ────► herdr server (~/.config/herdr/herdr.sock)
+  · delivers queued prompts            │ workspace "🤖 <Bot>" per bot
+    when the target is idle            ├─ root pane: main agent "<slug>" (claude|codex|pi|cursor)
+  · watches subagent runs              ├─ split pane: subagent "<slug>-<run>"
+  · fires schedules                    └─ split pane: subagent "<slug>-<run>"
+  · re-imports the Grok Bot roster          │
+                                            │ each agent launches
+herdbot mcp --bot B [--run R] ◄─────────────┘ (claude, codex, cursor: stdio MCP;
+herdbot tool <name> …          ◄──────────────  pi: herdbot-pi.ts extension)
+      │ reads/writes
+      ▼
+$HERDBOT_HOME (~/Bots): bot.toml, BOT.md, .runs/, .queue/, .state/
 ```
+The gpui-kit app comes later. It reads the same files and calls the same herdr socket.
 
 ### Crates
 | Crate | Responsibility |
 |---|---|
-| `herdr-client` | Async NDJSON client for `herdr.sock`. Types generated from `herdr api schema` (JSON Schema → `typify`). Checks `protocol == 22` in `ping`. Subscribes with `events.subscribe`. |
-| `orchestrator` | Bot CRUD, router, subagent state machine, scheduler, store (`rusqlite`) |
-| `herdbot-mcp` | Stdio MCP server binary for claude, codex, and cursor (pi uses a `-e` extension instead; see §3). It is registered with each of them, carries no state, and forwards calls to the orchestrator over `~/.herdbot/orch.sock`. |
-| `app` | gpui-kit UI. Uses `crates/shell` and `examples/` as the shell reference. |
+| `herdr-client` | Async NDJSON client for `herdr.sock`. Checks `protocol == 22` in `ping`. Subscribes with `events.subscribe`. |
+| `herdbot` | One binary: CLI, daemon, stdio MCP server, the `tool` entry point for pi, the router, and the Grok Bot importer. State is plain files under `$HERDBOT_HOME`. There is no orchestrator socket and no database: every process reads and writes the same files, and only the daemon delivers prompts. |
+| `app` | gpui-kit UI (not started). Uses `crates/shell` and `examples/` as the shell reference. |
 
 ### herdr integration (verified this session)
 - Socket `~/.config/herdr/herdr.sock` speaks newline-delimited JSON. `{"id","method","params"}` → `{"id","result":{...}}`. Ping returned `version 0.9.1, protocol 22`.
@@ -73,46 +66,83 @@ Status: MVP scope approved. `crates/herdr-client` and its live spike (`cargo run
   - `agent.start` needs a shell sitting at its prompt.
   - `blocked` means the agent is waiting on an approval or a question.
 
-### Bot workspace layout
+### Bot layout (`$HERDBOT_HOME`, default `~/Bots`)
 ```
-~/Bots/<slug>/
-  BOT.md            # role + standing instructions (source of truth)
-  CLAUDE.md -> BOT.md
-  AGENTS.md -> BOT.md   # codex, cursor-agent, pi
-  memory/*.md       # RecallMemory / UpdateMemory = file ops
-  skills/<name>/SKILL.md
-  tasks.json        # mirrored to sqlite
+routing.toml          # written from the repo default on first use; edit freely
+herdbot.toml          # [paths] "/workspace/obsidian-vault" = "~/…"  (applied to imported BOT.md)
+<slug>/bot.toml       # name, title, cwd?, class?, source = grok|local, grok_id?, [[schedules]]
+<slug>/BOT.md         # instructions; overwritten by Grok sync when source = "grok"
+<slug>/BOT.local.md   # local additions, appended, never overwritten
+<slug>/memory/  skills/
+.state/<slug>.json    # workspace_id, root_pane, agent
+.state/launch/<agent>.md / .mcp.json   # instructions + MCP config handed to the harness
+.runs/<id>.json       # one subagent run
+.queue/<agent>.jsonl  # prompts waiting for that agent to be idle
 ```
-`herdr workspace.create --cwd ~/Bots/<slug> --label <name> --env HERDBOT_BOT_ID=<id>` creates the workspace. Its root pane runs the bot's default harness with `herdbot-mcp` registered.
+The agent learns its instructions from a herdbot preamble plus `BOT.md` + `BOT.local.md`:
+- claude: `--append-system-prompt-file`
+- pi: `--append-system-prompt <file>`
+- codex and cursor (no verified flag): sent as the first prompt
 
-Likely (from each harness's documented convention, not tested here): pi and cursor-agent pick up `AGENTS.md`. Verify each one during the first spike.
+**Run from an installed binary.** Every MCP config and pane env records the path of the running `herdbot` binary. If the daemon runs from `target/debug`, a bot that rebuilds herdbot swaps the binary out from under its own subagents. Install a stable copy first (`cargo install --path crates/herdbot`) and run `herdbot daemon` from `~/.cargo/bin`.
+
+`cwd` defaults to the bot folder. A bot can point it at a repo instead: `herdbot new herdbot-dev --cwd ~/Code/herdbot`.
+
+### Delivery: everything goes through the queue
+**A prompt sent to a busy agent steers its turn, and the in-flight answer is lost** (verified with pi on 2026-10-20). `agent.prompt` sent mid-turn was injected as a steer, and the first task's reply never appeared. So nothing prompts an agent directly except the agent's very first prompt at launch. Messages, subagent results and schedule firings are appended to `.queue/<agent>.jsonl`. The daemon flushes a queue only when the agent is `idle`/`done`, joins pending items into one prompt, and then waits 15 s before delivering to that agent again. A queued message for a bot that isn't running brings it up. The daemon is the only process that launches bots, so two senders can't race to start the same bot.
+
+**Known limitation:** while a trust or warning modal is up (codex's first run, for example), herdr can report the agent as idle. The daemon then types into the modal and drops the queued item. Accept the modal once in that pane and resend.
 
 ### Subagent lifecycle
-1. A bot calls the MCP tool `Task{description, prompt, subagent_type, model?, async}`. This mirrors the recovered `TaskArgs`.
-2. The orchestrator routes `(subagent_type, bot.harness_pref, override)` → `(harness, model, effort)`.
-3. `pane.split` from the bot's root pane. Direction comes from `pane.layout` (wide → right, tall → down), with `--no-focus`.
-4. `agent.start name=<slug>-<type>-<n> kind=<harness> -- <model flags>`
-5. `agent.prompt` with the task prompt plus a footer: *"When done, call `report_result` with your summary."*
+1. A bot calls `task{description, prompt, subagent_type?, model?}`.
+2. The router resolves `(subagent_type, bot override, explicit model)` to `harness:model[:effort]` (§4).
+3. `pane.split` right of the bot's root pane, `focus:false`, with env `HERDBOT_BOT/RUN/TOOLS/EXE/HOME`.
+4. `agent.start name=<slug>-<run> kind=<harness>`, then one prompt: the task plus a footer asking for `report_result`.
+5. `task` returns the run id at once. Tool calls never block on a subagent, because harness tool timeouts are short.
 6. Completion:
-   - **sync**: the `Task` MCP call blocks until `report_result` arrives (with a timeout). The summary goes back as the tool result.
-   - **async**: `Task` returns `subagent_id` right away. When `report_result` arrives, the orchestrator runs `WakeParent`, which is `agent.prompt` on the parent pane, queued until the parent is `idle`/`done`.
-   - Fallback: if the pane reaches `done` without calling `report_result`, the orchestrator reads `agent.read recent-unwrapped` and marks the result `inferred`.
-7. `CheckSubagent` → `agent.get`. `MessageSubagent` → `agent.prompt`. `StopSubagent` → `send_keys ctrl+c`, then `pane.close`.
-8. `blocked` (from the event stream) → an approval card in the UI with the pane's recent output. Approve or deny sends keys. The default is **not** to pass `--yolo` / `--dangerously-skip-permissions`.
+   - **`report_result`** marks the run done and queues `[subagent <id> "<desc>" finished]
+<result>` for the parent. This is Grok's WakeParent.
+   - **No report:** if the child is `idle`/`done` more than 20 s after start, the daemon queues its last 60 lines instead.
+   - **Exited:** if the child is gone more than 90 s after start, the parent gets a failure notice.
+   - **`blocked`:** the parent is told once that the child is waiting on an approval in pane P.
+7. Once a run is done, the daemon closes its pane as soon as the child settles. `check_subagent` and `stop_subagent` cover the rest.
+8. Approvals stay with each harness's normal behaviour (no `--yolo`). Only herdbot's own tools are pre-approved: claude `--allowedTools mcp__herdbot`, codex `default_tools_approval_mode="approve"`. Whether cursor prompts per tool call under `--approve-mcps` is untested.
 
-### Harness launch flags (verified from each `--help`)
-| Harness | Model | Effort | MCP |
+### Bot tools
+`task`, `check_subagent`, `stop_subagent`, `send_to_agent{bot, message}`, `list_bots`, and `report_result` (runs only).
+
+`send_to_agent` brings the target bot up and queues `[message from <bot>] …`. The reply comes back the same way.
+
+### Harness launch (verified live 2026-10-20 unless marked)
+| Harness | Model / effort | Tools | Instructions |
 |---|---|---|---|
-| claude | `--model <id>` | — | `--mcp-config <json> --strict-mcp-config` |
-| codex | `-m <slug>` | `-c model_reasoning_effort=<lvl>` | `-c mcp_servers.herdbot.command=...` (Assumption: config-key syntax is unverified) |
-| cursor-agent | `--model <id>` | encoded in the model ID (`-high`, `-xhigh`) | `cursor-agent mcp` / `.cursor/mcp.json` in the workspace |
-| pi | `--no-extensions --provider opencode-go --model <id>` | `--thinking <lvl>` | `-e <path>/herdbot.ts` (MCP is unavailable under `--no-extensions`) |
+| claude | `--model`, `--effort` | `--mcp-config <file> --allowedTools mcp__herdbot` ✔ | `--append-system-prompt-file` ✔ |
+| codex | `-m`, `-c model_reasoning_effort=` | `-c mcp_servers.herdbot.{command,args,env}=…` and `default_tools_approval_mode="approve"` (herdbot tools only; valid values `auto|prompt|writes|approve`) ✔. Runs embedded (codex warns that `-c` disables its shared server). The first run hit codex's trust prompts for plugin hooks, which ate the prompts. | first prompt |
+| cursor-agent | `--model` (effort is in the id) | merges a `herdbot` entry into `<cwd>/.cursor/mcp.json` (identity from pane env), `--approve-mcps`. Not yet run live. | first prompt |
+| pi | `--no-extensions -e <herdbot-pi.ts> --provider opencode-go --model`, `--thinking` | herdbot-pi.ts registers the tools and shells out to `herdbot tool` ✔ | `--append-system-prompt <file>` ✔ |
+
+herdr rejects agent args it can't quote safely (`invalid_agent_argument`, triggered by newlines), so prompts and MCP config are passed as files.
 
 **pi guardrail** (verified in the spike):
-1. Always pass `--no-extensions --provider opencode-go --model <id>`. Without `--no-extensions`, one of your pi extensions overrode the CLI model **at startup**, before any message, to `opencode-go/qwen3.8-max`. Later it switched to `openai-codex/gpt-6-astra`. Likely: that second switch was a failover after an opencode-go 401 (the qwen turn's error status wasn't checked). Which installed package does this hasn't been identified. With the flag, the 2026-10-20 run held `opencode-go/deepseek-v4-flash` for the whole session and answered `PONG`.
-   **`--no-extensions` also drops MCP.** Asked to list its tools, pi named only `read, bash, edit, write`. Your configured servers (`radius`, `rea`) did not load, and adding `-e builtin:mcp` didn't help. So for pi, the herdbot bridge ships as a **herdbot pi extension** (`-e <path>/herdbot.ts`) that registers the Task-family tools natively and calls the orchestrator socket. claude, codex, and cursor use the stdio MCP server.
-2. Reject any pi model not in the allowlist from `pi --list-models` (provider `opencode-go`), refreshed at startup.
-3. Audit at runtime: herdr reports the pi session file (`agent.agent_session.value`, a `.jsonl`). Tail it. Any `model_change` or assistant message whose `provider` is not `opencode-go` → stop the subagent and flag the bot. An assistant `stopReason: "error"` surfaces as a failed subagent.
+1. Always pass `--no-extensions --provider opencode-go --model <id>`. Without `--no-extensions`, one of your pi extensions overrode the CLI model **at startup**, before any message, to `opencode-go/qwen3.8-max`. Later it switched to `openai-codex/gpt-6-astra`. Likely: the second switch was a failover after an opencode-go 401. `--no-extensions` also drops MCP (pi's docs claim `-e builtin:mcp` restores it; that wasn't retested, since the extension route is per-agent and needs no project trust).
+2. The router rejects any pi model not listed for `opencode-go` by `pi --list-models`.
+3. Still to do: audit the pi session `.jsonl` at runtime for any non-opencode-go `provider`.
+
+### Grok Bot sync (one-way)
+- **What's on disk.** Grok Bot keeps its roster in `~/Library/Application Support/Grok Bot/sand-client-persistence/<base32 key>.blob`, where the key decodes to `sand.client.slice.account.<acct>.roster.last-roster`.
+- **What gets imported.** Each row's `description` is the bot's full system prompt (checked: the long ones end cleanly). `herdbot import-grok` (and the daemon, whenever the file changes) creates or refreshes one bot per row and rewrites paths from `herdbot.toml`.
+- **Not on disk.** Schedules (`GrokBotAgentAutomation{automation_id, record_json}`), skills and memory live in Grok Bot's server-side store (`/home/box/sand-data/agents/<id>/store`). The local cache only holds the roster, the last 200 transcript messages per bot, and UI state. They have to come in another way: a template JSON export from the app (`botTemplateJsonShareV1`), or asking each Grok bot to dump its routines. herdbot does not call Grok Bot's private API with the app's tokens.
+- **Running both apps at once.** Imported schedules start `enabled = false`, so a routine never fires in both apps. Switch a schedule on in herdbot only when it's switched off in Grok Bot. Writes never go back to Grok Bot.
+- **Not yet imported.** Group bots (`isGroup`, rooms) are skipped for now.
+
+### Computer use (cua, not built)
+The plan is to route the `computer_use` class to cua across machines on the LAN. From cua.ai docs, summarised by a recon agent (unverified):
+- **A Space is a desktop**: a local macOS VM (Lume), or Linux.
+- **`cua-driver mcp`** drives the desktop of the machine it runs on, over stdio. To reach a remote host: `ssh -T user@host cua-driver mcp`.
+- **`cua-spacesd`** serves Spaces over gRPC/HTTP on :3211 with a bearer token.
+- **`cua daemon mcp`** is an MCP server.
+- **Lean:** a `cua` route that launches a claude subagent whose MCP config points at `cua-driver mcp` on the chosen host over SSH. `herdr --machine` can also run whole bots on another machine.
+- **Status:** nothing cua is installed yet.
 
 ---
 
@@ -135,6 +165,8 @@ All model IDs in `routing.toml` were listed by the installed CLIs on 2026-10-19.
 - herdr protocol `22`. The app refuses to start on a mismatch.
 
 ## 6. Open questions
-1. Where should bot workspaces live? (`~/Bots` is an Assumption.)
-2. One herdr session for all bots (`--session herdbot`), or the user's default session? A separate session keeps the user's own panes clean.
-3. Should approvals ever auto-allow per bot? Grok Bot has `ResolveGrokBotLocalToolPermission` plus "always allow".
+1. **Grok schedules, skills, memory:** export template JSON from the app, or ask each bot to dump its routines? (They aren't on disk; see §3 Grok Bot sync.)
+2. **cua setup:** cua-driver over SSH, or Lume Spaces?
+3. **Approvals:** should any bot run unattended (`--yolo` / `--dangerously-skip-permissions` / codex `--full-auto`)? The default is no.
+4. **herdr session:** one herdr session for all bots (`--session herdbot`), or the user's default session? Bots currently land in the default session.
+5. **`~/Bots` as `$HERDBOT_HOME`:** Assumption. Change it with the env var.
