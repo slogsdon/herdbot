@@ -130,7 +130,10 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
             continue;
         }
         let status = run::status(herdr, &r.agent).await;
-        let settled = matches!(status.as_deref(), Some("idle") | Some("done"));
+        // `spawn` records the route once the agent has taken its task. Until then an idle
+        // agent is still starting (agent_start alone can take 60 s), not finished.
+        let settled = matches!(status.as_deref(), Some("idle") | Some("done"))
+            && !r.route.is_empty();
         match (r.status.as_str(), status.as_deref()) {
             // agent.get fails until launch completes (agent_start allows 60s), so only a
             // missing agent past that window counts as an exit.
@@ -146,7 +149,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                 )?;
                 r.pane_closed = true;
             }
-            ("running", Some("blocked")) if !r.notified_blocked => {
+            ("running", Some("blocked")) if !r.notified_blocked && !r.route.is_empty() => {
                 // claude's limit screen offers choices, so a quota hit can show up as blocked.
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if !requeue_if_cooled(herdr, &mut r, &text).await? {

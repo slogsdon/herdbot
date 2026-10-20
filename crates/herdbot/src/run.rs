@@ -53,7 +53,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         route: String::new(),
     };
     home::save_state(slug, &state)?;
-    state.route = start(
+    let started = start(
         herdr,
         slug,
         &bot,
@@ -64,8 +64,17 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         None,
         None,
     )
-    .await?
-    .to_string();
+    .await;
+    state.route = match started {
+        Ok(route) => route.to_string(),
+        Err(e) => {
+            // No recorded route would hide the agent from quota failover. Close the
+            // workspace instead; the next queued message brings the bot back up.
+            let _ = herdr.workspace_close(&state.workspace_id).await;
+            home::clear_state(slug);
+            return Err(e);
+        }
+    };
     home::save_state(slug, &state)?;
     Ok(state)
 }
@@ -87,7 +96,7 @@ pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotS
     };
     // Save the new pane first: if the start fails, the next `up` splits from a live pane.
     home::save_state(slug, &state)?;
-    state.route = start(
+    let started = start(
         herdr,
         slug,
         &bot,
@@ -98,8 +107,17 @@ pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotS
         None,
         None,
     )
-    .await?
-    .to_string();
+    .await;
+    state.route = match started {
+        Ok(route) => route.to_string(),
+        Err(e) => {
+            // No recorded route would hide the agent from quota failover. Close the
+            // workspace instead; the next queued message brings the bot back up.
+            let _ = herdr.workspace_close(&state.workspace_id).await;
+            home::clear_state(slug);
+            return Err(e);
+        }
+    };
     home::save_state(slug, &state)?;
     Ok(state)
 }
@@ -192,9 +210,30 @@ async fn start(
         (None, task) => task.map(str::to_owned),
     };
     if let Some(text) = first {
-        herdr.agent_prompt(agent, &text, None).await?;
+        // A ready agent can still drop its first prompt (seen once with codex: splash
+        // screen, empty input, no turn). An idle agent has no turn to steer, so one resend
+        // is safe; past that, fail instead of letting the daemon harvest the splash.
+        for _ in 0..2 {
+            herdr.agent_prompt(agent, &text, None).await?;
+            if took_prompt(herdr, agent).await {
+                return Ok(route);
+            }
+            eprintln!("{agent}: first prompt not picked up; sending again");
+        }
+        return Err(format!("{agent} did not start a turn after two prompts").into());
     }
     Ok(route)
+}
+
+/// Whether `agent` leaves `idle` within 15 s of a prompt.
+async fn took_prompt(herdr: &Client, agent: &str) -> bool {
+    for _ in 0..15 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if !matches!(status(herdr, agent).await.as_deref(), Some("idle") | None) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Open a pane next to `parent_agent`'s bot, start a routed agent in it, hand it the task.
