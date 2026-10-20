@@ -1,0 +1,50 @@
+# herdbot routing table. Each candidate entry is "harness:model[:effort]", tried in order;
+# the first available harness wins. Model IDs come from the installed CLIs (2026-10-19):
+#   claude: environment model list · codex: `codex debug models`
+#   cursor: `cursor-agent --list-models` · pi: `pi --list-models` (opencode-go rows only)
+# Which model goes with which task is a judgment call; tune freely.
+
+[harness.pi]
+provider = "opencode-go"          # enforced: any model outside this provider is rejected
+allowlist_from = "pi --list-models"
+
+[default]
+candidates = ["claude:claude-sonnet-5-5", "codex:gpt-6.1-sol:medium", "cursor:composer-2.5", "pi:kimi-k2.7-code:medium"]
+
+[classes.plan]
+candidates = ["claude:claude-opus-5-5", "codex:gpt-6-astra:high", "cursor:claude-opus-5-thinking-high"]
+
+[classes.code]
+candidates = ["codex:gpt-6.1-sol:medium", "claude:claude-sonnet-5-5", "cursor:composer-2.5", "pi:kimi-k2.7-code:medium"]
+
+[classes.review]
+candidates = ["codex:gpt-6-astra:high", "claude:claude-opus-5-5", "cursor:grok-4.7-high"]
+
+[classes.debug]
+candidates = ["claude:claude-opus-5-5", "codex:gpt-6.1-sol:high", "cursor:gpt-5.6-sol-high"]
+
+[classes.explore]   # read-only codebase/file search: cheap + fast
+candidates = ["pi:deepseek-v4-flash:low", "claude:claude-haiku-5-5", "codex:gpt-6-luna:low", "cursor:gemini-3.7-flash-high"]
+
+[classes.shell]     # also used for "bash"
+candidates = ["pi:deepseek-v4-flash:low", "claude:claude-haiku-5-5", "codex:gpt-6-luna:low"]
+
+[classes.research]  # web search / synthesis
+candidates = ["pi:qwen3.8-max:high", "claude:claude-sonnet-5-5", "cursor:grok-4.7-high"]
+
+[classes.media_review]  # vision-capable models only (pi --list-models image column = yes)
+candidates = ["pi:mimo-v2.6-pro:medium", "claude:claude-sonnet-5-5", "cursor:gemini-3.7-flash-high"]
+
+[classes.browser_use]
+candidates = ["claude:claude-sonnet-5-5", "codex:gpt-6.1-sol:medium"]
+
+[classes.computer_use]
+candidates = ["claude:claude-sonnet-5-5"]
+
+[classes.custom]    # bot-defined subagents; their own `model` field wins if set
+candidates = ["claude:claude-sonnet-5-5", "pi:glm-5.3:medium"]
+
+# Per-bot overrides, e.g.:
+# [bots.seo-chief]
+# default_harness = "pi"
+# classes.research = ["pi:kimi-k3:high"]
