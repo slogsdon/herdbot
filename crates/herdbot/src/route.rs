@@ -310,8 +310,8 @@ pub fn launch(
 }
 
 /// pi's argv. --no-extensions stops user extensions from swapping the model or failing over
-/// to other providers; builtin:mcp is the one built-in turned back on, so herdbot-pi.ts can
-/// register herdbot's MCP server (pi's --mcp-config flag comes from a third-party extension
+/// to other providers; builtin:mcp and builtin:codemode let herdbot-pi.ts register
+/// herdbot's MCP server for scripts (pi's --mcp-config flag comes from a third-party extension
 /// that --no-extensions drops).
 fn pi_args(
     provider: &str,
@@ -320,9 +320,16 @@ fn pi_args(
     extension: String,
     prompt_file: String,
 ) -> Vec<String> {
-    let mut args: Vec<String> = ["--no-extensions", "-e", "builtin:mcp", "-e"]
-        .map(str::to_owned)
-        .to_vec();
+    let mut args: Vec<String> = [
+        "--no-extensions",
+        "-e",
+        "builtin:mcp",
+        "-e",
+        "builtin:codemode",
+        "-e",
+    ]
+    .map(str::to_owned)
+    .to_vec();
     args.push(extension);
     args.extend([
         "--provider".into(),
@@ -367,6 +374,8 @@ mod tests {
                 "--no-extensions",
                 "-e",
                 "builtin:mcp",
+                "-e",
+                "builtin:codemode",
                 "-e",
                 "/h/.state/herdbot-pi.ts",
                 "--provider",
