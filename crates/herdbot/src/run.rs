@@ -213,8 +213,9 @@ async fn start(
         // screen, empty input, no turn). An idle agent has no turn to steer, so one resend
         // is safe; past that, fail instead of letting the daemon harvest the splash.
         for _ in 0..2 {
+            let before = tail(herdr, agent, 40).await;
             herdr.agent_prompt(agent, &text, None).await?;
-            if took_prompt(herdr, agent).await {
+            if took_prompt(herdr, agent, &before).await {
                 return Ok(route);
             }
             eprintln!("{agent}: first prompt not picked up; sending again");
@@ -224,11 +225,21 @@ async fn start(
     Ok(route)
 }
 
-/// Whether `agent` leaves `idle` within 15 s of a prompt.
-async fn took_prompt(herdr: &Client, agent: &str) -> bool {
+/// Whether a prompt was picked up: the agent left `idle`, or its screen changed.
+///
+/// herdr reads pi's turn state off a "Working" spinner line, which a narrow pane truncates
+/// to the bare spinner glyph, so a pane squeezed by sibling splits stays `idle` through a
+/// whole turn. A dropped prompt leaves the screen untouched.
+fn prompt_taken(status: Option<&str>, before: &str, after: &str) -> bool {
+    !matches!(status, Some("idle") | None) || before != after
+}
+
+/// Whether `agent` takes the prompt within 15 s.
+async fn took_prompt(herdr: &Client, agent: &str, before: &str) -> bool {
     for _ in 0..15 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if !matches!(status(herdr, agent).await.as_deref(), Some("idle") | None) {
+        let status = status(herdr, agent).await;
+        if prompt_taken(status.as_deref(), before, &tail(herdr, agent, 40).await) {
             return true;
         }
     }
@@ -327,4 +338,26 @@ pub async fn tail(herdr: &Client, agent: &str, lines: u32) -> String {
                 .to_owned()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prompt_taken;
+
+    #[test]
+    fn prompt_taken_when_status_leaves_idle() {
+        assert!(prompt_taken(Some("working"), "screen", "screen"));
+    }
+
+    #[test]
+    fn prompt_taken_when_idle_status_hides_a_changed_screen() {
+        // narrow pane: herdr never sees the "Working" spinner, but the turn rewrites the screen
+        assert!(prompt_taken(Some("idle"), "ready", "ready\nCall list_bots"));
+    }
+
+    #[test]
+    fn prompt_dropped_when_idle_and_screen_unchanged() {
+        assert!(!prompt_taken(Some("idle"), "splash", "splash"));
+        assert!(!prompt_taken(None, "splash", "splash"));
+    }
 }
