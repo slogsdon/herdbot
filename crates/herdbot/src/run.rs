@@ -32,27 +32,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         }
         if workspace_alive {
             // Agent exited; restart it in a fresh pane of the same workspace.
-            let pane = split(herdr, &state.root_pane, slug, None, &home::cwd(slug, &bot)).await?;
-            let _ = herdr.pane_close(&state.root_pane).await;
-            let mut state = BotState {
-                root_pane: pane,
-                ..state
-            };
-            state.route = start(
-                herdr,
-                slug,
-                &bot,
-                &state.agent,
-                &state.root_pane,
-                bot.class.as_deref().unwrap_or("default"),
-                None,
-                None,
-                None,
-            )
-            .await?
-            .to_string();
-            home::save_state(slug, &state)?;
-            return Ok(state);
+            return restart(herdr, slug, state).await;
         }
         home::clear_state(slug);
     }
@@ -80,6 +60,40 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         &state.agent,
         &state.root_pane,
         bot.class.as_deref().unwrap_or("default"),
+        None,
+        None,
+        None,
+    )
+    .await?
+    .to_string();
+    home::save_state(slug, &state)?;
+    Ok(state)
+}
+
+/// Replace the bot's main agent with a freshly routed one in a new pane of the same
+/// workspace, so a harness that is cooling down gets skipped. Routing happens before
+/// anything is touched: with no route available the old agent keeps running.
+pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotState> {
+    let bot = home::load_bot(slug)?;
+    let class = bot.class.as_deref().unwrap_or("default");
+    route::resolve(&route::table()?, class, slug, None)?;
+    let pane = split(herdr, &state.root_pane, slug, None, &home::cwd(slug, &bot)).await?;
+    // Closing the pane ends its agent and frees the name for reuse (checked on herdr,
+    // 2026-10-20).
+    let _ = herdr.pane_close(&state.root_pane).await;
+    let mut state = BotState {
+        root_pane: pane,
+        ..state
+    };
+    // Save the new pane first: if the start fails, the next `up` splits from a live pane.
+    home::save_state(slug, &state)?;
+    state.route = start(
+        herdr,
+        slug,
+        &bot,
+        &state.agent,
+        &state.root_pane,
+        class,
         None,
         None,
         None,

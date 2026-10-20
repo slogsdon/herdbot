@@ -29,15 +29,15 @@ pub async fn run() -> Result<()> {
     let mut delivered_at: HashMap<String, i64> = HashMap::new();
     let mut last_fired: HashMap<String, i64> = load_fired();
     let mut roster_seen = None;
-    let mut main_status: HashMap<String, String> = HashMap::new();
+    let mut mains = MainAgents::default();
     loop {
-        if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut main_status).await {
+        if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains).await {
             eprintln!("queue: {e}");
         }
         if let Err(e) = watch_runs(&herdr).await {
             eprintln!("runs: {e}");
         }
-        if let Err(e) = watch_bots(&herdr, &mut main_status).await {
+        if let Err(e) = watch_bots(&herdr, &mut mains).await {
             eprintln!("bots: {e}");
         }
         if let Err(e) = fire_schedules(&mut last_fired, started) {
@@ -56,10 +56,20 @@ pub async fn run() -> Result<()> {
     }
 }
 
+/// What the daemon remembers about each bot's main agent between ticks, keyed by slug.
+#[derive(Default)]
+struct MainAgents {
+    /// Last status seen.
+    status: HashMap<String, String>,
+    /// Last text delivered: re-queued on the new route if that turn hit a quota or auth
+    /// failure. Text typed straight into the pane is not seen here.
+    prompt: HashMap<String, String>,
+}
+
 async fn flush_queues(
     herdr: &Client,
     delivered_at: &mut HashMap<String, i64>,
-    main_status: &mut HashMap<String, String>,
+    mains: &mut MainAgents,
 ) -> Result<()> {
     for entry in fs::read_dir(home::queue_dir())?.flatten() {
         let path = entry.path();
@@ -74,7 +84,10 @@ async fn flush_queues(
             Some(s) => s,
             None if home::load_state(&agent).is_some() || home::list_bots().contains(&agent) => {
                 // A bot's main agent that is not running: bring it up, deliver next tick.
-                run::up(herdr, &agent).await?;
+                // With every harness cooling down this fails; keep flushing the other queues.
+                if let Err(e) = run::up(herdr, &agent).await {
+                    eprintln!("{agent}: {e}");
+                }
                 continue;
             }
             None => {
@@ -95,14 +108,14 @@ async fn flush_queues(
             .filter_map(|v| v["text"].as_str().map(str::to_owned))
             .collect();
         if !texts.is_empty() {
-            herdr
-                .agent_prompt(&agent, &texts.join("\n\n"), None)
-                .await?;
+            let text = texts.join("\n\n");
+            herdr.agent_prompt(&agent, &text, None).await?;
             delivered_at.insert(agent.clone(), home::now());
             // A reply can come back inside one tick (a quota notice does), so count the
             // delivery as the start of a turn for `watch_bots`.
             if home::load_state(&agent).is_some() {
-                main_status.insert(agent.clone(), "working".into());
+                mains.status.insert(agent.clone(), "working".into());
+                mains.prompt.insert(agent.clone(), text);
             }
             println!("delivered {} message(s) to {agent}", texts.len());
         }
@@ -229,34 +242,50 @@ async fn requeue_if_cooled(herdr: &Client, r: &mut Run, tail: &str) -> Result<bo
     Ok(true)
 }
 
-/// Cool down a main agent's harness when the turn it just finished hit a quota or auth
-/// failure. Only a working → settled change counts, so the scrollback a daemon restart finds
-/// is not re-read.
-// ponytail: cooldown only; the main agent keeps its pane. It moves to the next route the next
-// time `run::up` restarts it.
-async fn watch_bots(herdr: &Client, last: &mut HashMap<String, String>) -> Result<()> {
+/// When the turn a main agent just finished hit a quota or auth failure: cool its harness
+/// down, restart it on the next route and re-queue the prompt that failed. Only a working →
+/// settled change counts, so the scrollback a daemon restart finds is not re-read.
+async fn watch_bots(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
     for slug in home::list_bots() {
         let Some(state) = home::load_state(&slug) else {
             continue;
         };
         let Some(status) = run::status(herdr, &state.agent).await else {
-            last.remove(&slug);
+            mains.status.remove(&slug);
             continue;
         };
-        let was = last.insert(slug, status.clone());
+        let was = mains.status.insert(slug.clone(), status.clone());
         if was.as_deref() != Some("working")
             || !matches!(status.as_str(), "idle" | "done" | "blocked")
         {
             continue;
         }
+        // A stored prompt belongs to this turn only; an older one was answered already.
+        let prompt = mains.prompt.remove(&slug);
         let harness = state.route.split(':').next().unwrap_or_default();
         let tail = run::tail(herdr, &state.agent, 60).await;
-        if let Some(c) = cooldown::detect(harness, &tail, chrono::Local::now()) {
-            cooldown::record(harness, &c)?;
-            println!(
-                "cooldown {harness} (main agent {}): {}",
-                state.agent, c.reason
-            );
+        let Some(c) = cooldown::detect(harness, &tail, chrono::Local::now()) else {
+            continue;
+        };
+        cooldown::record(harness, &c)?;
+        println!("cooldown {harness} (main agent {slug}): {}", c.reason);
+        let harness = harness.to_owned();
+        match run::restart(herdr, &slug, state).await {
+            Ok(new) => {
+                println!("restarted {slug} on {}", new.route);
+                mains.status.remove(&slug);
+                if let Some(prompt) = prompt {
+                    let kind = c.reason.split(':').next().unwrap_or_default();
+                    home::enqueue(
+                        &slug,
+                        &format!(
+                            "[herdbot: the previous session on {harness} stopped with a {kind} failure. This is a new session on {}, without that conversation. The message it could not answer follows.]\n\n{prompt}",
+                            new.route
+                        ),
+                    )?;
+                }
+            }
+            Err(e) => eprintln!("{slug}: staying on {harness}: {e}"),
         }
     }
     Ok(())

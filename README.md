@@ -165,7 +165,7 @@ The routing table is in [`routing.toml`](routing.toml). Resolution order:
 
 The strings were checked against the installed CLIs on 2026-10-20: claude 2.1.304, codex 0.163.0, cursor-agent 2026.10.16. cursor's quota text comes from its server rather than the CLI, so cursor has no quota detection.
 
-A match writes `.state/cooldown/<harness>.json` (`{until, reason}`). `until` is the parsed reset time plus one minute, or one hour from now when the output gives no time. `route::available` skips the harness until then. A subagent that failed this way is closed, and its task is re-queued with the same class on the next route; its parent is told the new run id. A main agent only records the cooldown and keeps its pane. It moves to the next route the next time it is restarted. To lift a cooldown early, delete the file.
+A match writes `.state/cooldown/<harness>.json` (`{until, reason}`). `until` is the parsed reset time plus one minute, or one hour from now when the output gives no time. `route::available` skips the harness until then. A subagent that failed this way is closed, and its task is re-queued with the same class on the next route; its parent is told the new run id. A main agent is restarted in a new pane on the next route, and the queued message it could not answer is delivered again with a note that the conversation is new. Text typed straight into the pane is not re-sent. When no other route is available, the old agent keeps running. To lift a cooldown early, delete the file.
 
 Task classes are the recovered `SubagentType` values (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`, which Grok Bot handles through `custom`.
 
