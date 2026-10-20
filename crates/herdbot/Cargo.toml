@@ -4,6 +4,7 @@ description = "Bots on herdr: registry, routing, subagent panes, messaging, sche
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 herdr-client = { path = "../herdr-client" }
