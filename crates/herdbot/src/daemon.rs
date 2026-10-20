@@ -9,7 +9,7 @@ use std::time::Duration;
 use herdr_client::Client;
 
 use crate::home::{self, Result, Run};
-use crate::{cooldown, grok, run};
+use crate::{cooldown, fm, grok, run};
 
 const TICK: Duration = Duration::from_secs(2);
 /// After a delivery, give the agent this long to pick it up before delivering again.
@@ -191,12 +191,22 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
     Ok(())
 }
 
+/// The harness's own failure text first; fm only when that finds nothing. Subagent runs only:
+/// a misread here re-runs one task, while for a main agent it would cost the conversation.
+async fn detect_failure(harness: &str, tail: &str) -> Option<cooldown::Cooldown> {
+    let now = chrono::Local::now();
+    match cooldown::detect(harness, tail, now) {
+        Some(c) => Some(c),
+        None => fm::cooldown_backstop(tail, now.timestamp()).await,
+    }
+}
+
 /// If `tail` shows the run's harness out of quota or locked out, cool that harness down,
 /// close the run, re-queue its task on the next route and tell the parent. Returns whether
 /// it did.
 async fn requeue_if_cooled(herdr: &Client, r: &mut Run, tail: &str) -> Result<bool> {
     let harness = r.route.split(':').next().unwrap_or_default();
-    let Some(c) = cooldown::detect(harness, tail, chrono::Local::now()) else {
+    let Some(c) = detect_failure(harness, tail).await else {
         return Ok(false);
     };
     cooldown::record(harness, &c)?;

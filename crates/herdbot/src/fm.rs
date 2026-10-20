@@ -66,7 +66,7 @@ pub fn recent(tail: &str) -> Vec<&str> {
 
 /// A cited failure line must be this close to the bottom: a turn that died on a quota ends
 /// on it, while quoted fixtures and diffs sit higher up.
-const CITE_LINES: usize = 5;
+const CITE_LINES: usize = 12;
 
 pub fn accepted(verdict: &Verdict, tail: &str) -> bool {
     let (words, window) = match verdict.kind {
@@ -76,11 +76,21 @@ pub fn accepted(verdict: &Verdict, tail: &str) -> bool {
     };
     let line = verdict.line.to_ascii_lowercase();
     let lines = recent(tail);
-    !line.is_empty()
-        && lines[lines.len().saturating_sub(window)..]
-            .iter()
-            .any(|l| l.to_ascii_lowercase() == line)
-        && words.iter().any(|w| line.contains(w))
+    let window = &lines[lines.len().saturating_sub(window)..];
+    !line.is_empty() && words.iter().any(|w| line.contains(w)) && cites_rows(&line, window)
+}
+
+/// Shortest cited text (whitespace removed) that counts: "limit" alone proves nothing.
+const MIN_CITE_CHARS: usize = 12;
+
+/// Whether `line` appears in the bottom `rows` of the pane, ignoring case and whitespace. A
+/// narrow pane wraps one message over several rows, and fm may cite only a piece of it.
+fn cites_rows(line: &str, rows: &[&str]) -> bool {
+    let squash = |text: &str| -> String {
+        text.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect()
+    };
+    let wanted = squash(line);
+    wanted.chars().count() >= MIN_CITE_CHARS && squash(&rows.concat()).contains(&wanted)
 }
 
 /// `fm available` exits 0 once the model is present and its terms are accepted.
@@ -126,6 +136,27 @@ pub async fn classify_tail(tail: &str) -> Option<Verdict> {
     Some(verdict)
 }
 
+/// An fm-only cooldown is short: a misread costs ten minutes of one harness, not an hour.
+const FM_COOLDOWN_SECS: i64 = 600;
+
+fn verdict_cooldown(v: &Verdict, tail: &str, now: i64) -> Option<crate::cooldown::Cooldown> {
+    let kind = match v.kind {
+        TailKind::Quota => "quota",
+        TailKind::Auth => "auth",
+        _ => return None,
+    };
+    accepted(v, tail).then(|| crate::cooldown::Cooldown {
+        until: now + FM_COOLDOWN_SECS,
+        // "quota (fm)" before the colon: daemon messages show only that part.
+        reason: format!("{kind} (fm): {}", v.line),
+    })
+}
+
+/// A cooldown when the string matchers found nothing but fm reads a quota or auth failure.
+pub async fn cooldown_backstop(tail: &str, now: i64) -> Option<crate::cooldown::Cooldown> {
+    verdict_cooldown(&classify_tail(tail).await?, tail, now)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +191,11 @@ mod tests {
         // fm calls "fixed the login bug in auth.rs" an auth failure; bare "login"/"auth" must not pass.
         let fixed = "I fixed the login bug in auth.rs; tests pass.\n";
         assert!(!accepted(&v(TailKind::Auth, "I fixed the login bug in auth.rs; tests pass."), fixed));
+        // A narrow pane wraps one message over several rows; fm may cite it with the breaks.
+        let wrapped = "noise\nAPI Error: 429 rate_li\nmit_error: weekly\n limit\n";
+        assert!(accepted(&v(TailKind::Quota, "API Error: 429 rate_limit_error: weekly limit"), wrapped));
+        assert!(accepted(&v(TailKind::Quota, "429\nrate_li\nmit_err\nor:"), wrapped));
+        assert!(!accepted(&v(TailKind::Quota, "weekly limit"), wrapped));
         // Non-failure kinds need no line.
         assert!(accepted(&v(TailKind::Done, ""), tail));
     }
@@ -172,5 +208,18 @@ mod tests {
         // A bare menu has no approval word, so it does not hold a delivery.
         assert!(!accepted(&v("1. Yes  2. No"), "1. Yes  2. No\n"));
         assert!(!accepted(&v(""), tail));
+    }
+
+    #[test]
+    fn fm_cooldowns_are_short_and_marked() {
+        let tail = "API Error: 429 rate_limit_error: weekly limit\n";
+        let quota = Verdict { kind: TailKind::Quota, line: "API Error: 429 rate_limit_error: weekly limit".into() };
+        let c = verdict_cooldown(&quota, tail, 1000).unwrap();
+        assert_eq!(c.until, 1000 + FM_COOLDOWN_SECS);
+        assert!(c.reason.starts_with("quota (fm): API Error: 429"));
+        let made_up = Verdict { kind: TailKind::Quota, line: "limit".into() };
+        assert_eq!(verdict_cooldown(&made_up, tail, 1000), None);
+        let done = Verdict { kind: TailKind::Done, line: String::new() };
+        assert_eq!(verdict_cooldown(&done, tail, 1000), None);
     }
 }
