@@ -34,7 +34,12 @@ The spec's payload table comes from strings in the installed binaries. This task
 
 ```bash
 mkdir -p /tmp/hookcap && cd /tmp/hookcap
-claude --settings '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"cat > /tmp/hookcap/claude-stop.json"}]}]}}' -p "Reply with exactly: PONG"
+claude --settings '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"cat > /tmp/hookcap/claude-stop.json"}]}]}}'
+```
+
+This is interactive, not `-p`: print mode draws on usage credits. Ask `Reply with exactly: PONG`, wait for the reply, then `/exit`. Then:
+
+```bash
 jq '{hook_event_name, stop_hook_active, last_assistant_message}' /tmp/hookcap/claude-stop.json
 ```
 
