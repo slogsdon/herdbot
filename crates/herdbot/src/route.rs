@@ -298,30 +298,43 @@ pub fn launch(
                 .and_then(|p| p.get("provider"))
                 .and_then(Value::as_str)
                 .unwrap_or("opencode-go");
-            // --no-extensions: a user extension overrides the model and fails over to other
-            // providers. It also drops MCP, so herdbot's tools ride in as their own extension.
-            let mut args = vec![
-                s("--no-extensions"),
-                s("-e"),
-                pi_extension()?,
-                s("--provider"),
-                provider.to_owned(),
-                s("--model"),
-                route.model.clone(),
-            ];
-            if let Some(e) = effort {
-                args.extend([s("--thinking"), e]);
-            }
-            args.extend([s("--append-system-prompt"), prompt_file]);
-            // The extension finds its bot/run in HERDBOT_BOT / HERDBOT_RUN from the pane env.
+            // herdbot-pi.ts registers `herdbot mcp` with bot/run from the pane env.
             Launch {
                 kind: "pi",
-                args,
+                args: pi_args(provider, &route.model, effort, pi_extension()?, prompt_file),
                 preamble_prompt: None,
             }
         }
         other => return Err(format!("unknown harness {other}").into()),
     })
+}
+
+/// pi's argv. --no-extensions stops user extensions from swapping the model or failing over
+/// to other providers; builtin:mcp is the one built-in turned back on, so herdbot-pi.ts can
+/// register herdbot's MCP server (pi's --mcp-config flag comes from a third-party extension
+/// that --no-extensions drops).
+fn pi_args(
+    provider: &str,
+    model: &str,
+    effort: Option<String>,
+    extension: String,
+    prompt_file: String,
+) -> Vec<String> {
+    let mut args: Vec<String> = ["--no-extensions", "-e", "builtin:mcp", "-e"]
+        .map(str::to_owned)
+        .to_vec();
+    args.push(extension);
+    args.extend([
+        "--provider".into(),
+        provider.to_owned(),
+        "--model".into(),
+        model.to_owned(),
+    ]);
+    if let Some(e) = effort {
+        args.extend(["--thinking".into(), e]);
+    }
+    args.extend(["--append-system-prompt".into(), prompt_file]);
+    args
 }
 
 const PI_EXTENSION: &str = include_str!("../assets/herdbot-pi.ts");
@@ -338,6 +351,36 @@ fn pi_extension() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pi_keeps_guardrail_and_loads_builtin_mcp() {
+        let args = pi_args(
+            "opencode-go",
+            "kimi-k2.7-code",
+            Some("medium".into()),
+            "/h/.state/herdbot-pi.ts".into(),
+            "/h/.state/launch/a.md".into(),
+        );
+        assert_eq!(
+            args,
+            [
+                "--no-extensions",
+                "-e",
+                "builtin:mcp",
+                "-e",
+                "/h/.state/herdbot-pi.ts",
+                "--provider",
+                "opencode-go",
+                "--model",
+                "kimi-k2.7-code",
+                "--thinking",
+                "medium",
+                "--append-system-prompt",
+                "/h/.state/launch/a.md",
+            ]
+        );
+        assert!(!args.iter().any(|a| a == "--mcp-config"));
+    }
 
     #[test]
     fn candidates_parse() {
