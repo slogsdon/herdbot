@@ -1,0 +1,15 @@
+[package]
+name = "herdbot"
+description = "Bots on herdr: registry, routing, subagent panes, messaging, schedules"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+herdr-client = { path = "../herdr-client" }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+toml = "1"
+croner = "4"
+chrono = "0.4"
