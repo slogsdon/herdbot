@@ -65,7 +65,6 @@ pub fn import() -> Result<String> {
     let rows = roster["value"]["rows"]
         .as_array()
         .ok_or("roster: no rows")?;
-    let rewrites = home::paths_rewrites();
     let mut report = Vec::new();
     for row in rows {
         let (Some(id), Some(name)) = (row["id"].as_str(), row["name"].as_str()) else {
@@ -95,16 +94,11 @@ pub fn import() -> Result<String> {
         bot.title = row["title"].as_str().unwrap_or_default().into();
         home::save_bot(&slug, &bot)?;
         if bot.source == "grok" {
-            let mut text = row["description"].as_str().unwrap_or_default().to_owned();
-            for (from, to) in &rewrites {
-                text = text.replace(
-                    from.as_str(),
-                    &to.replace('~', &home::home_dir().to_string_lossy()),
-                );
-            }
+            // Verbatim; [paths] rewrites are applied at launch (home::instructions).
+            let text = row["description"].as_str().unwrap_or_default();
             let target = home::bot_dir(&slug).join("BOT.md");
-            if fs::read_to_string(&target).ok().as_deref() != Some(text.as_str()) {
-                fs::write(target, &text)?;
+            if fs::read_to_string(&target).ok().as_deref() != Some(text) {
+                fs::write(target, text)?;
                 report.push(format!("updated {slug}"));
             }
         }

@@ -123,20 +123,49 @@ pub fn list_bots() -> Vec<String> {
     out
 }
 
-/// BOT.md followed by BOT.local.md.
-pub fn instructions(slug: &str) -> String {
+/// Grok Bot's sandbox path for the Obsidian vault. Unmapped, it becomes the bot's cwd.
+pub const GROK_VAULT: &str = "/workspace/obsidian-vault";
+
+/// BOT.md followed by BOT.local.md, with `[paths]` rewrites applied. Rewriting at launch
+/// keeps BOT.md identical to Grok Bot's text and makes herdbot.toml edits apply on restart.
+pub fn instructions(slug: &str, bot: &Bot) -> String {
     let dir = bot_dir(slug);
-    ["BOT.md", "BOT.local.md"]
+    let text = ["BOT.md", "BOT.local.md"]
         .iter()
         .filter_map(|f| fs::read_to_string(dir.join(f)).ok())
         .collect::<Vec<_>>()
-        .join("\n\n")
+        .join("\n\n");
+    rewrite_paths(text, &paths_rewrites(), &cwd(slug, bot))
+}
+
+fn rewrite_paths(mut text: String, rewrites: &BTreeMap<String, String>, cwd: &str) -> String {
+    // Longest first, so "/workspace/obsidian-vault" wins over a "/workspace" mapping.
+    let mut pairs: Vec<(&str, String)> = rewrites
+        .iter()
+        .map(|(from, to)| (from.as_str(), expand_tilde(to)))
+        .collect();
+    if !rewrites.contains_key(GROK_VAULT) {
+        pairs.push((GROK_VAULT, cwd.to_owned()));
+    }
+    pairs.sort_by_key(|(from, _)| std::cmp::Reverse(from.len()));
+    for (from, to) in pairs {
+        text = text.replace(from, &to);
+    }
+    text
+}
+
+/// A leading `~` only: paths like `iCloud~md~obsidian` keep theirs.
+pub fn expand_tilde(path: &str) -> String {
+    match path.strip_prefix('~') {
+        Some(rest) => format!("{}{rest}", home_dir().to_string_lossy()),
+        None => path.to_owned(),
+    }
 }
 
 pub fn cwd(slug: &str, bot: &Bot) -> String {
     bot.cwd
         .as_deref()
-        .map(|c| c.replacen('~', &home_dir().to_string_lossy(), 1))
+        .map(expand_tilde)
         .unwrap_or_else(|| bot_dir(slug).to_string_lossy().into_owned())
 }
 
@@ -281,5 +310,26 @@ mod tests {
         assert_eq!(slug("42 things!!"), "b42-things");
         assert!(slug("an extremely long bot name that keeps going").len() <= 20);
         assert_eq!(run_id().len(), 6);
+    }
+
+    #[test]
+    fn vault_path_defaults_to_cwd() {
+        let text = "notes in /workspace/obsidian-vault/Daily and /workspace/x".to_owned();
+        let none = BTreeMap::new();
+        assert_eq!(
+            rewrite_paths(text.clone(), &none, "/w/bot"),
+            "notes in /w/bot/Daily and /workspace/x"
+        );
+        let mapped = BTreeMap::from([
+            ("/workspace".to_owned(), "/w".to_owned()),
+            (GROK_VAULT.to_owned(), "/vault".to_owned()),
+        ]);
+        assert_eq!(
+            rewrite_paths(text, &mapped, "/w/bot"),
+            "notes in /vault/Daily and /w/x"
+        );
+        let icloud = "/Users/x/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal";
+        assert_eq!(expand_tilde(icloud), icloud);
+        assert_eq!(expand_tilde("~/a~b"), format!("{}/a~b", home_dir().display()));
     }
 }

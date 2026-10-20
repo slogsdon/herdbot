@@ -164,7 +164,7 @@ async fn start(
         None => format!(
             "{}\n\n{}",
             tools::main_preamble(slug, bot),
-            home::instructions(slug)
+            home::instructions(slug, bot)
         ),
         Some(run) => tools::sub_preamble(slug, run),
     };
