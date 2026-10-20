@@ -64,13 +64,26 @@ fn trimmed(line: &str) -> String {
 }
 
 /// Quota lines start with "You've hit your … limit" (claude: "You've hit your session limit ·
-/// resets 12:30am"; codex: "You've hit your usage limit. … Try again at 3:45 PM."). cursor's
-/// quota text comes from its server, not the CLI, so cursor has auth detection only.
+/// resets 12:30am"; codex: "You've hit your usage limit. … Try again at 3:45 PM."). cursor
+/// (2026.10.16): "Error: Weekly usage limit reached. It" wrapped onto "resets in 1 day.",
+/// followed by "unifiedSkuWeeklyLimitResetDays: 1".
 fn quota_line(harness: &str, line: &str) -> bool {
     let text = trimmed(line);
-    matches!(harness, "claude" | "codex")
-        && text.starts_with("You've hit your")
-        && text.contains("limit")
+    match harness {
+        "claude" | "codex" => text.starts_with("You've hit your") && text.contains("limit"),
+        "cursor" => text.starts_with("Error:") && text.contains("usage limit reached"),
+        _ => false,
+    }
+}
+
+/// cursor's "…ResetDays: N" field. Day granularity, so the cooldown can end before the reset;
+/// the next quota hit then sets a fresh one.
+fn reset_days(lines: &[&str], now: DateTime<Local>) -> Option<DateTime<Local>> {
+    let days: i64 = lines.iter().find_map(|l| {
+        let (key, value) = l.trim().split_once(": ")?;
+        key.ends_with("ResetDays").then(|| value.trim().parse().ok())?
+    })?;
+    Some(now + chrono::Duration::days(days))
 }
 
 /// Auth-failure lines, verified against the installed CLIs (2026-10-20): claude 2.1.304,
@@ -109,6 +122,7 @@ pub fn detect(harness: &str, tail: &str, now: DateTime<Local>) -> Option<Cooldow
     let fallback = now.timestamp() + DEFAULT_SECS;
     if let Some(line) = recent.iter().rev().find(|l| quota_line(harness, l)) {
         let until = reset_time(line, now)
+            .or_else(|| reset_days(recent, now))
             .map(|t| t.timestamp() + MARGIN_SECS)
             .filter(|&t| t > now.timestamp() && t - now.timestamp() <= MAX_SECS)
             .unwrap_or(fallback);
@@ -204,6 +218,23 @@ mod tests {
                 .timestamp()
         );
         assert!(c.reason.starts_with("quota:"));
+    }
+
+    #[test]
+    fn cursor_weekly_limit_uses_reset_days() {
+        // Captured from cursor-agent 2026.10.16 in a herdr pane.
+        let tail = "  Composer 2.5\n  ~/Bots/ping-cursor\n  Error: Weekly usage limit reached. It\n  resets in 1 day.\n  Buy credits to keep going now, or upgrade\n  your plan for more weekly usage.\n  rateLimitReason: prepaid_balance_exhausted\n  prepaidWallet: personal\n  unifiedSkuWeeklyLimit: true\n  unifiedSkuWeeklyLimitResetDays: 1\n  chatMessage: *Weekly usage limit reached.\n  It resets in 1 day.*\n";
+        let c = detect("cursor", tail, at(9, 0)).unwrap();
+        assert_eq!(
+            c.until,
+            Local
+                .with_ymd_and_hms(2026, 10, 21, 9, 1, 0)
+                .unwrap()
+                .timestamp()
+        );
+        assert!(c.reason.starts_with("quota: Error: Weekly"));
+        // The quoted chatMessage line alone does not count.
+        assert!(detect("cursor", "  chatMessage: *Weekly usage limit reached.", at(9, 0)).is_none());
     }
 
     #[test]
