@@ -157,6 +157,16 @@ pub async fn cooldown_backstop(tail: &str, now: i64) -> Option<crate::cooldown::
     verdict_cooldown(&classify_tail(tail).await?, tail, now)
 }
 
+/// Deliveries held for one agent before delivering anyway (about 2 min at the 15 s retry), so
+/// a misread prompt cannot stall a queue for good.
+pub const MAX_HOLDS: u32 = 8;
+
+/// Whether to hold a delivery to an "idle" agent because its pane shows a prompt.
+pub fn hold(verdict: Option<&Verdict>, tail: &str, times_held: u32) -> bool {
+    times_held < MAX_HOLDS
+        && verdict.is_some_and(|v| v.kind == TailKind::Approval && accepted(v, tail))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +231,16 @@ mod tests {
         assert_eq!(verdict_cooldown(&made_up, tail, 1000), None);
         let done = Verdict { kind: TailKind::Done, line: String::new() };
         assert_eq!(verdict_cooldown(&done, tail, 1000), None);
+    }
+
+    #[test]
+    fn holds_for_a_cited_prompt_but_not_forever() {
+        let tail = "Do you trust the files in this folder?\n> 1. Yes\n";
+        let modal = Verdict { kind: TailKind::Approval, line: "Do you trust the files in this folder?".into() };
+        assert!(hold(Some(&modal), tail, 0));
+        assert!(!hold(Some(&modal), tail, MAX_HOLDS));
+        let idle = Verdict { kind: TailKind::Done, line: String::new() };
+        assert!(!hold(Some(&idle), tail, 0));
+        assert!(!hold(None, tail, 0));
     }
 }

@@ -30,8 +30,9 @@ pub async fn run() -> Result<()> {
     let mut last_fired: HashMap<String, i64> = load_fired();
     let mut roster_seen = None;
     let mut mains = MainAgents::default();
+    let mut held: HashMap<String, u32> = HashMap::new();
     loop {
-        if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains).await {
+        if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains, &mut held).await {
             eprintln!("queue: {e}");
         }
         if let Err(e) = watch_runs(&herdr).await {
@@ -70,6 +71,7 @@ async fn flush_queues(
     herdr: &Client,
     delivered_at: &mut HashMap<String, i64>,
     mains: &mut MainAgents,
+    held: &mut HashMap<String, u32>,
 ) -> Result<()> {
     for entry in fs::read_dir(home::queue_dir())?.flatten() {
         let path = entry.path();
@@ -98,6 +100,23 @@ async fn flush_queues(
         };
         if status != "idle" && status != "done" {
             continue;
+        }
+        if fm::available() {
+            let tail = run::tail(herdr, &agent, 60).await;
+            let times = held.get(&agent).copied().unwrap_or(0);
+            let verdict = fm::classify_tail(&tail).await;
+            if fm::hold(verdict.as_ref(), &tail, times) {
+                held.insert(agent.clone(), times + 1);
+                // Retry after DELIVERY_COOLDOWN, not every tick.
+                delivered_at.insert(agent.clone(), home::now());
+                eprintln!("{agent}: holding delivery, its pane shows a prompt ({}/{})", times + 1, fm::MAX_HOLDS);
+                continue;
+            }
+            // Reset only once fm stops seeing a prompt. After MAX_HOLDS the count stays
+            // saturated, so a pane fm keeps misreading is held once, not on every message.
+            if !verdict.is_some_and(|v| v.kind == fm::TailKind::Approval) {
+                held.remove(&agent);
+            }
         }
         // Rename first so prompts queued while we deliver land in a fresh file.
         let taken = path.with_extension("taking");
