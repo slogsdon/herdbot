@@ -69,13 +69,14 @@ The gpui-kit app comes later. It reads the same files and calls the same herdr s
 ### Bot layout (`$HERDBOT_HOME`, default `~/Bots`)
 ```
 routing.toml          # written from the repo default on first use; edit freely
-herdbot.toml          # [paths] "/workspace/obsidian-vault" = "~/…"  (applied to imported BOT.md)
+herdbot.toml          # [paths] "/workspace/obsidian-vault" = "~/…"  (applied to instructions at launch)
 <slug>/bot.toml       # name, title, cwd?, class?, source = grok|local, grok_id?, [[schedules]]
 <slug>/BOT.md         # instructions; overwritten by Grok sync when source = "grok"
 <slug>/BOT.local.md   # local additions, appended, never overwritten
 <slug>/memory/  skills/
 .state/<slug>.json    # workspace_id, root_pane, agent
 .state/launch/<agent>.md / .mcp.json   # instructions + MCP config handed to the harness
+.state/daemon.log     # daemon output when run as the launchd service
 .runs/<id>.json       # one subagent run
 .queue/<agent>.jsonl  # prompts waiting for that agent to be idle
 ```
@@ -86,6 +87,10 @@ The agent learns its instructions from a herdbot preamble plus `BOT.md` + `BOT.l
 
 **Run from an installed binary.** Every MCP config and pane env records the path of the running `herdbot` binary. If the daemon runs from `target/debug`, a bot that rebuilds herdbot swaps the binary out from under its own subagents. Install a stable copy first (`cargo install --path crates/herdbot`) and run `herdbot daemon` from `~/.cargo/bin`.
 
+**Daemon as a service.** `~/.cargo/bin/herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it: the daemon starts at login and restarts 10 s after any exit (including while herdr is not running). It records the installing shell's `PATH`, `HERDBOT_HOME` and `HERDR_SOCKET`, since launchd's bare PATH can't find the harness CLIs. It refuses to install from `target/`. `service status` shows state and pid; `service uninstall` removes it. After a `cargo install`, `launchctl kickstart -k gui/$(id -u)/dev.herdbot.daemon` restarts it onto the new binary.
+
+**Path rewrites.** `herdbot.toml` `[paths]` maps strings in the instructions to local paths (`~` expands to `$HOME`); the longest match wins. They are applied when a bot launches, so `BOT.md` stays exactly as Grok Bot wrote it and an edit takes effect on the bot's next start. Grok Bot's `/workspace/obsidian-vault` becomes the bot's `cwd` when it isn't mapped.
+
 `cwd` defaults to the bot folder. A bot can point it at a repo instead: `herdbot new herdbot-dev --cwd ~/Code/herdbot`.
 
 ### Delivery: everything goes through the queue
@@ -93,16 +98,18 @@ The agent learns its instructions from a herdbot preamble plus `BOT.md` + `BOT.l
 
 **Known limitation:** while a trust or warning modal is up (codex's first run, for example), herdr can report the agent as idle. The daemon then types into the modal and drops the queued item. Accept the modal once in that pane and resend.
 
+**Known limitation: stale pane reads on claude.** On 2026-10-20 a claude pane's `recent_unwrapped` read lacked a reply that its transcript had, and the pane was left scrolled up ("1 new message ↓"). Harvest and quota detection read the same way, so claude quota detection is unverified and a scrolled pane may hide the limit line. Only cursor quota detection has been seen working live.
+
 ### Subagent lifecycle
 1. A bot calls `task{description, prompt, subagent_type?, model?}`.
 2. The router resolves `(subagent_type, bot override, explicit model)` to `harness:model[:effort]` (§4).
 3. `pane.split` right of the bot's root pane, `focus:false`, with env `HERDBOT_BOT/RUN/TOOLS/EXE/HOME`.
-4. `agent.start name=<slug>-<run> kind=<harness>`, then one prompt: the task plus a footer asking for `report_result`.
-5. `task` returns the run id at once. Tool calls never block on a subagent, because harness tool timeouts are short.
+4. `agent.start name=<slug>-<run> kind=<harness>`, then one prompt: the task plus a footer asking for `report_result`. If the agent is still `idle` 15 s later, the prompt is sent once more, and after that the run fails with "did not start a turn". Seen once on 2026-10-20: codex showed its splash with an empty input and never started a turn (no rollout file); not reproduced since, so the resend path is untested. A main agent that fails this way gets its workspace closed rather than left running with no recorded route, which would hide it from quota failover.
+5. `task` returns the run id once the agent has taken the task (a few seconds). Tool calls never block on a subagent, because harness tool timeouts are short.
 6. Completion:
    - **`report_result`** marks the run done and queues `[subagent <id> "<desc>" finished]
 <result>` for the parent. This is Grok's WakeParent.
-   - **No report:** if the child is `idle`/`done` more than 20 s after start, the daemon queues its last 60 lines instead.
+   - **No report:** if the child is `idle`/`done` more than 20 s after start, the daemon queues its last 60 lines instead. The daemon judges a run only after `spawn` has recorded its route, so a slow `agent.start` is not mistaken for a finished turn.
    - **Exited:** if the child is gone more than 90 s after start, the parent gets a failure notice.
    - **`blocked`:** the parent is told once that the child is waiting on an approval in pane P.
 7. Once a run is done, the daemon closes its pane as soon as the child settles. `check_subagent` and `stop_subagent` cover the rest.
@@ -118,7 +125,7 @@ The agent learns its instructions from a herdbot preamble plus `BOT.md` + `BOT.l
 |---|---|---|---|
 | claude | `--model`, `--effort` | `--mcp-config <file> --allowedTools mcp__herdbot` ✔ | `--append-system-prompt-file` ✔ |
 | codex | `-m`, `-c model_reasoning_effort=` | `-c mcp_servers.herdbot.{command,args,env}=…` and `default_tools_approval_mode="approve"` (herdbot tools only; valid values `auto|prompt|writes|approve`) ✔. Runs embedded (codex warns that `-c` disables its shared server). The first run hit codex's trust prompts for plugin hooks, which ate the prompts. | first prompt |
-| cursor-agent | `--model` (effort is in the id) | merges a `herdbot` entry into `<cwd>/.cursor/mcp.json` (identity from pane env), `--approve-mcps`. Not yet run live. | first prompt |
+| cursor-agent | `--model` (effort is in the id) | merges a `herdbot` entry into `<cwd>/.cursor/mcp.json` (identity from pane env), `--approve-mcps`, `--trust` (without it, a first run in a new cwd opens a trust modal that swallows the first prompt; seen live 2026-10-20). Tools not yet seen working: the test account hit its weekly limit. | first prompt |
 | pi | `--no-extensions -e <herdbot-pi.ts> --provider opencode-go --model`, `--thinking` | herdbot-pi.ts registers the tools and shells out to `herdbot tool` ✔ | `--append-system-prompt <file>` ✔ |
 
 herdr rejects agent args it can't quote safely (`invalid_agent_argument`, triggered by newlines), so prompts and MCP config are passed as files.
@@ -130,7 +137,7 @@ herdr rejects agent args it can't quote safely (`invalid_agent_argument`, trigge
 
 ### Grok Bot sync (one-way)
 - **What's on disk.** Grok Bot keeps its roster in `~/Library/Application Support/Grok Bot/sand-client-persistence/<base32 key>.blob`, where the key decodes to `sand.client.slice.account.<acct>.roster.last-roster`.
-- **What gets imported.** Each row's `description` is the bot's full system prompt (checked: the long ones end cleanly). `herdbot import-grok` (and the daemon, whenever the file changes) creates or refreshes one bot per row and rewrites paths from `herdbot.toml`.
+- **What gets imported.** Each row's `description` is the bot's full system prompt (checked: the long ones end cleanly). `herdbot import-grok` (and the daemon, whenever the file changes) creates or refreshes one bot per row. BOT.md is written verbatim; path rewrites happen at launch.
 - **Not on disk.** Schedules (`GrokBotAgentAutomation{automation_id, record_json}`), skills and memory live in Grok Bot's server-side store (`/home/box/sand-data/agents/<id>/store`). The local cache only holds the roster, the last 200 transcript messages per bot, and UI state. They have to come in another way: a template JSON export from the app (`botTemplateJsonShareV1`), or asking each Grok bot to dump its routines. herdbot does not call Grok Bot's private API with the app's tokens.
 - **Running both apps at once.** Imported schedules start `enabled = false`, so a routine never fires in both apps. Switch a schedule on in herdbot only when it's switched off in Grok Bot. Writes never go back to Grok Bot.
 - **Not yet imported.** Group bots (`isGroup`, rooms) are skipped for now.
@@ -160,10 +167,10 @@ The routing table is in [`routing.toml`](routing.toml). Resolution order:
 |---|---|---|
 | claude | a line starting `You've hit your … limit`; the reset time comes from `resets 12:30am` | `Please run /login`, `authentication_error` |
 | codex | a line starting `You've hit your usage limit`; the reset time comes from `try again at 3:45 PM` or `… at Oct 21st, 2026 3:45 PM` | `Your access token could not be refreshed`, `OAuth refresh token was rejected`, `api_key_expired` |
-| cursor | not detected (see below) | `Your stored authentication is invalid`, `Error: Authentication required`, ``run `cursor-agent login` to re-authenticate`` |
+| cursor | a line starting `Error:` containing `usage limit reached`; the reset comes from `unifiedSkuWeeklyLimitResetDays: N` (day granularity) | `Your stored authentication is invalid`, `Error: Authentication required`, ``run `cursor-agent login` to re-authenticate`` |
 | pi (opencode-go) | — | `api_key_expired` |
 
-The strings were checked against the installed CLIs on 2026-10-20: claude 2.1.304, codex 0.163.0, cursor-agent 2026.10.16. cursor's quota text comes from its server rather than the CLI, so cursor has no quota detection.
+The strings were checked against the installed CLIs on 2026-10-20: claude 2.1.304, codex 0.163.0, cursor-agent 2026.10.16. cursor's quota text comes from its server rather than the CLI; the pattern above is from one live capture (weekly limit, 2026-10-20), so other cursor limit wordings may slip through.
 
 A match writes `.state/cooldown/<harness>.json` (`{until, reason}`). `until` is the parsed reset time plus one minute, or one hour from now when the output gives no time. `route::available` skips the harness until then. A subagent that failed this way is closed, and its task is re-queued with the same class on the next route; its parent is told the new run id. A main agent is restarted in a new pane on the next route, and the queued message it could not answer is delivered again with a note that the conversation is new. Text typed straight into the pane is not re-sent. When no other route is available, the old agent keeps running. To lift a cooldown early, delete the file.
 
