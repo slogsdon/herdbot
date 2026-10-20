@@ -7,6 +7,7 @@ mod home;
 mod mcp;
 mod route;
 mod run;
+mod service;
 mod tools;
 
 use herdr_client::Client;
@@ -15,6 +16,7 @@ use home::Result;
 
 const USAGE: &str = "usage:
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
+  herdbot service install|uninstall|status   run the daemon as a launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
   herdbot new <name> [--cwd DIR] [--class CLASS]
   herdbot list | runs
@@ -59,6 +61,16 @@ async fn cli() -> Result<()> {
     let rest = |args: &[String], from: usize| args.get(from..).unwrap_or_default().join(" ");
     match command.as_str() {
         "daemon" => daemon::run().await,
+        "service" => {
+            let out = match args.first().map(String::as_str) {
+                Some("install") => service::install()?,
+                Some("uninstall") => service::uninstall()?,
+                Some("status") => service::status()?,
+                _ => return Err(USAGE.into()),
+            };
+            println!("{out}");
+            Ok(())
+        }
         "import-grok" => {
             println!("{}", grok::import()?);
             Ok(())
