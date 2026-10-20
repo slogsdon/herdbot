@@ -130,11 +130,10 @@ pub async fn down(herdr: &Client, slug: &str) -> Result<()> {
     Ok(())
 }
 
-/// Environment for a pane: who it belongs to, and the tool list for the pi extension.
+/// Environment for a pane: bot/run identity and the MCP server executable and home.
 fn pane_env(slug: &str, run: Option<&str>) -> Value {
     let mut env = json!({
         "HERDBOT_BOT": slug,
-        "HERDBOT_TOOLS": tools::list(run.is_some()).to_string(),
         "HERDBOT_EXE": std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
         "HERDBOT_HOME": home::root().to_string_lossy(),
     });

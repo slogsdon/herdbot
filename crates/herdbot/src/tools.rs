@@ -1,5 +1,5 @@
-//! The tools every bot agent gets, served over MCP (claude, codex, cursor) and through
-//! `herdbot tool` (pi's extension). Mirrors Grok Bot's Task / CheckSubagent / StopSubagent /
+//! The tools every bot agent gets, served over MCP to every harness (pi registers the server
+//! from herdbot-pi.ts); `herdbot tool` calls one from a shell. Mirrors Grok Bot's Task / CheckSubagent / StopSubagent /
 //! SendToAgent / WakeParent; the wake is automatic when a subagent reports.
 
 use herdr_client::Client;

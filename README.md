@@ -62,14 +62,13 @@ herdbot daemon ──── NDJSON/UDS ────► herdr server (~/.config/h
   · fires schedules                    └─ split pane: subagent "<slug>-<run>"
   · re-imports the Grok Bot roster          │
                                             │ each agent launches
-herdbot mcp --bot B [--run R] ◄─────────────┘ (claude, codex, cursor: stdio MCP;
-herdbot tool <name> …          ◄──────────────  pi: herdbot-pi.ts extension)
+herdbot mcp --bot B [--run R] ◄─────────────┘ (stdio MCP, all harnesses)
       │ reads/writes
       ▼
 $HERDBOT_HOME (~/Bots): bot.toml, BOT.md, .runs/, .queue/, .state/
 ```
 
-There are two crates. `herdr-client` is an async client for the herdr socket. `herdbot` is a single binary that serves as the CLI, the daemon, the stdio MCP server the harnesses call, the `tool` entry point for pi, the router, and the Grok Bot importer. There's no orchestrator socket and no database. Every process reads and writes the same plain files, and only the daemon prompts agents.
+There are two crates. `herdr-client` is an async client for the herdr socket. `herdbot` is a single binary that serves as the CLI, the daemon, the stdio MCP server the harnesses call, the `tool` entry point for shell debugging, the router, and the Grok Bot importer. There's no orchestrator socket and no database. Every process reads and writes the same plain files, and only the daemon prompts agents.
 
 ### Bot layout
 
@@ -135,11 +134,11 @@ Verified live on 2026-10-20 unless the table says otherwise.
 | claude | `--model`, `--effort` | `--mcp-config <file> --allowedTools mcp__herdbot` | `--append-system-prompt-file` |
 | codex | `-m`, `-c model_reasoning_effort=` | `-c mcp_servers.herdbot.{command,args,env}=…` with `default_tools_approval_mode="approve"`. On the first run in a directory, codex's trust prompts for plugin hooks ate the prompts. | first prompt |
 | cursor-agent | `--model` (effort is part of the id) | merges a `herdbot` entry into `<cwd>/.cursor/mcp.json` (identity comes from the pane env), plus `--approve-mcps` and `--trust`. Without `--trust`, the first run in a new cwd opens a trust modal that swallows the first prompt. The tools haven't been seen working yet because the test account hit its weekly limit. | first prompt |
-| pi | `--no-extensions -e <herdbot-pi.ts> --provider opencode-go --model`, `--thinking` | `herdbot-pi.ts` registers the tools and shells out to `herdbot tool` | `--append-system-prompt <file>` |
+| pi | `--no-extensions -e builtin:mcp -e <herdbot-pi.ts> --provider opencode-go --model`, `--thinking` | `-e builtin:mcp -e herdbot-pi.ts`, which registers the herdbot stdio MCP server with `pi.registerMcpServer` (`--mcp-config` comes from a third-party extension that `--no-extensions` drops) | `--append-system-prompt <file>` |
 
 herdr rejects agent arguments it can't quote safely (newlines trigger `invalid_agent_argument`), so prompts and MCP config are passed as files.
 
-pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, loads its tools as its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers.
+pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, enables built-in MCP and registers its server through its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers. Built-in MCP also reads `~/.pi/agent/mcp.json`. Servers there default to code-mode exposure, which a bot's pi doesn't load, so they stay out of reach. A global server set to `"exposure": "direct"` would show up in bot sessions.
 
 ### Routing
 
@@ -183,7 +182,7 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 - **Rooms**, meaning group bots that take turns.
 - **Schedule and skill import** from Grok Bot templates.
 - **A desktop UI that feels native to the Mac.** Federico Viticci's early look at his "Apple Bots" app sets a good bar: a global quick-entry window for messaging any bot, a menu bar item, and split views with one agent per pane. For herdbot that means a hotkey that queues a message to a bot, and a menu bar item showing which bots are up, which subagents are running, which harnesses are cooling down, and anything `blocked` and waiting on you. Blocked approvals should become notifications you can act on. The UI only reads the same files and calls the same herdr socket, so it can be built in either [gpui-kit](https://github.com/longbridge/gpui-kit) or SwiftUI. gpui-kit 0.8.0 builds on Zed snapshots that break their API, so it would be pinned to a git rev.
-- **pi through MCP and code mode.** pi 1.x has MCP built in, and it takes `--mcp-config <path>`, the same way herdbot already configures claude. That would let pi use herdbot's MCP server and retire the `herdbot-pi.ts` bridge. It also gets pi's code mode, where the model writes a short script that calls several tools at once. Earendil reports about 40% fewer prompt tokens with it. Still to check is whether built-in MCP survives `--no-extensions`, which the pi guardrail depends on (`--no-mcp` is a separate flag, which suggests it does).
+- **pi code mode.** Gated spike pending: built-in MCP is enabled with direct tool exposure; code mode must pass three timed live checks before being enabled.
 - **A durable harness on Pi Durable.** Earendil's [Pi Durable](https://earendil.com/posts/pi-durable/) (experimental, TypeScript) checkpoints every model call and tool call, so a new process picks up unfinished work after a crash. It also makes submissions exactly-once, lets a conversation fork without copying its transcript, and lets several clients watch and steer one conversation. Those cover herdbot's weakest spots, which are scraping pane text for status and quota errors, and losing an answer when a busy agent gets prompted. A `durable` harness, a small Node host per bot that runs in a herdr pane, would hand herdbot real status and results for pi-driven bots instead of screen reads. The API may still change, so this stays an experiment next to the pane-based harnesses.
 - **Apple's on-device model for light work.** macOS 27 ships `fm`, a command-line front end to Apple's Foundation Models. It runs on-device, costs nothing against any subscription, and `fm respond` can return JSON constrained to a schema. Good uses for it include picking a task class when a bot doesn't name one, deciding whether a pane tail shows a quota error, an approval prompt or a finished turn (a backstop for the string matching), and summarizing a subagent's output before it reaches the parent. It would be a fallback rather than a requirement, used only when `fm` exists and its terms have been accepted once with `sudo fm license`. Apple's session also shows a larger Private Cloud Compute model, but one hands-on report says macOS 27.0 rejects it, so that's unverified.
 

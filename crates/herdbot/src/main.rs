@@ -25,7 +25,7 @@ const USAGE: &str = "usage:
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
   herdbot route <class> [--bot BOT]      show which harness:model a class resolves to
   herdbot mcp --bot BOT [--run ID]       stdio MCP server (launched by harnesses)
-  herdbot tool <name> --bot BOT [--run ID] <json>   one tool call (pi extension)";
+  herdbot tool <name> --bot BOT [--run ID] <json>   one tool call, for debugging from a shell";
 
 fn flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     let i = args.iter().position(|a| a == name)?;
