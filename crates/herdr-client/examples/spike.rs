@@ -62,43 +62,20 @@ async fn run(
     let pane = split["pane"]["pane_id"].as_str().unwrap().to_owned();
     println!("split {root} -> {pane}");
 
-    herdr.pane_run(&pane, "echo herdbot-$((40+2))").await?;
+    // The agent goes into the brand-new split pane straight away, which exercises the
+    // agent_pane_busy retry while its shell is still starting.
+    let name = match agent {
+        Some(kind) => Some(start_agent(herdr, kind, &pane).await?),
+        None => None,
+    };
+
+    herdr.pane_run(root, "echo herdbot-$((40+2))").await?;
     herdr
-        .pane_wait_for_substring(&pane, "herdbot-42", 10_000)
+        .pane_wait_for_substring(root, "herdbot-42", 10_000)
         .await?;
     println!("pane run ok: matched herdbot-42");
 
-    let Some(kind) = agent else { return Ok(()) };
-    // Cheapest models from routing.toml's explore class; pi is pinned to opencode-go.
-    let args: Vec<&str> = match kind {
-        // --no-extensions: a user pi extension overrides the CLI model and fails over to other
-        // providers. builtin:mcp re-enables MCP, which the herdbot bridge needs.
-        "pi" => vec![
-            "--no-extensions",
-            "-e",
-            "builtin:mcp",
-            "--provider",
-            "opencode-go",
-            "--model",
-            "deepseek-v4-flash",
-            "--thinking",
-            "low",
-        ],
-        "claude" => vec!["--model", "claude-haiku-5-5"],
-        "codex" => vec!["-m", "gpt-6-luna", "-c", "model_reasoning_effort=low"],
-        "cursor" => vec!["--model", "gemini-3.7-flash-high"],
-        other => return Err(format!("unknown kind {other}").into()),
-    };
-    let args: Vec<String> = args.into_iter().map(String::from).collect();
-
-    let name = agent_name(&format!("spike-{kind}"));
-    print_events(
-        herdr
-            .subscribe(&[on_pane("pane.agent_status_changed", root)])
-            .await?,
-    );
-    herdr.agent_start(&name, kind, root, &args, 30_000).await?;
-    println!("agent {name} started ({kind} {args:?})");
+    let Some(name) = name else { return Ok(()) };
     // A turn that finishes (or errors) inside herdr's 5s activity gate reports
     // agent_prompt_stalled even though the prompt was delivered.
     match herdr
@@ -124,12 +101,45 @@ async fn run(
         .await?;
     println!(
         "--- last output ---\n{}",
-        read["read"]["text"]
-            .as_str()
-            .or(read["text"].as_str())
-            .unwrap_or(&read.to_string())
+        read["read"]["text"].as_str().unwrap_or_default()
     );
     Ok(())
+}
+
+async fn start_agent(
+    herdr: &Client,
+    kind: &str,
+    pane: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    // Cheapest models from routing.toml's explore class.
+    let args: Vec<&str> = match kind {
+        // --no-extensions: a user pi extension overrides the CLI model and fails over to other
+        // providers. It also drops MCP (`-e builtin:mcp` did not restore it), so herdbot's pi
+        // bridge must ship as its own `-e` extension.
+        "pi" => vec![
+            "--no-extensions",
+            "--provider",
+            "opencode-go",
+            "--model",
+            "deepseek-v4-flash",
+            "--thinking",
+            "low",
+        ],
+        "claude" => vec!["--model", "claude-haiku-5-5"],
+        "codex" => vec!["-m", "gpt-6-luna", "-c", "model_reasoning_effort=low"],
+        "cursor" => vec!["--model", "gemini-3.7-flash-high"],
+        other => return Err(format!("unknown kind {other}").into()),
+    };
+    let args: Vec<String> = args.into_iter().map(String::from).collect();
+    let name = agent_name(&format!("spike-{kind}"));
+    print_events(
+        herdr
+            .subscribe(&[on_pane("pane.agent_status_changed", pane)])
+            .await?,
+    );
+    herdr.agent_start(&name, kind, pane, &args, 30_000).await?;
+    println!("agent {name} started in {pane} ({kind} {args:?})");
+    Ok(name)
 }
 
 fn print_events(mut events: Subscription) {

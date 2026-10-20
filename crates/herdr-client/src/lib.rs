@@ -230,6 +230,9 @@ impl Client {
     /// Over the socket this returns immediately with `launch_pending: true`; the name is not
     /// promptable until launch completes. Waits (polling `agent.get`) until the agent is
     /// `interactive_ready`, and returns the final agent object.
+    ///
+    /// A freshly created pane rejects the start with `agent_pane_busy` until its shell reaches
+    /// a prompt; that is retried within the same deadline.
     pub async fn agent_start(
         &self,
         name: &str,
@@ -238,13 +241,22 @@ impl Client {
         args: &[String],
         timeout_ms: u64,
     ) -> Result<Value> {
-        self.call(
-            "agent.start",
-            json!({ "name": name, "kind": kind, "pane_id": pane_id, "args": args, "timeout_ms": timeout_ms }),
-        )
-        .await?;
-        // ponytail: 250ms poll; switch to a pane.agent_detected subscription if latency matters.
+        // ponytail: 250ms polls; switch to pane.agent_detected events if latency matters.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let params = json!({ "name": name, "kind": kind, "pane_id": pane_id, "args": args, "timeout_ms": timeout_ms });
+        loop {
+            match self.call("agent.start", params.clone()).await {
+                Err(Error::Api { code, .. })
+                    if code == "agent_pane_busy" && tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                }
+                result => {
+                    result?;
+                    break;
+                }
+            }
+        }
         loop {
             let mut got = self.agent_get(name).await?;
             let agent = got["agent"].take();
