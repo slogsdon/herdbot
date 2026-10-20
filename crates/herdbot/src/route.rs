@@ -280,7 +280,14 @@ pub fn launch(
             }
             Launch {
                 kind: "cursor",
-                args: vec![s("--model"), route.model.clone(), s("--approve-mcps")],
+                // --trust: a first run in a new cwd otherwise opens a trust modal that eats the
+                // preamble prompt's keystrokes.
+                args: vec![
+                    s("--model"),
+                    route.model.clone(),
+                    s("--approve-mcps"),
+                    s("--trust"),
+                ],
                 preamble_prompt: Some(instructions.to_owned()),
             }
         }
