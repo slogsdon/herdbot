@@ -10,7 +10,7 @@ repository.workspace = true
 herdr-client = { path = "../herdr-client" }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["io-std"] }
+tokio = { workspace = true, features = ["io-std", "process"] }
 toml = "1"
 croner = "4"
 chrono = "0.4"

@@ -14,7 +14,7 @@ const MARGIN_SECS: i64 = 60;
 const MAX_SECS: i64 = 8 * 24 * 3600;
 /// Only the bottom of the pane counts. Older lines are conversation, which can quote these
 /// strings (a bot working on herdbot, or a forwarded "[subagent … failed]" message).
-const SCAN_LINES: usize = 15;
+pub const SCAN_LINES: usize = 15;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cooldown {

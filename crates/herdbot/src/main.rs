@@ -2,6 +2,7 @@
 
 mod cooldown;
 mod daemon;
+mod fm;
 mod grok;
 mod home;
 mod mcp;
