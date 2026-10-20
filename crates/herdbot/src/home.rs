@@ -56,6 +56,9 @@ pub struct Bot {
     pub grok_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<Schedule>,
+    /// "ask" or "auto"; overrides `[approvals] mode` in herdbot.toml for this bot's agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approvals: Option<String>,
 }
 
 fn local() -> String {
@@ -286,6 +289,52 @@ pub fn paths_rewrites() -> BTreeMap<String, String> {
         .paths
 }
 
+/// How a bot's agents handle tool approvals. Auto uses each harness's own automatic review,
+/// never a bypass (route::approval_args).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Approvals {
+    #[default]
+    Ask,
+    Auto,
+}
+
+pub fn parse_approvals(value: &str) -> Approvals {
+    match value {
+        "auto" => Approvals::Auto,
+        "ask" => Approvals::Ask,
+        other => {
+            eprintln!("approvals: unknown mode {other:?}; using ask");
+            Approvals::Ask
+        }
+    }
+}
+
+pub fn parse_approvals_default(herdbot_toml: &str) -> Approvals {
+    #[derive(Deserialize, Default)]
+    struct Section {
+        mode: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct Config {
+        #[serde(default)]
+        approvals: Section,
+    }
+    toml::from_str::<Config>(herdbot_toml)
+        .unwrap_or_default()
+        .approvals
+        .mode
+        .as_deref()
+        .map_or(Approvals::Ask, parse_approvals)
+}
+
+/// The bot's own setting, else herdbot.toml's `[approvals] mode`, else ask.
+pub fn approvals(bot: &Bot) -> Approvals {
+    match bot.approvals.as_deref() {
+        Some(mode) => parse_approvals(mode),
+        None => parse_approvals_default(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default()),
+    }
+}
+
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
@@ -301,6 +350,18 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approvals_default_to_ask_and_bots_override() {
+        assert_eq!(parse_approvals_default(""), Approvals::Ask);
+        assert_eq!(parse_approvals_default("[approvals]\nmode = \"auto\"\n"), Approvals::Auto);
+        assert_eq!(parse_approvals("auto"), Approvals::Auto);
+        assert_eq!(parse_approvals("yolo"), Approvals::Ask); // unknown → ask
+        let bot: Bot = toml::from_str("name = \"x\"\napprovals = \"auto\"\n").unwrap();
+        assert_eq!(bot.approvals.as_deref(), Some("auto"));
+        let plain: Bot = toml::from_str("name = \"x\"\n").unwrap();
+        assert_eq!(plain.approvals, None);
+    }
 
     #[test]
     fn slugs_fit_agent_names() {

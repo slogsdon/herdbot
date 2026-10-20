@@ -136,6 +136,8 @@ Verified live on 2026-10-20 unless the table says otherwise.
 | cursor-agent | `--model` (effort is part of the id) | merges a `herdbot` entry into `<cwd>/.cursor/mcp.json` (identity comes from the pane env), plus `--approve-mcps` and `--trust`. Without `--trust`, the first run in a new cwd opens a trust modal that swallows the first prompt. The tools haven't been seen working yet because the test account hit its weekly limit. | first prompt |
 | pi | `--no-extensions -e builtin:mcp -e builtin:codemode -e <herdbot-pi.ts> --provider opencode-go --model`, `--thinking` | `-e builtin:mcp -e builtin:codemode -e herdbot-pi.ts`, which registers the herdbot stdio MCP server with `pi.registerMcpServer` at code-mode exposure; scripts use `searchTools()` (`--mcp-config` comes from a third-party extension that `--no-extensions` drops) | `--append-system-prompt <file>` |
 
+Approvals: `[approvals] mode = "auto"` in `herdbot.toml`, or `approvals = "auto"` in a `bot.toml`, launches that bot's main agent and subagents with claude's `--permission-mode auto` and codex's `--approve-for-me`. pi doesn't ask for approvals. cursor has no automatic-review mode, so it still asks. `"ask"` is the default and adds no flags.
+
 herdr rejects agent arguments it can't quote safely (newlines trigger `invalid_agent_argument`), so prompts and MCP config are passed as files.
 
 pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, enables built-in MCP and code mode and registers its server through its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers. Built-in MCP also reads `~/.pi/agent/mcp.json`. Code mode exposes enabled servers there to bot scripts, including the global `radius` and `rea` servers; a global server set to `"exposure": "direct"` is declared directly.
@@ -190,7 +192,7 @@ Open questions:
 
 - Should the desktop UI be gpui-kit (Rust, shares crates with herdbot) or SwiftUI (every native Apple framework, as in Viticci's app)?
 
-- Should any bot run unattended (`--yolo`, `--dangerously-skip-permissions`, codex `--full-auto`)? The default is no.
+- Should any bot run unattended? Automatic review is available through `approvals = "auto"`; full bypass (`--yolo`, `--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`) is still never used.
 - Should bots get their own herdr session (`--session herdbot`)? They currently land in your default session.
 
 ## License

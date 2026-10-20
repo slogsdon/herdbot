@@ -196,6 +196,7 @@ async fn start(
         &instructions,
         &tool_args,
         &home::cwd(slug, bot),
+        home::approvals(bot),
     )?;
     herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)

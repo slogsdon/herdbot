@@ -175,6 +175,17 @@ fn pi_models(provider: &str) -> &'static [String] {
     })
 }
 
+/// Launch flags for `mode`. Auto is each harness's own automatic review, never a bypass:
+/// claude's auto permission mode and codex's --approve-for-me. pi asks for nothing, and
+/// cursor only offers --force, which is a bypass.
+pub fn approval_args(harness: &str, mode: home::Approvals) -> Vec<String> {
+    match (harness, mode) {
+        ("claude", home::Approvals::Auto) => vec!["--permission-mode".into(), "auto".into()],
+        ("codex", home::Approvals::Auto) => vec!["--approve-for-me".into()],
+        _ => Vec::new(),
+    }
+}
+
 /// How the harness reaches herdbot's tools.
 pub struct Launch {
     /// herdr agent kind.
@@ -195,6 +206,7 @@ pub fn launch(
     instructions: &str,
     tool_args: &[String],
     cwd: &str,
+    approvals: home::Approvals,
 ) -> Result<Launch> {
     let exe = std::env::current_exe()?.to_string_lossy().into_owned();
     let mcp_args: Vec<String> = std::iter::once("mcp".to_owned())
@@ -227,6 +239,7 @@ pub fn launch(
             if let Some(e) = effort {
                 args.extend([s("--effort"), e]);
             }
+            args.extend(approval_args("claude", approvals));
             args.extend([s("--append-system-prompt-file"), prompt_file]);
             Launch {
                 kind: "claude",
@@ -258,6 +271,7 @@ pub fn launch(
             if let Some(e) = effort {
                 args.extend([s("-c"), format!("model_reasoning_effort={e}")]);
             }
+            args.extend(approval_args("codex", approvals));
             Launch {
                 kind: "codex",
                 args,
@@ -358,6 +372,18 @@ fn pi_extension() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_flags_per_harness() {
+        use crate::home::Approvals::{Ask, Auto};
+        assert_eq!(approval_args("claude", Auto), ["--permission-mode", "auto"]);
+        assert_eq!(approval_args("codex", Auto), ["--approve-for-me"]);
+        assert!(approval_args("pi", Auto).is_empty());
+        assert!(approval_args("cursor", Auto).is_empty());
+        for harness in ["claude", "codex", "pi", "cursor"] {
+            assert!(approval_args(harness, Ask).is_empty());
+        }
+    }
 
     #[test]
     fn pi_keeps_guardrail_and_loads_builtin_mcp() {
