@@ -233,7 +233,7 @@ pub fn launch(
     // Harnesses may not pass the pane environment to MCP servers (codex does not), so the
     // home directory travels in the server config.
     let home_dir = home::root().to_string_lossy().into_owned();
-    let mcp = serde_json::json!({ "mcpServers": { "herdbot": { "command": exe, "args": mcp_args, "env": { "HERDBOT_HOME": home_dir } } } });
+    let mcp = mcp_config(&exe, &mcp_args, &home_dir, None);
     let dir = home::root().join(".state").join("launch");
     std::fs::create_dir_all(&dir)?;
     let prompt_file = dir.join(format!("{agent}.md"));
@@ -350,6 +350,32 @@ pub fn launch(
     })
 }
 
+/// cua-driver's stdio MCP server, locally or through `ssh -T` (no tty, so stdio stays clean).
+#[allow(dead_code)] // Task 2 wires this entry into computer_use launches.
+pub fn cua_server(cua: &home::Cua) -> serde_json::Value {
+    let command = cua.command.clone().unwrap_or_else(|| "cua-driver".into());
+    match &cua.host {
+        None => serde_json::json!({ "command": command, "args": ["mcp"] }),
+        Some(host) => {
+            serde_json::json!({ "command": "ssh", "args": ["-T", host, command, "mcp"] })
+        }
+    }
+}
+
+/// The MCP config claude gets: herdbot's server, plus cua for computer_use.
+pub fn mcp_config(
+    exe: &str,
+    mcp_args: &[String],
+    home_dir: &str,
+    cua: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut config = serde_json::json!({ "mcpServers": { "herdbot": { "command": exe, "args": mcp_args, "env": { "HERDBOT_HOME": home_dir } } } });
+    if let Some(cua) = cua {
+        config["mcpServers"]["cua"] = cua;
+    }
+    config
+}
+
 /// claude `--settings` content adding herdbot's hooks. claude runs `command` through a shell,
 /// so the exe path is single-quoted.
 fn claude_hook_settings(exe: &str) -> serde_json::Value {
@@ -412,6 +438,34 @@ fn pi_extension() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cua_server_local_and_ssh() {
+        use serde_json::json;
+        assert_eq!(
+            cua_server(&home::Cua::default()),
+            json!({ "command": "cua-driver", "args": ["mcp"] })
+        );
+        let remote = home::Cua {
+            host: Some("shane@studio.local".into()),
+            command: Some("~/.local/bin/cua-driver".into()),
+        };
+        assert_eq!(
+            cua_server(&remote),
+            json!({ "command": "ssh", "args": ["-T", "shane@studio.local", "~/.local/bin/cua-driver", "mcp"] })
+        );
+    }
+
+    #[test]
+    fn mcp_config_adds_cua_only_when_given() {
+        let args = vec!["mcp".to_owned(), "--bot".to_owned(), "b".to_owned()];
+        let plain = mcp_config("/bin/herdbot", &args, "/h", None);
+        assert_eq!(plain["mcpServers"]["herdbot"]["command"], "/bin/herdbot");
+        assert_eq!(plain["mcpServers"]["herdbot"]["env"]["HERDBOT_HOME"], "/h");
+        assert!(plain["mcpServers"].get("cua").is_none());
+        let with = mcp_config("/bin/herdbot", &args, "/h", Some(cua_server(&home::Cua::default())));
+        assert_eq!(with["mcpServers"]["cua"]["command"], "cua-driver");
+    }
 
     #[test]
     fn approval_flags_per_harness() {

@@ -305,6 +305,32 @@ pub fn paths_rewrites() -> BTreeMap<String, String> {
         .paths
 }
 
+/// `[cua]` in herdbot.toml: where computer_use subagents reach cua-driver. No host means this
+/// Mac; `command` defaults to `cua-driver` on PATH.
+#[allow(dead_code)] // Task 2 wires this config into computer_use launches.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct Cua {
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+}
+
+#[allow(dead_code)] // Task 2 wires this parser into computer_use launches.
+pub fn parse_cua(text: &str) -> Cua {
+    #[derive(Deserialize, Default)]
+    struct Config {
+        #[serde(default)]
+        cua: Cua,
+    }
+    toml::from_str::<Config>(text).unwrap_or_default().cua
+}
+
+#[allow(dead_code)] // Task 2 wires this config into computer_use launches.
+pub fn cua_config() -> Cua {
+    parse_cua(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct MemoryConfig {
@@ -392,6 +418,21 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cua_table_is_optional() {
+        assert_eq!(parse_cua(""), Cua::default());
+        assert_eq!(parse_cua("[paths]\n\"/a\" = \"/b\"\n"), Cua::default());
+        assert_eq!(
+            parse_cua(
+                "[cua]\nhost = \"shane@studio.local\"\ncommand = \"~/.local/bin/cua-driver\"\n"
+            ),
+            Cua {
+                host: Some("shane@studio.local".into()),
+                command: Some("~/.local/bin/cua-driver".into())
+            }
+        );
+    }
 
     #[test]
     fn memory_settings_default_off() {
