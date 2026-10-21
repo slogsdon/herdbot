@@ -18,7 +18,24 @@ const DELIVERY_COOLDOWN: i64 = 15;
 const HARVEST_AFTER: i64 = 20;
 const STARTUP_GRACE: i64 = 90;
 
+/// One daemon at a time: the memory files have a single writer (OptChat spec §2's method).
+fn take_lock() -> Result<std::os::unix::net::UnixListener> {
+    use std::os::unix::net::{UnixListener, UnixStream};
+    let path = home::root().join(".state").join("daemon.lock");
+    fs::create_dir_all(path.parent().unwrap())?;
+    match UnixListener::bind(&path) {
+        Ok(listener) => Ok(listener),
+        Err(_) if UnixStream::connect(&path).is_ok() => Err("another herdbot daemon is running".into()),
+        Err(_) => {
+            // A socket nobody listens on: its daemon died. Take it over.
+            fs::remove_file(&path)?;
+            Ok(UnixListener::bind(&path)?)
+        }
+    }
+}
+
 pub async fn run() -> Result<()> {
+    let _lock = take_lock()?;
     let herdr = Client::from_env();
     println!(
         "herdbot daemon: herdr {} at {}",
@@ -31,12 +48,17 @@ pub async fn run() -> Result<()> {
     let mut roster_seen = None;
     let mut mains = MainAgents::default();
     let mut held: HashMap<String, u32> = HashMap::new();
+    let mut mems = HashMap::new();
+    let mut contexts = HashMap::new();
     loop {
         if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains, &mut held).await {
             eprintln!("queue: {e}");
         }
         if let Err(e) = consume_events(&herdr, &mut mains).await {
             eprintln!("events: {e}");
+        }
+        if let Err(e) = crate::memory::tick(&herdr, &mut mems, &mut contexts).await {
+            eprintln!("memory: {e}");
         }
         if let Err(e) = watch_runs(&herdr).await {
             eprintln!("runs: {e}");
@@ -82,13 +104,18 @@ async fn flush_queues(
     mains: &mut MainAgents,
     held: &mut HashMap<String, u32>,
 ) -> Result<()> {
+    let compactors: std::collections::HashSet<String> = home::list_runs()
+        .into_iter()
+        .filter(|r| r.class == "compact" && r.status == "running")
+        .map(|r| r.agent)
+        .collect();
     for entry in fs::read_dir(home::queue_dir())?.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
         }
         let agent = path.file_stem().unwrap().to_string_lossy().into_owned();
-        if home::now() - delivered_at.get(&agent).copied().unwrap_or(0) < DELIVERY_COOLDOWN {
+        if !compactors.contains(&agent) && home::now() - delivered_at.get(&agent).copied().unwrap_or(0) < DELIVERY_COOLDOWN {
             continue;
         }
         let status = match run::status(herdr, &agent).await {

@@ -327,7 +327,6 @@ pub fn parse_memory_config(text: &str) -> MemoryConfig {
     toml::from_str::<Config>(text).unwrap_or_default().memory
 }
 
-#[allow(dead_code)] // Used by the memory daemon in the next implementation task.
 pub fn memory_config() -> MemoryConfig {
     parse_memory_config(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default())
 }

@@ -6,24 +6,21 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use herdr_client::Client;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::home::{self, Result};
 
 pub const NODE: usize = 512;
-#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const TRIES: usize = 5;
-#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const RETRY_SECS: i64 = 10;
 /// A compactor starts after the log has been quiet this long (or at once for a recycle).
-#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const QUIET_SECS: i64 = 60;
 pub const DEFAULT_VIEW: usize = 64_000;
 const PLACEHOLDER: &str = "(not summarized yet: zoom it)";
 
 /// A realistic summary line of exactly NODE bytes, shown to the compactor for scale.
-#[allow(dead_code)] // Compactor job prompts are sent by the daemon tick in Task 5.
 pub const SCALE: &str = "user: keep the router table in routing.toml, never in code and route explore to cheap models first; talk: moved explore candidates to pi deepseek-v4-flash then claude haiku, kept plan on opus; user: asked why codex lost its first prompt; talk: traced it to the trust modal on first run in a new cwd, fix is --trust for cursor and a resend for codex; user: approved shipping the resend; work: subagent k3x9a1 ran the tests, 13 passed, committed 9b4b9a8; talk: still open: does claude quota text need a date parser";
 
 pub const COMPACT: &str = include_str!("../assets/optchat-compact.md");
@@ -44,7 +41,6 @@ pub struct Message {
 }
 
 impl Message {
-    #[allow(dead_code)] // The daemon tick creates messages in Task 5.
     pub fn new(i: usize, kind: &str, text: &str, date: i64) -> Self {
         Message { i, kind: kind.into(), text: text.into(), size: kind.len() + 2 + text.len(), date, t: 0 }
     }
@@ -139,7 +135,6 @@ impl Mem {
     }
 
     /// A node a compactor built.
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn insert(&mut self, k: Key, text: String) {
         self.tree.insert(k, text);
         let parent = (k.0 + 1, k.1 / 2);
@@ -183,19 +178,16 @@ impl Mem {
     }
 
     /// First message whose view part is unbuilt (the spec's `first`).
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn first_unbuilt(&self) -> usize {
         self.view.iter().find(|&&k| !self.built(k)).map_or(self.root.len(), |&k| span(k).0)
     }
 
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn settled(&self) -> bool {
         self.view.iter().all(|&k| self.built(k))
     }
 
     /// The next node for a compactor, in OptChat's order (spec §4.1 rule 3): unbuilt, its
     /// sources built, everything in the view before its end summarized, not waiting on a retry.
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn due(&self, failed: &HashMap<Key, i64>, now: i64) -> Option<Key> {
         let total = self.root.len();
         let first = self.first_unbuilt();
@@ -232,7 +224,6 @@ impl Mem {
 
     /// Where a node's compactor context ends: before message i for level 0 (the message itself
     /// comes whole in the step), through its last message for a merge.
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn job_end((l, i): Key) -> usize {
         if l == 0 { i } else { (i + 1) << l }
     }
@@ -240,7 +231,6 @@ impl Mem {
     /// The compactor's context: bare view lines (no ids, newlines flattened) of the parts that
     /// end at or before `end`. Unbuilt parts are left out; rule 3 means there are none before a
     /// due node anyway.
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn context_lines(&self, end: usize) -> Vec<String> {
         self.view
             .iter()
@@ -251,7 +241,6 @@ impl Mem {
 
     /// One job for a compactor. The first job of a run carries the whole context; later ones
     /// carry only the context lines that changed since the previous job.
-    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn job_prompt(&self, (l, i): Key, context: &[String], first: bool) -> String {
         let context = if first {
             format!("<chat>\n{}\n</chat>\n\n", context.join("\n"))
@@ -314,13 +303,11 @@ pub fn fold(messages: Vec<Message>, nodes: Vec<Node>, budget: usize) -> Mem {
 }
 
 /// Context lines past the longest prefix the two lists share.
-#[allow(dead_code)] // The daemon tick uses this when starting compactor runs in Task 5.
 pub fn delta(prev: &[String], next: &[String]) -> Vec<String> {
     let common = prev.iter().zip(next).take_while(|(a, b)| a == b).count();
     next[common..].to_vec()
 }
 
-#[allow(dead_code)] // The daemon tick handles compactor replies in Task 5.
 #[derive(Debug)]
 pub enum Verdict {
     Accept(String),
@@ -330,7 +317,6 @@ pub enum Verdict {
     Fail,
 }
 
-#[allow(dead_code)] // The daemon tick handles compactor replies in Task 5.
 pub fn check(tries: &[String]) -> Verdict {
     let last = tries.last().map(|t| t.trim().to_owned()).unwrap_or_default();
     if last.is_empty() {
@@ -356,7 +342,6 @@ pub fn check(tries: &[String]) -> Verdict {
 
 /// One turns.jsonl line (number `t`) → its messages: `user` for the delivered prompt (absent
 /// when typed in the pane), then `talk` for the reply.
-#[allow(dead_code)] // The daemon tick imports turns in Task 5.
 pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Message> {
     let at = line["at"].as_i64().unwrap_or_default();
     let mut out = Vec::new();
@@ -372,7 +357,6 @@ pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Mes
 /// Messages from `turns.jsonl` not yet in the log. The import position is the last logged
 /// message's turn: after its `talk`, the next turn; after a lone `user` (a crash between the two
 /// appends), that turn's `talk` only.
-#[allow(dead_code)] // The daemon tick imports turns in Task 5.
 pub fn new_messages(mem: &Mem, lines: &[&str]) -> Vec<Message> {
     let (start, skip_user) = match mem.root.last() {
         None => (0, false),
@@ -395,7 +379,6 @@ pub fn new_messages(mem: &Mem, lines: &[&str]) -> Vec<Message> {
     out
 }
 
-#[allow(dead_code)] // The daemon tick decides recycling in Task 5.
 pub fn should_recycle(session_bytes: usize, budget: usize, status: &str, queue_empty: bool, settled: bool) -> bool {
     session_bytes > 2 * budget && matches!(status, "idle" | "done") && queue_empty && settled
 }
@@ -452,7 +435,6 @@ pub fn push_inbox(slug: &str, run: &str, text: &str) -> Result<()> {
     append_line(&inbox_path(slug), &InboxEntry { run: run.into(), text: text.into(), at: home::now() })
 }
 
-#[allow(dead_code)] // The daemon tick drains this inbox in Task 5.
 pub fn drain_inbox(slug: &str) -> Result<Vec<InboxEntry>> {
     let path = inbox_path(slug);
     let taken = path.with_extension("taking");
@@ -475,6 +457,191 @@ pub fn view_block(slug: &str, bot: &home::Bot) -> Option<String> {
 
 pub fn compact_preamble(bot_name: &str) -> String {
     COMPACT.replace("{bot}", bot_name)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Job {
+    pub l: u32,
+    pub i: usize,
+    pub tries: Vec<String>,
+    pub run: String,
+}
+
+/// The daemon's per-bot memory state. A cache: everything in it can be recomputed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct State {
+    pub session_bytes: usize,
+    /// The main agent's pane when `session_bytes` started counting; a new pane is a new session.
+    pub session_pane: String,
+    pub last_log_at: i64,
+    pub job: Option<Job>,
+    /// Bytes of job prompts sent to the current compactor run.
+    pub run_bytes: usize,
+    /// (level, index, retry after).
+    pub failed: Vec<(u32, usize, i64)>,
+}
+
+fn state_path(slug: &str) -> PathBuf {
+    home::root().join(".state").join("memory").join(format!("{slug}.json"))
+}
+
+pub fn load_state(slug: &str) -> State {
+    std::fs::read_to_string(state_path(slug)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+pub fn save_state(slug: &str, state: &State) -> Result<()> {
+    std::fs::create_dir_all(state_path(slug).parent().unwrap())?;
+    std::fs::write(state_path(slug), serde_json::to_vec_pretty(state)?)?;
+    Ok(())
+}
+
+async fn close_compactor(herdr: &Client, mut run: home::Run) -> Result<()> {
+    let _ = herdr.pane_close(&run.pane).await;
+    run.status = "done".into();
+    run.result = Some("memory compactor finished".into());
+    run.pane_closed = true;
+    home::save_run(&run)
+}
+
+/// One daemon pass over every memory bot: import turns, take compactor answers, hand out the
+/// next job (starting or ending a compactor as needed), and recycle a long session.
+pub async fn tick(
+    herdr: &Client,
+    mems: &mut HashMap<String, Mem>,
+    contexts: &mut HashMap<String, Vec<String>>,
+) -> Result<()> {
+    let max = home::memory_config().max_compactors;
+    let compactors = |runs: &[home::Run]| runs.iter().filter(|r| r.class == "compact" && r.status == "running" && !r.pane_closed).count();
+    let mut running = compactors(&home::list_runs());
+    let now = home::now();
+    for slug in home::list_bots() {
+        let Ok(bot) = home::load_bot(&slug) else { continue };
+        if !bot.memory {
+            continue;
+        }
+        let budget = budget(&bot);
+        let mem = mems.entry(slug.clone()).or_insert_with(|| load(&slug, budget, true));
+        let mut st = load_state(&slug);
+
+        // 1. New turns → log messages (the cursor is derived from the log; see new_messages).
+        let turns = std::fs::read_to_string(home::bot_dir(&slug).join("turns.jsonl")).unwrap_or_default();
+        let lines: Vec<&str> = turns.lines().collect();
+        for m in new_messages(mem, &lines) {
+            append_line(&chat_dir(&slug).join("main.jsonl"), &m)?;
+            st.session_bytes += m.size;
+            st.last_log_at = now;
+            mem.append(m);
+        }
+
+        // 2. A new main-agent pane is a new session.
+        if let Some(bs) = home::load_state(&slug)
+            && bs.root_pane != st.session_pane
+        {
+            st.session_pane = bs.root_pane;
+            st.session_bytes = 0;
+        }
+
+        // 3. The compactor run, and a job whose run is gone.
+        let compactor = home::list_runs()
+            .into_iter()
+            .find(|r| r.bot == slug && r.class == "compact" && r.status == "running" && !r.pane_closed);
+        if let Some(job) = &st.job
+            && compactor.as_ref().is_none_or(|r| r.id != job.run)
+        {
+            st.failed.push((job.l, job.i, now + RETRY_SECS));
+            st.job = None;
+        }
+
+        // 4. Answers.
+        for entry in drain_inbox(&slug)? {
+            let Some(job) = st.job.as_mut() else { continue };
+            if entry.run != job.run {
+                continue;
+            }
+            job.tries.push(entry.text);
+            match check(&job.tries) {
+                Verdict::Accept(text) => {
+                    let key = (job.l, job.i);
+                    append_line(&chat_dir(&slug).join("tree.jsonl"), &Node { l: key.0, i: key.1, size: text.len(), text: text.clone() })?;
+                    mem.insert(key, text);
+                    st.failed.retain(|&(l, i, _)| (l, i) != key);
+                    st.job = None;
+                }
+                Verdict::Retry(reply) => {
+                    if let Some(r) = &compactor {
+                        home::enqueue(&r.agent, &reply)?;
+                    }
+                }
+                Verdict::Fail => {
+                    st.failed.push((job.l, job.i, now + RETRY_SECS));
+                    st.job = None;
+                }
+            }
+        }
+
+        // 5. The next job.
+        let failed: HashMap<Key, i64> = st.failed.iter().map(|&(l, i, t)| ((l, i), t)).collect();
+        let next = mem.due(&failed, now);
+        let recycle_waiting = st.session_bytes > 2 * budget;
+        if st.job.is_none() {
+            match (next, compactor) {
+                (Some(key), Some(r)) if st.run_bytes <= 2 * budget => {
+                    let context = mem.context_lines(Mem::job_end(key));
+                    let new = delta(contexts.get(&slug).map(Vec::as_slice).unwrap_or_default(), &context);
+                    let prompt = mem.job_prompt(key, &new, false);
+                    home::enqueue(&r.agent, &prompt)?;
+                    st.run_bytes += prompt.len();
+                    contexts.insert(slug.clone(), context);
+                    st.job = Some(Job { l: key.0, i: key.1, tries: Vec::new(), run: r.id });
+                }
+                (Some(_), Some(r)) => {
+                    // Its session has grown past the budget: a fresh compactor takes over.
+                    close_compactor(herdr, r).await?;
+                    contexts.remove(&slug);
+                }
+                // A bot that is down stays down: spawn would bring it up.
+                (Some(key), None)
+                    if running < max
+                        && home::load_state(&slug).is_some()
+                        && (now - st.last_log_at >= QUIET_SECS || recycle_waiting) =>
+                {
+                    let context = mem.context_lines(Mem::job_end(key));
+                    let prompt = mem.job_prompt(key, &context, true);
+                    let r = crate::run::spawn(herdr, &slug, "herdbot-memory", "compact", None, "memory compactor", &prompt).await?;
+                    if r.status == "running" {
+                        running += 1;
+                        st.run_bytes = prompt.len();
+                        contexts.insert(slug.clone(), context);
+                        st.job = Some(Job { l: key.0, i: key.1, tries: Vec::new(), run: r.id });
+                    }
+                }
+                (None, Some(r)) if matches!(crate::run::status(herdr, &r.agent).await.as_deref(), Some("idle") | Some("done")) => {
+                    close_compactor(herdr, r).await?;
+                    contexts.remove(&slug);
+                }
+                _ => {}
+            }
+        }
+
+        // 6. Recycle a long session onto a fresh one carrying the view.
+        if let Some(bs) = home::load_state(&slug) {
+            let status = crate::run::status(herdr, &bs.agent).await.unwrap_or_default();
+            let queue_empty = !home::queue_dir().join(format!("{}.jsonl", bs.agent)).exists();
+            if should_recycle(st.session_bytes, budget, &status, queue_empty, mem.settled()) {
+                match crate::run::restart(herdr, &slug, bs).await {
+                    Ok(new) => {
+                        println!("memory: recycled {slug} onto {}", new.route);
+                        st.session_pane = new.root_pane;
+                        st.session_bytes = 0;
+                    }
+                    Err(e) => eprintln!("memory: {slug}: recycle failed: {e}"),
+                }
+            }
+        }
+        save_state(&slug, &st)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
