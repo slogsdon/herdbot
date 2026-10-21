@@ -32,7 +32,7 @@ All three stay harness-agnostic. A capability goes behind something every harnes
 | claude 2.1.304 (live: 2.1.305) | `Stop`; the payload has `last_assistant_message`, `transcript_path`, `stop_hook_active` | `PermissionRequest`, `Notification` | `--settings <file-or-json>` |
 | codex 0.163.0 | `notify` program, last argv is JSON with `"type": "agent-turn-complete"`, `last-assistant-message`, `thread-id`, `turn-id` | `approval-requested` (notification type): **not seen in a live capture** | `-c notify=[…]` |
 | pi 1.2.0 | extension event `agent_end { messages }` | `ui_prompt_start { kind, title }` | `herdbot-pi.ts` (after the pi-MCP plan) |
-| cursor-agent 2026.10.19 | Likely: `hooks.json` with `afterAgentResponse` / `stop` (strings in its bundle); file location and payload unverified. Live check skipped by instruction. | unknown | Likely `<cwd>/.cursor/hooks.json` |
+| cursor-agent 2026.10.19 | Cursor's installed hook documentation lists `afterAgentResponse` and `stop`; project hooks use `<cwd>/.cursor/hooks.json` with `{"version":1,"hooks":...}`. Live firing and payload remain unverified: a print-mode capture attempt lost its connection before producing a response or hook file. | unknown (approval/block event unverified) | `<cwd>/.cursor/hooks.json` (documented) |
 
 Shane's own config, which must keep working:
 - `~/.codex/config.toml` sets `notify = ["…/SkyComputerUseClient", "turn-ended"]`.
