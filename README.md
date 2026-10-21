@@ -82,11 +82,14 @@ herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/
 <slug>/BOT.local.md   # local additions, appended, never overwritten
 <slug>/memory/  skills/
 <slug>/turns.jsonl    # main-agent prompt/reply pairs, from turn hooks
+<slug>/chat/main.jsonl / tree.jsonl    # memory log and summary tree, memory bots only (see Memory)
 .state/<slug>.json    # workspace_id, root_pane, agent, route
 .state/launch/<agent>.md / .mcp.json / .settings.json   # instructions, MCP config and hook settings handed to the harness
 .state/cooldown/<harness>.json         # set when a harness hits a quota or auth limit
 .state/events/<agent>.jsonl            # hook events waiting for the daemon (see Turn hooks)
 .state/rooms/<slug>.json               # the daemon's routing state for the room
+.state/memory/<slug>.json / .nodes.jsonl   # memory state (a cache) and the write_node inbox
+.state/daemon.lock    the daemon's single-writer lock (see Memory)
 .state/fm/            schemas handed to fm
 .state/daemon.log     # daemon output when it runs as the launchd service
 .runs/<id>.json       # one subagent run
@@ -185,6 +188,23 @@ cursor-agent is not wired: herdbot installs no hook for it, so its results come 
 - Main-agent turns are logged to `<slug>/turns.jsonl` as `{at, prompt, reply}`. `prompt` is the text the daemon last delivered, or `null` if you typed into the pane. Not checked live: no `turns.jsonl` line had been written when this was documented.
 - With `approvals = "auto"`, a blocked event is rarely reachable, because the harness seldom asks for approval.
 
+### Memory
+
+A bot with `memory = true` in `bot.toml` keeps one endless log of its prompts and replies, compresses it into a tree of one-line summaries, and starts every fresh session with a fixed-size view of it. It's off by default, and with it off nothing else about that bot changes.
+
+- **What's logged.** Every prompt and every reply becomes a line in `<slug>/chat/main.jsonl`, marked `user` or `talk`, with its UTF-8 size and time; every summary becomes a line in `<slug>/chat/tree.jsonl`. Both files are append-only, written only by the daemon, one write plus one fsync per line, and torn lines are skipped at load. **`chat/` keeps every prompt and reply forever**, so a memory bot's folder is a complete transcript of it. Treat it as private.
+- **How it's compressed.** A message that fits in 512 bytes is its own line. A longer one is compressed into a line of at most 512 bytes, then neighbouring lines are merged two at a time, so a line higher up covers more messages. The view shows recent messages one line each and older ones many per line; a line the compactor hasn't built yet shows as `id+1|(not summarized yet: zoom it)`.
+- **Compactor runs.** The model work runs as `compact`-class subagents in panes, never through a harness's print mode. A bot gets one compactor run at a time, and `[memory] max_compactors` in `herdbot.toml` (default 2) caps how many run across all bots. A run starts when a bot has a summary due and its log has been quiet for 60 s, or when a recycle is waiting on it, and each job is one turn: compress one message, or merge two neighbouring lines. Jobs carry no `id+n` markers; the compactor answers with `write_node`, and the daemon validates the node, keeps the shortest try when a line is over the limit, and closes the run when nothing is due. A run whose job prompts pass `2 × VIEW` bytes is closed and replaced, so one compactor session never grows without bound.
+- **The view.** A memory bot's instructions end with a short doc on reading the view and then the view itself, so a restart, a quota failover onto another harness and a recycle all hand the bot its past.
+- **Recycling.** Once the bytes logged since the current session started pass `2 × VIEW`, and the bot is idle with an empty queue and a built-out view, the daemon restarts its main agent in a fresh session carrying the view. That keeps context bounded instead of leaving the harness to compact one ever-growing session.
+- **`zoom` and `date`.** A memory bot's main agent also gets two herdbot tools: `zoom{id, n}` opens a view line into the two lines under it, down to the single message at `n = 1`, and `date{id}` gives that message's time. They read `chat/` directly, so every harness gets them.
+- **Size.** `memory_view_bytes` in `bot.toml` sets the view's budget, 64,000 bytes by default, and a summary line may take 512 of them. Sizes are UTF-8 bytes, never tokens.
+- **One daemon.** The daemon listens on `.state/daemon.lock`, so it is the only writer of a bot's memory. A second `herdbot daemon` exits with `another herdbot daemon is running`, and a socket left behind by a dead daemon is taken over.
+
+The model comes from OptChat, which grew out of Victor Taelin's [OptMem](https://github.com/VictorTaelin/OptMem). herdbot deviates where its own design says so: the view is rebuilt at every fresh session and a long session is recycled, instead of a model call per message, and the compactor is a herdbot subagent in a pane instead of an API call. Memory only logs prompts and replies; tool calls and tool results aren't in the log, because the hooks don't see them.
+
+Verified live on 2026-10-20 on a codex-routed bot with a 1,500-byte view: 25 turns (50 log messages) built the tree through four compactor runs that opened and closed `done`, the log showed `memory: recycled mem-test onto …` once the session passed 3,000 logged bytes, the fresh session's instructions carried the `<chat>` view, and the bot answered a question about an early message with two `zoom` calls. At that budget the launch instructions were 4.5 KB; at the 64 KB default the first prompt would be far larger, and whether codex delivers a view that size intact is unverified.
+
 ### Routing
 
 The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in order:
@@ -194,7 +214,7 @@ The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in 
 3. `[classes.<subagent_type>]`, an ordered list of `harness:model[:effort]`
 4. `[default]`
 
-The first available candidate wins. A harness is available when its binary is on `PATH` and it isn't cooling down after a quota or auth failure. Task classes are Grok Bot's subagent types (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`. The model IDs were listed by the installed CLIs on 2026-10-19. Which model suits which task is my judgment, so tune it.
+The first available candidate wins. A harness is available when its binary is on `PATH` and it isn't cooling down after a quota or auth failure. Task classes are Grok Bot's subagent types (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`, and `compact` for a memory bot's compactor runs (see [Memory](#memory)). The model IDs were listed by the installed CLIs on 2026-10-19. Which model suits which task is my judgment, so tune it.
 
 Every launched agent gets an explicit effort. A candidate without one takes its class's `effort`, then `[default] effort`, then `medium`, so a harness never falls back to your global setting.
 
