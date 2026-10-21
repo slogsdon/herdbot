@@ -175,6 +175,8 @@ The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in 
 
 The first available candidate wins. A harness is available when its binary is on `PATH` and it isn't cooling down after a quota or auth failure. Task classes are Grok Bot's subagent types (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`. The model IDs were listed by the installed CLIs on 2026-10-19. Which model suits which task is my judgment, so tune it.
 
+Every launched agent gets an explicit effort. A candidate without one takes its class's `effort`, then `[default] effort`, then `medium`, so a harness never falls back to your global setting.
+
 **Cooldown and failover.** When a subagent settles or blocks, and when a main agent finishes a turn, the daemon scans the last 15 non-empty lines of its pane for its harness's failure text.
 
 | Harness | Quota | Auth |

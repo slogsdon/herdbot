@@ -98,7 +98,10 @@ pub fn resolve(table: &Value, class: &str, bot: &str, explicit: Option<&str>) ->
             continue;
         };
         match available(table, &route) {
-            Ok(()) => return Ok(route),
+            Ok(()) => {
+                let effort = route.effort.clone().or_else(|| Some(default_effort(table, class)));
+                return Ok(Route { effort, ..route });
+            }
             Err(why) => rejected.push(format!("{c}: {why}")),
         }
     }
@@ -107,6 +110,21 @@ pub fn resolve(table: &Value, class: &str, bot: &str, explicit: Option<&str>) ->
         rejected.join("; ")
     )
     .into())
+}
+
+/// The effort for a route that names none: its class's `effort`, then `[default] effort`,
+/// then medium. Never None: a harness left without one falls back to the user's own global
+/// setting, which can be far costlier.
+fn default_effort(table: &Value, class: &str) -> String {
+    let key = class_key(class);
+    table
+        .get("classes")
+        .and_then(|c| c.get(key))
+        .and_then(|c| c.get("effort"))
+        .or_else(|| table.get("default").and_then(|d| d.get("effort")))
+        .and_then(Value::as_str)
+        .unwrap_or("medium")
+        .to_owned()
 }
 
 fn binary(harness: &str) -> Option<&'static str> {
@@ -431,6 +449,33 @@ mod tests {
         assert_eq!(parse("claude"), None);
         assert_eq!(class_key("bash"), "shell");
         assert_eq!(class_key("watch_video"), "default");
+    }
+
+    #[test]
+    fn missing_effort_comes_from_class_then_default() {
+        let t: Value = "[default]\neffort = \"low\"\ncandidates = [\"pi:x\"]\n[classes.plan]\neffort = \"high\"\ncandidates = [\"pi:x\"]\n"
+            .parse::<toml::Table>()
+            .unwrap()
+            .into();
+        assert_eq!(default_effort(&t, "plan"), "high");
+        assert_eq!(default_effort(&t, "explore"), "low");
+        let bare: Value = "[default]\ncandidates = [\"pi:x\"]\n"
+            .parse::<toml::Table>()
+            .unwrap()
+            .into();
+        assert_eq!(default_effort(&bare, "plan"), "medium");
+        // The repo's default table names an effort on every candidate or class.
+        let shipped: Value = DEFAULT_ROUTING.parse::<toml::Table>().unwrap().into();
+        for (class, body) in shipped["classes"].as_table().unwrap() {
+            for candidate in body["candidates"].as_array().unwrap() {
+                let candidate = candidate.as_str().unwrap();
+                let route = parse(candidate).unwrap();
+                assert!(
+                    route.effort.is_some() || body.get("effort").is_some(),
+                    "{class}: {candidate} has no effort"
+                );
+            }
+        }
     }
 
     #[test]
