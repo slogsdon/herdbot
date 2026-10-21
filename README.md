@@ -81,9 +81,11 @@ herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/
 <slug>/BOT.md         # instructions; overwritten by Grok sync when source = "grok"
 <slug>/BOT.local.md   # local additions, appended, never overwritten
 <slug>/memory/  skills/
+<slug>/turns.jsonl    # main-agent prompt/reply pairs, from turn hooks
 .state/<slug>.json    # workspace_id, root_pane, agent, route
-.state/launch/<agent>.md / .mcp.json   # instructions and MCP config handed to the harness
+.state/launch/<agent>.md / .mcp.json / .settings.json   # instructions, MCP config and hook settings handed to the harness
 .state/cooldown/<harness>.json         # set when a harness hits a quota or auth limit
+.state/events/<agent>.jsonl            # hook events waiting for the daemon (see Turn hooks)
 .state/rooms/<slug>.json               # the daemon's routing state for the room
 .state/fm/            schemas handed to fm
 .state/daemon.log     # daemon output when it runs as the launchd service
@@ -110,7 +112,7 @@ A prompt sent to a busy agent steers its current turn, and the answer it was wor
 Two known limitations:
 
 - While a trust or warning modal is up (codex's first run in a directory, for example), herdr can report the agent as idle. The daemon then types into the modal and the queued item is lost. When `fm` is available, the daemon holds the delivery (up to 8 retries, about 2 min) while fm reads a prompt in the pane, so accepting the modal lets it through. Without fm it is lost as before. I haven't seen this hold fire on a real modal: codex showed no trust prompt in the two fresh directories I tried.
-- Reading a claude pane's history once returned text without the latest reply, and it left the pane scrolled up. Harvesting and quota detection read panes the same way, so claude's quota detection is unverified. Only cursor's has been seen working on a real limit so far.
+- Reading a claude pane's history once returned text without the latest reply, and it left the pane scrolled up. Claude subagent results no longer depend on that read, since they come from the Stop hook (see [Turn hooks](#turn-hooks)). Quota detection still reads the pane, so claude's quota detection is unverified. Only cursor's has been seen working on a real limit so far.
 
 ### Subagent lifecycle
 
@@ -121,9 +123,9 @@ Two known limitations:
 5. `task` returns the run id once the agent has taken the task, usually within a few seconds. Tool calls never wait on a subagent, because harness tool timeouts are short.
 6. The run finishes one of four ways:
    - **`report_result`** marks the run done and queues `[subagent <id> "<desc>" finished]` with the result for the parent.
-   - **No report.** If the agent is idle more than 20 s after it started, the daemon sends the parent its last 60 lines instead. It only judges a run once the route is recorded, so a slow start isn't mistaken for a finished turn.
+   - **No report.** The daemon sends the parent the harness's own last reply, from its turn-end hook (claude `Stop`, codex `notify`, pi `agent_end`). It falls back to the last 60 pane lines only for a harness without a hook, or when a hooked agent has settled for 5 s with no hook event. The pane fallback also waits until the agent has been idle more than 20 s after it started. It only judges a run once the route is recorded, so a slow start isn't mistaken for a finished turn. Each run records its source in `result_source`: `report`, `hook` or `tail`.
    - **Exited.** If the agent is gone more than 90 s after start, the parent gets a failure notice.
-   - **`blocked`.** The parent is told once that the subagent is waiting on an approval in pane P.
+   - **`blocked`.** The parent is told once that the subagent is waiting on an approval in pane P. Both sources are live: a harness hook block and herdr's `blocked` status can each raise it, whichever comes first, and the once-only flag dedupes them. Live, only claude's `PermissionRequest` produced a hook block; codex has no hook source for it.
 7. The daemon closes a finished run's pane once the agent settles. `check_subagent` and `stop_subagent` cover everything else.
 8. Approvals stay with each harness's normal behaviour, with no `--yolo`. Only herdbot's own tools are pre-approved, through `--allowedTools mcp__herdbot` for claude and `default_tools_approval_mode="approve"` for codex. I haven't tested whether cursor asks for each tool call under `--approve-mcps`.
 
@@ -163,6 +165,25 @@ Approvals: `[approvals] mode = "auto"` in `herdbot.toml`, or `approvals = "auto"
 herdr rejects agent arguments it can't quote safely (newlines trigger `invalid_agent_argument`), so prompts and MCP config are passed as files.
 
 pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, enables built-in MCP and code mode and registers its server through its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers. Built-in MCP also reads `~/.pi/agent/mcp.json`. Code mode exposes enabled servers there to bot scripts, including the global `radius` and `rea` servers; a global server set to `"exposure": "direct"` is declared directly.
+
+### Turn hooks
+
+Each harness's own hook reports two things to herdbot: a finished turn with its reply, and a block waiting on you. Live on 2026-10-20, claude, codex and pi subagent runs each reached `done` with `result_source: hook`.
+
+| Harness | Turn end (reply) | Blocked | Installed by |
+|---|---|---|---|
+| claude | `Stop`, reply from `last_assistant_message` | `PermissionRequest` (seen live). `Notification` for permission or input is wired but not seen live | `--settings .state/launch/<agent>.settings.json` |
+| codex | `notify` `agent-turn-complete`, reply from `last-assistant-message` | none. `approval-requested` never reached `notify` in a live capture, so herdr's status is used | `-c notify=[<herdbot>, hook, codex]` |
+| pi | `agent_end`, reply from the last assistant text | `ui_prompt_start` is wired but not seen live | `herdbot-pi.ts`, which pipes each event to `herdbot hook pi` |
+
+cursor-agent is not wired: herdbot installs no hook for it, so its results come from the pane fallback.
+
+- `herdbot hook` always exits 0 and prints nothing. Its own errors go to `.state/events/hook-errors.log`. Each payload becomes at most one line in `.state/events/<agent>.jsonl`, which the daemon drains on each tick. Text is capped at 64 KB, keeping the head and tail.
+- codex side turns are filtered. Codex sends `agent-turn-complete` for its own title-generation turn too, and herdbot skips those.
+- codex: herdbot's hook re-runs your own `notify` from `~/.codex/config.toml` with the same payload appended, detached. Whether that chained notify still receives its payload is not checked live.
+- claude's `--settings` hooks stack with your own. Checked live with one user `Stop` hook, which ran alongside herdbot's. Your `~/.claude/settings.json` is never edited.
+- Main-agent turns are logged to `<slug>/turns.jsonl` as `{at, prompt, reply}`. `prompt` is the text the daemon last delivered, or `null` if you typed into the pane. Not checked live: no `turns.jsonl` line had been written when this was documented.
+- With `approvals = "auto"`, a blocked event is rarely reachable, because the harness seldom asks for approval.
 
 ### Routing
 
