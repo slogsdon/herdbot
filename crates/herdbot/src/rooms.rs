@@ -358,6 +358,16 @@ pub fn delivery_prompt(slug: &str, room: &Room, entries: &[Option<Entry>], d: &D
     })
 }
 
+pub fn check_member(room: &Room, bot: &str, in_run: bool) -> std::result::Result<(), String> {
+    if in_run {
+        return Err("rooms are for a bot's main agent, not subagent runs".into());
+    }
+    if !room.members.iter().any(|m| m == bot) {
+        return Err(format!("{bot} is not a member of {:?}", room.name));
+    }
+    Ok(())
+}
+
 /// One daemon pass over every room.
 pub fn tick(now: i64) -> Result<()> {
     let names: BTreeMap<String, String> = home::list_bots()
@@ -566,6 +576,14 @@ mod tests {
         // Only its own posts in range: nothing to send.
         let own = Delivery { member: "bob".into(), after: 2, through: 3 };
         assert_eq!(delivery_prompt("crew", &r, &entries, &own), None);
+    }
+
+    #[test]
+    fn only_main_agents_of_members_post() {
+        let r = room(Mode::Channel);
+        assert_eq!(check_member(&r, "ann", false), Ok(()));
+        assert!(check_member(&r, "zed", false).unwrap_err().contains("not a member"));
+        assert!(check_member(&r, "ann", true).unwrap_err().contains("main agent"));
     }
 
     #[test]

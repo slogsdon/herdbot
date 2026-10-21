@@ -56,6 +56,21 @@ pub fn list(in_run: bool) -> Value {
             "inputSchema": { "type": "object", "required": ["result"], "properties": { "result": { "type": "string" } } }
         }));
     }
+    if !in_run {
+        tools.push(json!({
+            "name": "room_post",
+            "description": "Post to a room you belong to. Members you name with @slug are called on next.",
+            "inputSchema": { "type": "object", "required": ["room", "text"], "properties": {
+                "room": { "type": "string", "description": "Room slug, from the [room <slug> …] header or list_rooms" },
+                "text": { "type": "string" }
+            }}
+        }));
+        tools.push(json!({
+            "name": "list_rooms",
+            "description": "Rooms you belong to, with their mode and members.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }));
+    }
     Value::Array(tools)
 }
 
@@ -64,6 +79,7 @@ pub fn main_preamble(slug: &str, bot: &Bot) -> String {
         "You are the bot \"{name}\" ({title}), running under herdbot in your own herdr workspace.\n\
          - Delegate with the herdbot `task` tool: each subagent gets its own pane and a model routed to the task type. Results come back as messages starting with [subagent <id>].\n\
          - Talk to other bots with `send_to_agent`; their messages reach you as [message from <bot>]. `list_bots` lists them.\n\
+         - Rooms you belong to send messages as [room <slug> …]. Answer with `room_post`; name others with @slug to call on them. `list_rooms` lists your rooms.\n\
          - Scheduled runs arrive as [scheduled: <name>].\n\
          - Your memory lives in {dir}/memory and your skills in {dir}/skills. Read and update them with your file tools.\n\
          Your standing instructions follow.",
@@ -179,6 +195,23 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 home::load_bot(&s)
                     .ok()
                     .map(|b| format!("{s}: {} — {}", b.name, b.title))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")),
+        "room_post" => {
+            let slug = arg(args, "room")?;
+            let room = crate::rooms::load_room(slug)?;
+            crate::rooms::check_member(&room, &ctx.bot, ctx.run.is_some())?;
+            crate::rooms::append(slug, &ctx.bot, arg(args, "text")?)?;
+            Ok(format!("posted to {slug}"))
+        }
+        "list_rooms" => Ok(crate::rooms::list_rooms()
+            .into_iter()
+            .filter_map(|s| {
+                crate::rooms::load_room(&s)
+                    .ok()
+                    .filter(|r| r.members.contains(&ctx.bot))
+                    .map(|r| format!("{s}: {} ({:?}): {}", r.name, r.mode, r.members.join(", ")))
             })
             .collect::<Vec<_>>()
             .join("\n")),
