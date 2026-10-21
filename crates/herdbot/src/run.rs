@@ -205,17 +205,20 @@ async fn start(
     herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
         .await?;
+    // The launch turn's READY is not conversation: `consume_events` drops the turn end this
+    // marker marks. Only memory bots log turns, so only they mark, and every launch clears
+    // an older mark first: a recycle or failover relaunch must not swallow a real turn.
+    let ready = home::root().join(".state").join("launch").join(format!("{agent}.ready"));
+    let _ = std::fs::remove_file(&ready);
+    if bot.memory && launch.preamble_prompt.is_some() && task.is_none() {
+        let _ = std::fs::write(&ready, home::now().to_string());
+    }
     // One prompt only: a second prompt while the first turn runs steers it (verified with pi).
     let first = match (launch.preamble_prompt, task) {
         (Some(pre), Some(task)) => Some(format!("{pre}\n\n---\n\n{task}")),
-        (Some(pre), None) => {
-            // The launch turn's READY is not conversation: consume_events skips the reply it marks.
-            let marker = home::root().join(".state").join("launch").join(format!("{agent}.ready"));
-            let _ = std::fs::write(&marker, "");
-            Some(format!(
-                "{pre}\n\nThese are standing instructions, not a task. Reply READY and wait for messages."
-            ))
-        }
+        (Some(pre), None) => Some(format!(
+            "{pre}\n\nThese are standing instructions, not a task. Reply READY and wait for messages."
+        )),
         (None, task) => task.map(str::to_owned),
     };
     if let Some(text) = first {

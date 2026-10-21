@@ -17,6 +17,9 @@ const DELIVERY_COOLDOWN: i64 = 15;
 /// A run counts as finished-without-report once its agent is idle/done this long after start.
 const HARVEST_AFTER: i64 = 20;
 const STARTUP_GRACE: i64 = 90;
+/// How long after launch a launch turn's `READY` may still arrive. A marker older than this
+/// means that turn end was lost, so it must no longer swallow a real turn.
+const LAUNCH_READY_SECS: i64 = 600;
 
 /// One daemon at a time: the memory files have a single writer (OptChat spec §2's method).
 fn take_lock() -> Result<std::os::unix::net::UnixListener> {
@@ -180,6 +183,40 @@ async fn flush_queues(
     Ok(())
 }
 
+/// `.state/launch/<agent>.ready`, written by `run::start` when a launch's first prompt asks
+/// for `READY` (memory bots only): that turn end is instructions, not conversation.
+fn launch_marker(agent: &str) -> std::path::PathBuf {
+    home::root()
+        .join(".state")
+        .join("launch")
+        .join(format!("{agent}.ready"))
+}
+
+fn marker_time(path: &std::path::Path) -> Option<i64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// Whether a turn end is that launch turn. The marker decides, never the presence of a
+/// pending delivery: the daemon can deliver a queued question before it consumes the
+/// `READY` event, and pairing READY with that question loses the question's own turn.
+fn launch_ready(marker_at: Option<i64>, event_at: i64) -> bool {
+    marker_at.is_some_and(|at| at <= event_at && event_at - at <= LAUNCH_READY_SECS)
+}
+
+/// The turn a main agent's event appends to `turns.jsonl`: the pending prompt, if any.
+/// `None` for the launch turn's `READY`, whose delivery (if one had landed) stays pending.
+fn turn_to_log(
+    mains: &mut MainAgents,
+    agent: &str,
+    marker_at: Option<i64>,
+    event_at: i64,
+) -> Option<Option<String>> {
+    if launch_ready(marker_at, event_at) {
+        return None;
+    }
+    Some(mains.delivered.remove(agent))
+}
+
 /// Drain `.state/events/*.jsonl` (written by `herdbot hook`) into runs, parents and turn logs.
 async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
     let dir = hook::events_dir();
@@ -232,10 +269,10 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                 }
                 hook::Action::Defer => deferred.push(line.to_owned()),
                 hook::Action::LogTurn(reply) => {
-                    let prompt = mains.delivered.remove(&event.agent);
-                    let marker = home::root().join(".state").join("launch").join(format!("{}.ready", event.agent));
-                    let launch_reply = prompt.is_none() && fs::remove_file(&marker).is_ok();
-                    if !launch_reply {
+                    let marker = launch_marker(&event.agent);
+                    let mark = marker_time(&marker);
+                    let _ = fs::remove_file(&marker);
+                    if let Some(prompt) = turn_to_log(mains, &event.agent, mark, event.at) {
                         hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
                     }
                 }
@@ -514,7 +551,39 @@ fn fire_schedules(last_fired: &mut HashMap<String, i64>, started: i64) -> Result
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn launch_ready_is_not_a_turn_even_with_a_delivery_pending() {
+        // Live bug: a queued question was delivered in the same tick as the READY turn end,
+        // so `delivered` held a prompt. The old `prompt.is_none()` guard then logged READY
+        // paired with that question and consumed its prompt for good.
+        let mut mains = MainAgents::default();
+        mains
+            .delivered
+            .insert("mem-test".into(), "what next?".into());
+        assert_eq!(turn_to_log(&mut mains, "mem-test", Some(100), 104), None);
+        assert_eq!(
+            mains.delivered.get("mem-test").map(String::as_str),
+            Some("what next?"),
+            "the delivery must stay pending for the reply it belongs to"
+        );
+        // A mark whose turn end never came, an unreadable one, and no mark at all: log.
+        let mut stale = MainAgents::default();
+        assert_eq!(
+            turn_to_log(&mut stale, "mem-test", Some(100), 100 + LAUNCH_READY_SECS + 1),
+            Some(None)
+        );
+        assert_eq!(turn_to_log(&mut stale, "mem-test", None, 104), Some(None));
+        let mut fresh = MainAgents::default();
+        fresh.delivered.insert("mem-test".into(), "q".into());
+        assert_eq!(
+            turn_to_log(&mut fresh, "mem-test", Some(104), 100),
+            Some(Some("q".into())),
+            "a mark written after the event (clock skew) is not the launch turn"
+        );
+    }
 
     #[test]
     fn cron_next_occurrence() {
