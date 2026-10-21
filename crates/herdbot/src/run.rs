@@ -12,6 +12,10 @@ pub fn main_agent(slug: &str) -> String {
     slug.to_owned()
 }
 
+fn marks_launch_ready(has_preamble: bool, is_main_agent: bool) -> bool {
+    has_preamble && is_main_agent
+}
+
 async fn agent_alive(herdr: &Client, name: &str) -> bool {
     herdr.agent_get(name).await.is_ok()
 }
@@ -207,11 +211,11 @@ async fn start(
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
         .await?;
     // The launch turn's READY is not conversation: `consume_events` drops the turn end this
-    // marker marks. Only memory bots log turns, so only they mark, and every launch clears
-    // an older mark first: a recycle or failover relaunch must not swallow a real turn.
+    // marker marks. Every launch clears an older mark first, so a relaunch without a READY
+    // prompt must not swallow a real turn.
     let ready = home::root().join(".state").join("launch").join(format!("{agent}.ready"));
     let _ = std::fs::remove_file(&ready);
-    if bot.memory && launch.preamble_prompt.is_some() && task.is_none() {
+    if marks_launch_ready(launch.preamble_prompt.is_some(), task.is_none()) {
         let _ = std::fs::write(&ready, home::now().to_string());
     }
     // One prompt only: a second prompt while the first turn runs steers it (verified with pi).
@@ -358,7 +362,14 @@ pub async fn tail(herdr: &Client, agent: &str, lines: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::prompt_taken;
+    use super::{marks_launch_ready, prompt_taken};
+
+    #[test]
+    fn launch_ready_marker_requires_ready_prompt_for_main_agent() {
+        assert!(marks_launch_ready(true, true)); // includes non-memory bots
+        assert!(!marks_launch_ready(false, true));
+        assert!(!marks_launch_ready(true, false));
+    }
 
     #[test]
     fn prompt_taken_when_status_leaves_idle() {

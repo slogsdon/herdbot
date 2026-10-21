@@ -184,7 +184,7 @@ async fn flush_queues(
 }
 
 /// `.state/launch/<agent>.ready`, written by `run::start` when a launch's first prompt asks
-/// for `READY` (memory bots only): that turn end is instructions, not conversation.
+/// for `READY`: that turn end is instructions, not conversation.
 fn launch_marker(agent: &str) -> std::path::PathBuf {
     home::root()
         .join(".state")

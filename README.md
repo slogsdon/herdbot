@@ -187,6 +187,7 @@ cursor-agent is wired via `<cwd>/.cursor/hooks.json` from verified captures; the
 - codex: herdbot's hook re-runs your own `notify` from `~/.codex/config.toml` with the same payload appended, detached. Whether that chained notify still receives its payload is not checked live.
 - claude's `--settings` hooks stack with your own. Checked live with one user `Stop` hook, which ran alongside herdbot's. Your `~/.claude/settings.json` is never edited.
 - Main-agent turns are logged to `<slug>/turns.jsonl` as `{at, prompt, reply}`. `prompt` is the text the daemon last delivered, or `null` if you typed into the pane. Not checked live: no `turns.jsonl` line had been written when this was documented.
+- A launch preamble that asks a main agent to reply `READY` is skipped in the turn log; launches without that prompt (for example, pi and claude) are not marked.
 - With `approvals = "auto"`, a blocked event is rarely reachable, because the harness seldom asks for approval.
 
 ### Memory
