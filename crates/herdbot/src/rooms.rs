@@ -465,6 +465,39 @@ mod tests {
     }
 
     #[test]
+    fn moderated_relays_through_the_moderator() {
+        let mut r = room(Mode::Moderated); // moderator ann
+        r.member_cooldown_secs = 0;
+        let (d, _, st) = route(&r, &names(), State::default(), &[e("you", "@bob what do you think", 1)], 1, 1);
+        assert_eq!(called(&d), ["ann"]);
+        let (d, _, st) = route(&r, &names(), st, &[e("ann", "@bob your turn", 2)], 2, 2);
+        assert_eq!(called(&d), ["bob"]);
+        let (d, _, _) = route(&r, &names(), st, &[e("bob", "@cy here", 3)], 3, 3);
+        assert_eq!(called(&d), ["ann"]);
+    }
+
+    #[test]
+    fn missing_members_are_reported_once_and_skipped() {
+        let mut r = room(Mode::Channel);
+        r.member_cooldown_secs = 0;
+        let mut gone = names();
+        gone.remove("cy");
+        let (d, n, st) = route(&r, &gone, State::default(), &[e("you", "@cy @bob", 1)], 1, 1);
+        assert_eq!(called(&d), ["bob"]);
+        assert_eq!(n, ["[herdbot: cy is not a bot any more; skipped]"]);
+        let (_, n, _) = route(&r, &gone, st, &[e("you", "@cy?", 2)], 2, 2);
+        assert!(n.is_empty());
+        // round_robin skips them in the order.
+        let mut rr = room(Mode::RoundRobin);
+        rr.member_cooldown_secs = 0;
+        let mut no_ann = names();
+        no_ann.remove("ann");
+        let (d, n, _) = route(&rr, &no_ann, State::default(), &[e("you", "go", 1)], 1, 1);
+        assert_eq!(called(&d), ["bob"]);
+        assert_eq!(n, ["[herdbot: ann is not a bot any more; skipped]"]);
+    }
+
+    #[test]
     fn room_toml_defaults_and_validation() {
         let room = parse_room("name = \"Crew\"\nmembers = [\"ann\", \"bob\"]\n").unwrap();
         assert_eq!(room.mode, Mode::Channel);
