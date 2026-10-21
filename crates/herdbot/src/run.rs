@@ -284,6 +284,8 @@ pub async fn spawn(
         pane_closed: false,
         notified_blocked: false,
         prompt: prompt.to_owned(),
+        result_source: String::new(),
+        settled_at: None,
     };
     home::save_run(&run)?;
     let task = format!(

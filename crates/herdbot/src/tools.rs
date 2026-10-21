@@ -224,6 +224,7 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             let result = arg(args, "result")?.to_owned();
             run.status = "done".into();
             run.result = Some(result.clone());
+            run.result_source = "report".into();
             home::save_run(&run)?;
             home::enqueue(
                 &run.parent_agent,

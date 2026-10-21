@@ -10,6 +10,14 @@ use crate::home::{self, Result};
 
 const MAX_TEXT: usize = 64 * 1024;
 
+/// Seconds a hooked run may sit settled before the daemon falls back to the pane tail.
+pub const HOOK_GRACE: i64 = 5;
+
+/// Harnesses whose launch installs a hook (see route::launch). Others use the pane tail.
+pub fn installed(harness: &str) -> bool {
+    matches!(harness, "claude" | "codex" | "pi")
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub at: i64,
@@ -146,6 +154,53 @@ pub fn append_event(event: &Event) -> Result<()> {
         .append(true)
         .open(events_dir().join(format!("{}.jsonl", event.agent)))?;
     file.write_all(format!("{}\n", serde_json::to_string(event)?).as_bytes())?;
+    Ok(())
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Action {
+    /// A run's turn ended without report_result: finish it with this reply.
+    FinishRun(String),
+    BlockRun(String),
+    /// Not yet decidable (the run's route is not recorded): keep the event for a later tick.
+    Defer,
+    /// A main agent's reply, for `<slug>/turns.jsonl`.
+    LogTurn(String),
+    LogBlocked(String),
+    Ignore,
+    /// No run and no bot by that name.
+    Drop,
+}
+
+pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
+    let text = || event.text.clone().unwrap_or_default();
+    let reason = || event.reason.clone().unwrap_or_default();
+    match (run, event.kind.as_str()) {
+        (Some(r), _) if r.pane_closed || r.status != "running" => Action::Ignore,
+        (Some(r), _) if r.route.is_empty() => Action::Defer,
+        (Some(_), "turn_end") => Action::FinishRun(text()),
+        (Some(r), "blocked") if !r.notified_blocked => Action::BlockRun(reason()),
+        (Some(_), _) => Action::Ignore,
+        (None, "turn_end") if is_main => Action::LogTurn(text()),
+        (None, "blocked") if is_main => Action::LogBlocked(reason()),
+        (None, _) if is_main => Action::Ignore,
+        (None, _) => Action::Drop,
+    }
+}
+
+/// Whether the tail harvest may run: always for unhooked harnesses, else after HOOK_GRACE.
+pub fn grace_over(harness: &str, settled_at: Option<i64>, now: i64) -> bool {
+    !installed(harness) || settled_at.is_some_and(|t| now - t >= HOOK_GRACE)
+}
+
+/// `<slug>/turns.jsonl`: one line per main-agent turn, the input OptChat memory builds on.
+pub fn append_turn(slug: &str, at: i64, prompt: Option<&str>, reply: &str) -> Result<()> {
+    let line = serde_json::json!({ "at": at, "prompt": prompt, "reply": reply });
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(home::bot_dir(slug).join("turns.jsonl"))?;
+    file.write_all(format!("{line}\n").as_bytes())?;
     Ok(())
 }
 
@@ -307,5 +362,75 @@ mod tests {
             Some(vec!["/Apps/Sky Client".into(), "turn-ended".into()])
         );
         assert_eq!(codex_notify("model = \"x\"\n"), None);
+    }
+
+    fn event(kind: &str) -> Event {
+        Event {
+            at: 1,
+            agent: "b-r1".into(),
+            kind: kind.into(),
+            text: Some("reply".into()),
+            reason: Some("Bash: ls".into()),
+            harness: "claude".into(),
+        }
+    }
+
+    fn running() -> home::Run {
+        home::Run {
+            status: "running".into(),
+            route: "claude:claude-sonnet-5-5".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn decides_for_runs() {
+        assert_eq!(
+            decide(&event("turn_end"), Some(&running()), false),
+            Action::FinishRun("reply".into())
+        );
+        assert_eq!(
+            decide(&event("blocked"), Some(&running()), false),
+            Action::BlockRun("Bash: ls".into())
+        );
+        let told = home::Run {
+            notified_blocked: true,
+            ..running()
+        };
+        assert_eq!(decide(&event("blocked"), Some(&told), false), Action::Ignore);
+        let done = home::Run {
+            status: "done".into(),
+            ..running()
+        };
+        assert_eq!(decide(&event("turn_end"), Some(&done), false), Action::Ignore);
+        let starting = home::Run {
+            route: String::new(),
+            ..running()
+        };
+        assert_eq!(
+            decide(&event("turn_end"), Some(&starting), false),
+            Action::Defer
+        );
+    }
+
+    #[test]
+    fn decides_for_main_agents_and_strangers() {
+        assert_eq!(
+            decide(&event("turn_end"), None, true),
+            Action::LogTurn("reply".into())
+        );
+        assert_eq!(
+            decide(&event("blocked"), None, true),
+            Action::LogBlocked("Bash: ls".into())
+        );
+        assert_eq!(decide(&event("turn_end"), None, false), Action::Drop);
+    }
+
+    #[test]
+    fn grace_only_for_hooked_harnesses() {
+        assert!(grace_over("cursor", None, 100));
+        assert!(!grace_over("claude", None, 100));
+        assert!(!grace_over("claude", Some(97), 100));
+        assert!(grace_over("claude", Some(95), 100));
     }
 }

@@ -198,7 +198,7 @@ pub fn clear_state(slug: &str) {
     let _ = fs::remove_file(sub(".state").join(format!("{slug}.json")));
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Run {
     pub id: String,
     pub bot: String,
@@ -221,6 +221,13 @@ pub struct Run {
     /// The task as given, so a run can be re-queued on another route.
     #[serde(default)]
     pub prompt: String,
+    /// Where `result` came from: "report" (report_result), "hook" (the harness's turn-end
+    /// hook) or "tail" (pane text). Empty for runs from before hooks.
+    #[serde(default)]
+    pub result_source: String,
+    /// When the daemon first saw the agent settled; cleared while it works.
+    #[serde(default)]
+    pub settled_at: Option<i64>,
 }
 
 pub fn run_path(id: &str) -> PathBuf {

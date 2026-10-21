@@ -9,7 +9,7 @@ use std::time::Duration;
 use herdr_client::Client;
 
 use crate::home::{self, Result, Run};
-use crate::{cooldown, fm, grok, rooms, run};
+use crate::{cooldown, fm, grok, hook, rooms, run};
 
 const TICK: Duration = Duration::from_secs(2);
 /// After a delivery, give the agent this long to pick it up before delivering again.
@@ -34,6 +34,9 @@ pub async fn run() -> Result<()> {
     loop {
         if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains, &mut held).await {
             eprintln!("queue: {e}");
+        }
+        if let Err(e) = consume_events(&herdr, &mut mains).await {
+            eprintln!("events: {e}");
         }
         if let Err(e) = watch_runs(&herdr).await {
             eprintln!("runs: {e}");
@@ -68,6 +71,9 @@ struct MainAgents {
     /// Last text delivered: re-queued on the new route if that turn hit a quota or auth
     /// failure. Text typed straight into the pane is not seen here.
     prompt: HashMap<String, String>,
+    /// Last text delivered, kept until that turn's reply is logged (`prompt` above is
+    /// consumed by quota failover, so turn pairing needs its own copy).
+    delivered: HashMap<String, String>,
 }
 
 async fn flush_queues(
@@ -137,9 +143,87 @@ async fn flush_queues(
             // delivery as the start of a turn for `watch_bots`.
             if home::load_state(&agent).is_some() {
                 mains.status.insert(agent.clone(), "working".into());
-                mains.prompt.insert(agent.clone(), text);
+                mains.prompt.insert(agent.clone(), text.clone());
+                mains.delivered.insert(agent.clone(), text);
             }
             println!("delivered {} message(s) to {agent}", texts.len());
+        }
+        fs::remove_file(taken)?;
+    }
+    Ok(())
+}
+
+/// Drain `.state/events/*.jsonl` (written by `herdbot hook`) into runs, parents and turn logs.
+async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
+    let dir = hook::events_dir();
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        // Rename first so events written while we work land in a fresh file.
+        let taken = path.with_extension("taking");
+        fs::rename(&path, &taken)?;
+        let mut deferred = Vec::new();
+        for line in fs::read_to_string(&taken)?.lines() {
+            let Ok(event) = serde_json::from_str::<hook::Event>(line) else {
+                eprintln!("events: skipped malformed line in {}", taken.display());
+                continue;
+            };
+            let run = home::list_runs().into_iter().find(|r| r.agent == event.agent);
+            let is_main = home::load_state(&event.agent).is_some();
+            match hook::decide(&event, run.as_ref(), is_main) {
+                hook::Action::FinishRun(text) => {
+                    let mut r = run.expect("decide only finishes known runs");
+                    r.status = "done".into();
+                    r.result = Some(text.clone());
+                    r.result_source = "hook".into();
+                    home::enqueue(
+                        &r.parent_agent,
+                        &format!("[subagent {} \"{}\" finished]\n{text}", r.id, r.description),
+                    )?;
+                    home::save_run(&r)?;
+                    println!("run {} done (hook)", r.id);
+                }
+                hook::Action::BlockRun(reason) => {
+                    let mut r = run.expect("decide only blocks known runs");
+                    let tail = run::tail(herdr, &r.agent, 60).await;
+                    if !requeue_if_cooled(herdr, &mut r, &tail).await? {
+                        home::enqueue(
+                            &r.parent_agent,
+                            &format!(
+                                "[subagent {} \"{}\" is blocked]\nIt is waiting for an approval in herdr pane {} ({reason}). Shane must answer it there.",
+                                r.id, r.description, r.pane
+                            ),
+                        )?;
+                        r.notified_blocked = true;
+                    }
+                    home::save_run(&r)?;
+                }
+                hook::Action::Defer => deferred.push(line.to_owned()),
+                hook::Action::LogTurn(reply) => {
+                    let prompt = mains.delivered.remove(&event.agent);
+                    hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
+                }
+                hook::Action::LogBlocked(reason) => println!("blocked {}: {reason}", event.agent),
+                hook::Action::Ignore => {}
+                hook::Action::Drop => {
+                    eprintln!("events: dropping event for unknown agent {}", event.agent)
+                }
+            }
+        }
+        if !deferred.is_empty() {
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)?;
+            std::io::Write::write_all(
+                &mut file,
+                format!("{}\n", deferred.join("\n")).as_bytes(),
+            )?;
         }
         fs::remove_file(taken)?;
     }
@@ -156,6 +240,20 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
         // agent is still starting (agent_start alone can take 60 s), not finished.
         let settled = matches!(status.as_deref(), Some("idle") | Some("done"))
             && !r.route.is_empty();
+        let now = home::now();
+        match (settled, r.settled_at) {
+            (true, None) => {
+                r.settled_at = Some(now);
+                home::save_run(&r)?;
+            }
+            (false, Some(_)) => {
+                r.settled_at = None;
+                home::save_run(&r)?;
+            }
+            _ => {}
+        }
+        let harness = r.route.split(':').next().unwrap_or_default().to_owned();
+        let grace_over = hook::grace_over(&harness, r.settled_at, now);
         match (r.status.as_str(), status.as_deref()) {
             // agent.get fails until launch completes (agent_start allows 60s), so only a
             // missing agent past that window counts as an exit.
@@ -185,7 +283,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                     r.notified_blocked = true;
                 }
             }
-            ("running", _) if settled && home::now() - r.started_at > HARVEST_AFTER => {
+            ("running", _) if settled && grace_over && now - r.started_at > HARVEST_AFTER => {
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if requeue_if_cooled(herdr, &mut r, &text).await? {
                     home::save_run(&r)?;
@@ -194,6 +292,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                 // Finished its turn without calling report_result: hand back what it printed.
                 r.status = "done".into();
                 r.result = Some(text.clone());
+                r.result_source = "tail".into();
                 home::enqueue(
                     &r.parent_agent,
                     &format!(
