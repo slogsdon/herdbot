@@ -25,7 +25,7 @@ const USAGE: &str = "usage:
   herdbot up <bot> | down <bot>
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
   herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
-  herdbot room send <room> <text…> | room list
+  herdbot room send <room> <text…> | room list | room up <room>
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
   herdbot route <class> [--bot BOT]      show which harness:model a class resolves to
   herdbot mcp --bot BOT [--run ID]       stdio MCP server (launched by harnesses)
@@ -229,6 +229,33 @@ async fn cli() -> Result<()> {
                             room.members.join(",")
                         );
                     }
+                }
+                "up" => {
+                    let slug = args.first().ok_or(USAGE)?.clone();
+                    let room = rooms::load_room(&slug)?;
+                    let marker = home::root()
+                        .join(".state")
+                        .join("rooms")
+                        .join(format!("{slug}.workspace"));
+                    if let Ok(id) = std::fs::read_to_string(&marker)
+                        && herdr
+                            .call("workspace.get", serde_json::json!({ "workspace_id": id.trim() }))
+                            .await
+                            .is_ok()
+                    {
+                        println!("room {slug} already open in workspace {}", id.trim());
+                        return Ok(());
+                    }
+                    let dir = rooms::room_dir(&slug);
+                    let created = herdr
+                        .workspace_create(&format!("💬 {}", room.name), &dir.to_string_lossy(), serde_json::json!({}))
+                        .await?;
+                    let id = created["workspace"]["workspace_id"].as_str().ok_or("workspace.create: no id")?;
+                    let pane = created["root_pane"]["pane_id"].as_str().ok_or("workspace.create: no pane")?;
+                    herdr.pane_run(pane, "tail -n 50 -f transcript.md").await?;
+                    std::fs::create_dir_all(marker.parent().unwrap())?;
+                    std::fs::write(&marker, id)?;
+                    println!("room {slug} in workspace {id}");
                 }
                 _ => return Err(USAGE.into()),
             }

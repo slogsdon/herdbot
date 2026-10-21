@@ -15,8 +15,9 @@ This is early, and it's macOS only for now (the daemon runs under launchd). What
 - routing across claude, codex and pi, plus failover when a harness hits a quota or auth limit
 - a one-way import of the Grok Bot roster
 - herdbot working on its own repo through a `herdbot-dev` bot
+- rooms (group bots) with channel, round-robin and moderated turn-taking, verified live on 2026-10-20
 
-Not built yet: rooms (group bots), importing Grok Bot's schedules and skills (they aren't stored on disk), computer use through [cua](https://cua.ai), and the desktop UI. cursor-agent launches, but its tools haven't been seen working end to end.
+Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk), computer use through [cua](https://cua.ai), and the desktop UI. cursor-agent launches, but its tools haven't been seen working end to end.
 
 ## Requirements
 
@@ -42,6 +43,7 @@ Other commands:
 ```
 herdbot list | runs                    bots and subagent runs
 herdbot up <bot> | down <bot>          start or stop a bot's workspace
+herdbot room new | send | list | up    group conversations between bots and you
 herdbot task <bot> <class> <prompt…>   start a subagent from the shell
 herdbot route <class> [--bot BOT]      which harness:model a task class resolves to
 herdbot import-grok                    import the Grok Bot roster once
@@ -82,10 +84,13 @@ herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/
 .state/<slug>.json    # workspace_id, root_pane, agent, route
 .state/launch/<agent>.md / .mcp.json   # instructions and MCP config handed to the harness
 .state/cooldown/<harness>.json         # set when a harness hits a quota or auth limit
+.state/rooms/<slug>.json               # the daemon's routing state for the room
 .state/fm/            schemas handed to fm
 .state/daemon.log     # daemon output when it runs as the launchd service
 .runs/<id>.json       # one subagent run
 .queue/<agent>.jsonl  # prompts waiting for that agent to be idle
+rooms/<slug>/room.toml                 # a room: members, mode, limits (see rooms.rs)
+rooms/<slug>/transcript.jsonl / .md    # the conversation (append-only) and its rendering
 ```
 
 A bot's instructions are a short herdbot preamble followed by `BOT.md` and `BOT.local.md`. claude gets them through `--append-system-prompt-file` and pi through `--append-system-prompt`. codex and cursor have no flag I could verify, so they get the instructions as their first prompt.
@@ -125,6 +130,22 @@ Two known limitations:
 ### Bot tools
 
 `task`, `check_subagent`, `stop_subagent`, `send_to_agent{bot, message}` and `list_bots`. Subagent runs also get `report_result`. `send_to_agent` queues `[message from <bot>] …` for the target bot, bringing it up if needed, and replies come back the same way.
+
+Main agents also get `room_post{room, text}` and `list_rooms`: a bot can post to rooms it belongs to, and room messages reach it as `[room <slug> …]`.
+
+### Rooms
+
+Rooms are group conversations between you and any number of bots. Each room has its own folder under `~/Bots/rooms/<slug>/` with a `room.toml`, an append-only `transcript.jsonl`, and a rendered `transcript.md`.
+
+Turn-taking modes:
+
+- `channel` (default): members speak only when named, either with `@<slug>` or by their display name as a whole word. A message that names nobody calls nobody.
+- `round_robin`: each message from you starts a round in which every member speaks once, in order.
+- `moderated`: everything goes to the moderator; the moderator names who speaks next.
+
+Limits: `max_turns` defaults to 6 bot posts in a row before the room pauses until you post again; `member_cooldown_secs` defaults to 30 seconds before a member can be called again; `turn_timeout_secs` defaults to 300 seconds for round-robin turns.
+
+Members answer from their own main agents using the `room_post` tool. `herdbot room up <room>` opens a workspace that tails `transcript.md`, and a future desktop UI would read the same file.
 
 ### Harness launch
 
@@ -179,12 +200,11 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 
 **Schedules, skills and memory aren't on disk.** Grok Bot keeps them server-side, so they'll have to come from an exported bot template or from asking each bot to list its routines. herdbot doesn't call Grok Bot's private API.
 
-**Running both apps at once** works because imported schedules start disabled, so a routine never fires in both. Turn a schedule on in herdbot only after you've turned it off in Grok Bot. Group bots (rooms) are skipped for now.
+**Running both apps at once** works because imported schedules start disabled, so a routine never fires in both. Turn a schedule on in herdbot only after you've turned it off in Grok Bot. Grok Bot's group bots aren't imported. Make the room with `herdbot room new`.
 
 ## Roadmap
 
 - **Computer use through cua.** The plan is to route the `computer_use` class to a claude subagent whose MCP config runs `cua-driver mcp` on the chosen machine over SSH (`ssh -T user@host cua-driver mcp`). cua Spaces (Lume macOS VMs) are the alternative. `herdr --machine` can also run whole bots on another host.
-- **Rooms**, meaning group bots that take turns.
 - **Schedule and skill import** from Grok Bot templates.
 - **A desktop UI that feels native to the Mac.** Federico Viticci's early look at his "Apple Bots" app sets a good bar: a global quick-entry window for messaging any bot, a menu bar item, and split views with one agent per pane. For herdbot that means a hotkey that queues a message to a bot, and a menu bar item showing which bots are up, which subagents are running, which harnesses are cooling down, and anything `blocked` and waiting on you. Blocked approvals should become notifications you can act on. The UI only reads the same files and calls the same herdr socket, so it can be built in either [gpui-kit](https://github.com/longbridge/gpui-kit) or SwiftUI. gpui-kit 0.8.0 builds on Zed snapshots that break their API, so it would be pinned to a git rev.
 - **pi code mode: verified on pi 1.2.0 (2026-10-20).** Three unisolated `deepseek-v4-flash` runs called `list_bots` from scripts and exited 0 in 5.48, 6.25, and 9.80 seconds; `kimi-k2.7-code` also passed in 13.08 seconds. Disabling global `rea` was unnecessary. Code mode is enabled; model-generated script errors were recovered within the gate.
