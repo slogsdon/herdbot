@@ -7,6 +7,7 @@ mod grok;
 mod home;
 mod hook;
 mod mcp;
+mod memory;
 mod rooms;
 mod route;
 mod run;
