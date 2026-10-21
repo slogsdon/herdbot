@@ -245,12 +245,19 @@ pub fn launch(
         "claude" => {
             let mcp_file = dir.join(format!("{agent}.mcp.json"));
             std::fs::write(&mcp_file, serde_json::to_vec_pretty(&mcp)?)?;
+            let settings_file = dir.join(format!("{agent}.settings.json"));
+            std::fs::write(
+                &settings_file,
+                serde_json::to_vec_pretty(&claude_hook_settings(&exe))?,
+            )?;
             // Pre-allow herdbot's own tools only; everything else keeps claude's normal approvals.
             let mut args = vec![
                 s("--model"),
                 route.model.clone(),
                 s("--mcp-config"),
                 mcp_file.to_string_lossy().into_owned(),
+                s("--settings"),
+                settings_file.to_string_lossy().into_owned(),
                 s("--allowedTools"),
                 s("mcp__herdbot"),
             ];
@@ -285,6 +292,8 @@ pub fn launch(
                 // Pre-approve herdbot's own tools only (claude gets the same via --allowedTools).
                 s("-c"),
                 s("mcp_servers.herdbot.default_tools_approval_mode=\"approve\""),
+                s("-c"),
+                codex_notify_arg(&exe),
             ];
             if let Some(e) = effort {
                 args.extend([s("-c"), format!("model_reasoning_effort={e}")]);
@@ -339,6 +348,19 @@ pub fn launch(
         }
         other => return Err(format!("unknown harness {other}").into()),
     })
+}
+
+/// claude `--settings` content adding herdbot's hooks. claude runs `command` through a shell,
+/// so the exe path is single-quoted.
+fn claude_hook_settings(exe: &str) -> serde_json::Value {
+    let command = format!("'{}' hook claude", exe.replace('\'', r"'\''"));
+    let entry = serde_json::json!([{ "hooks": [{ "type": "command", "command": command }] }]);
+    serde_json::json!({ "hooks": { "Stop": entry, "PermissionRequest": entry, "Notification": entry } })
+}
+
+/// codex `-c` override: herdbot's hook as notify (it chains Shane's own notify itself).
+fn codex_notify_arg(exe: &str) -> String {
+    format!("notify={}", serde_json::json!([exe, "hook", "codex"]))
 }
 
 /// pi's argv. --no-extensions stops user extensions from swapping the model or failing over
@@ -476,6 +498,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn hook_wiring() {
+        let s = claude_hook_settings("/Users/x/My Tools/herdbot");
+        let cmd = s["hooks"]["Stop"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(cmd, "'/Users/x/My Tools/herdbot' hook claude");
+        assert_eq!(
+            s["hooks"]["PermissionRequest"][0]["hooks"][0]["type"],
+            "command"
+        );
+        assert!(s["hooks"].get("Notification").is_some());
+        assert_eq!(
+            codex_notify_arg("/Users/x/herdbot"),
+            r#"notify=["/Users/x/herdbot","hook","codex"]"#
+        );
     }
 
     #[test]
