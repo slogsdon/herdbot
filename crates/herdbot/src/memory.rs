@@ -6,8 +6,13 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::HashMap;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+use crate::home::{self, Result};
 
 pub const NODE: usize = 512;
 pub const TRIES: usize = 5;
@@ -218,6 +223,74 @@ impl Mem {
         out.push_str("</chat>");
         out
     }
+
+    /// Where a node's compactor context ends: before message i for level 0 (the message itself
+    /// comes whole in the step), through its last message for a merge.
+    pub fn job_end((l, i): Key) -> usize {
+        if l == 0 { i } else { (i + 1) << l }
+    }
+
+    /// The compactor's context: bare view lines (no ids, newlines flattened) of the parts that
+    /// end at or before `end`. Unbuilt parts are left out; rule 3 means there are none before a
+    /// due node anyway.
+    pub fn context_lines(&self, end: usize) -> Vec<String> {
+        self.view
+            .iter()
+            .filter(|&&k| span(k).0 + span(k).1 <= end)
+            .filter_map(|k| self.tree.get(k).map(|t| flat(t)))
+            .collect()
+    }
+
+    /// One job for a compactor. The first job of a run carries the whole context; later ones
+    /// carry only the context lines that changed since the previous job.
+    pub fn job_prompt(&self, (l, i): Key, context: &[String], first: bool) -> String {
+        let context = if first {
+            format!("<chat>\n{}\n</chat>\n\n", context.join("\n"))
+        } else if context.is_empty() {
+            String::new()
+        } else {
+            format!("New lines at the end of <chat> since your last job:\n{}\n\n", context.join("\n"))
+        };
+        let step = if l == 0 {
+            format!("Compress this message into one line, in at most {NODE} bytes:\n{}", self.root[i].line())
+        } else {
+            format!(
+                "Merge these two lines into one, in at most {NODE} bytes:\n{}\n{}",
+                flat(&self.tree[&(l - 1, 2 * i)]),
+                flat(&self.tree[&(l - 1, 2 * i + 1)])
+            )
+        };
+        format!(
+            "{context}For scale, this line is exactly {NODE} bytes:\n{SCALE}\n\n{step}\n\nAnswer by calling write_node with the line as text."
+        )
+    }
+
+    /// The spec's zoom: n = 1 gives message id whole; larger n the node's two children.
+    pub fn zoom(&self, id: usize, n: usize) -> String {
+        if n == 0 || !n.is_power_of_two() || !id.is_multiple_of(n) || id + n > self.root.len() {
+            return format!("No line {id}+{n}.");
+        }
+        if n == 1 {
+            return format!("{id}+0|{}", self.root[id].line());
+        }
+        let (l, i) = (n.trailing_zeros(), id / n);
+        [(l - 1, 2 * i), (l - 1, 2 * i + 1)]
+            .iter()
+            .map(|&k| {
+                let (s, c) = span(k);
+                format!("{s}+{c}|{}", self.tree.get(&k).map_or(PLACEHOLDER.to_owned(), |t| flat(t)))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    pub fn date(&self, id: usize) -> String {
+        self.root
+            .get(id)
+            .and_then(|m| chrono::DateTime::from_timestamp(m.date, 0))
+            .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| format!("No message {id}."))
+    }
 }
 
 /// The view as the daemon rebuilds it at load: the stored tree, then every message in order
@@ -229,6 +302,123 @@ pub fn fold(messages: Vec<Message>, nodes: Vec<Node>, budget: usize) -> Mem {
         mem.append(m);
     }
     mem
+}
+
+/// Context lines past the longest prefix the two lists share.
+pub fn delta(prev: &[String], next: &[String]) -> Vec<String> {
+    let common = prev.iter().zip(next).take_while(|(a, b)| a == b).count();
+    next[common..].to_vec()
+}
+
+#[derive(Debug)]
+pub enum Verdict {
+    Accept(String),
+    /// Ask again with this cut-at-limit feedback (spec §4.3).
+    Retry(String),
+    /// An empty line: the node failed.
+    Fail,
+}
+
+pub fn check(tries: &[String]) -> Verdict {
+    let last = tries.last().map(|t| t.trim().to_owned()).unwrap_or_default();
+    if last.is_empty() {
+        return Verdict::Fail;
+    }
+    if last.len() <= NODE {
+        return Verdict::Accept(last);
+    }
+    if tries.len() >= TRIES {
+        let shortest = tries.iter().map(|t| t.trim()).min_by_key(|t| t.len()).unwrap_or_default();
+        return Verdict::Accept(shortest.to_owned());
+    }
+    let mut cut = NODE;
+    while !last.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    Verdict::Retry(format!(
+        "That line is {} bytes; the limit is {NODE}. It must end where it is cut here:\n{}| ← LIMIT",
+        last.len(),
+        &last[..cut]
+    ))
+}
+
+/// One turns.jsonl line (number `t`) → its messages: `user` for the delivered prompt (absent
+/// when typed in the pane), then `talk` for the reply.
+pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Message> {
+    let at = line["at"].as_i64().unwrap_or_default();
+    let mut out = Vec::new();
+    if let Some(prompt) = line["prompt"].as_str() {
+        out.push(Message { t, ..Message::new(next, "user", prompt, at) });
+    }
+    if let Some(reply) = line["reply"].as_str() {
+        out.push(Message { t, ..Message::new(next + out.len(), "talk", reply, at) });
+    }
+    out
+}
+
+/// Messages from `turns.jsonl` not yet in the log. The import position is the last logged
+/// message's turn: after its `talk`, the next turn; after a lone `user` (a crash between the two
+/// appends), that turn's `talk` only.
+pub fn new_messages(mem: &Mem, lines: &[&str]) -> Vec<Message> {
+    let (start, skip_user) = match mem.root.last() {
+        None => (0, false),
+        Some(m) if m.kind == "user" => (m.t, true),
+        Some(m) => (m.t + 1, false),
+    };
+    let mut out: Vec<Message> = Vec::new();
+    for (t, line) in lines.iter().enumerate().skip(start) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let next = mem.root.len() + out.len();
+        let mut messages = turn_messages(&value, next, t);
+        if skip_user && t == start {
+            messages.retain(|m| m.kind == "talk");
+            if let Some(m) = messages.first_mut() {
+                m.i = next;
+            }
+        }
+        out.extend(messages);
+    }
+    out
+}
+
+pub fn should_recycle(session_bytes: usize, budget: usize, status: &str, queue_empty: bool, settled: bool) -> bool {
+    session_bytes > 2 * budget && matches!(status, "idle" | "done") && queue_empty && settled
+}
+
+/// One value per line; a line that does not parse (torn by a crash) is skipped.
+pub fn parse_lines<T: DeserializeOwned>(text: &str) -> Vec<T> {
+    text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
+pub fn chat_dir(slug: &str) -> PathBuf {
+    home::bot_dir(slug).join("chat")
+}
+
+/// Append one line and fsync before returning (spec §2: a crash loses nothing written).
+pub fn append_line<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(format!("{}\n", serde_json::to_string(value)?).as_bytes())?;
+    file.sync_data()?;
+    Ok(())
+}
+
+/// The bot's memory from disk. `repair` (daemon only) adds a missing final newline so the
+/// next append starts its own line; MCP processes load with `repair = false` and never write.
+pub fn load(slug: &str, budget: usize, repair: bool) -> Mem {
+    let read = |name: &str| {
+        let path = chat_dir(slug).join(name);
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        if repair
+            && !text.is_empty()
+            && !text.ends_with('\n')
+            && let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&path)
+        {
+            let _ = f.write_all(b"\n");
+        }
+        text
+    };
+    fold(parse_lines(&read("main.jsonl")), parse_lines(&read("tree.jsonl")), budget)
 }
 
 #[cfg(test)]
@@ -334,5 +524,80 @@ mod tests {
         messages.extend(long(1).into_iter().map(|m| Message { i: 1, ..m }));
         let mem = fold(messages, vec![], 100_000);
         assert_eq!(mem.render(), "<chat>\n0+1|user: m0\n1+1|(not summarized yet: zoom it)\n</chat>");
+    }
+
+    #[test]
+    fn job_prompts_carry_no_ids() {
+        let mut messages = short(1);
+        messages.extend(long(1).into_iter().map(|m| Message { i: 1, ..m }));
+        let mem = fold(messages, vec![], 100_000);
+        let end = Mem::job_end((0, 1));
+        let context = mem.context_lines(end);
+        assert_eq!(context, ["user: m0"]);
+        let first = mem.job_prompt((0, 1), &context, true);
+        assert!(first.starts_with("<chat>\nuser: m0\n</chat>"));
+        assert!(first.contains(SCALE) && first.contains("Compress this message"));
+        assert!(!first.contains("+1|") && !first.contains("0+"));
+        let later = mem.job_prompt((0, 1), &[], false);
+        assert!(!later.contains("<chat>"));
+        assert_eq!(delta(&["a".into(), "b".into()], &["a".into(), "c".into(), "d".into()]), ["c", "d"]);
+    }
+
+    #[test]
+    fn size_enforcement() {
+        assert!(matches!(check(&["short line".into()]), Verdict::Accept(t) if t == "short line"));
+        let Verdict::Retry(reply) = check(&["y".repeat(600)]) else { panic!("over limit retries") };
+        assert!(reply.starts_with("That line is 600 bytes; the limit is 512."));
+        assert!(reply.ends_with("| ← LIMIT"));
+        let tries: Vec<String> = (0..5).map(|k| "y".repeat(600 - k * 20)).collect();
+        assert!(matches!(check(&tries), Verdict::Accept(t) if t.len() == 520));
+        assert!(matches!(check(&["  ".into()]), Verdict::Fail));
+    }
+
+    #[test]
+    fn zoom_and_date() {
+        let mem = fold(short(2), vec![], 1000);
+        assert_eq!(mem.zoom(0, 1), "0+0|user: m0");
+        assert_eq!(mem.zoom(0, 2), "0+1|user: m0\n1+1|talk: m1");
+        assert_eq!(mem.zoom(1, 2), "No line 1+2.");
+        assert_eq!(mem.zoom(0, 3), "No line 0+3.");
+        assert_eq!(mem.zoom(4, 1), "No line 4+1.");
+        assert!(mem.date(0).starts_with("19") || mem.date(0).starts_with("20")); // epoch 0, local zone
+        assert_eq!(mem.date(9), "No message 9.");
+    }
+
+    #[test]
+    fn imports_turns_and_decides_recycles() {
+        let both = serde_json::json!({"at": 5, "prompt": "hi", "reply": "yo"});
+        let m = turn_messages(&both, 3, 7);
+        assert_eq!((m[0].i, m[0].kind.as_str(), m[1].i, m[1].kind.as_str()), (3, "user", 4, "talk"));
+        assert_eq!(m[0].size, "user: hi".len());
+        assert_eq!((m[0].t, m[1].t), (7, 7));
+        let typed = serde_json::json!({"at": 5, "prompt": null, "reply": "yo"});
+        assert_eq!(turn_messages(&typed, 0, 0).len(), 1);
+        assert!(should_recycle(129, 64, "idle", true, true));
+        assert!(!should_recycle(128, 64, "idle", true, true));
+        assert!(!should_recycle(129, 64, "working", true, true));
+        assert!(!should_recycle(129, 64, "idle", false, true));
+        assert!(!should_recycle(129, 64, "done", true, false));
+        let lines: Vec<Message> = parse_lines("{\"i\":0,\"kind\":\"user\",\"text\":\"a\",\"size\":7,\"date\":0}\n{\"i\":1,\"ki");
+        assert_eq!(lines.len(), 1); // torn last line skipped
+    }
+
+    #[test]
+    fn importing_twice_is_a_no_op() {
+        let turns = [r#"{"at":1,"prompt":"a","reply":"b"}"#, r#"{"at":2,"prompt":null,"reply":"c"}"#];
+        let mut mem = Mem::new(1000);
+        let first = new_messages(&mem, &turns);
+        assert_eq!(first.iter().map(|m| (m.i, m.kind.as_str(), m.t)).collect::<Vec<_>>(), [(0, "user", 0), (1, "talk", 0), (2, "talk", 1)]);
+        for m in first {
+            mem.append(m);
+        }
+        assert!(new_messages(&mem, &turns).is_empty());
+        // A crash after logging only turn 0's prompt: only its reply is imported next time.
+        let mut partial = Mem::new(1000);
+        partial.append(new_messages(&partial, &turns[..1]).remove(0));
+        let rest = new_messages(&partial, &turns);
+        assert_eq!(rest.iter().map(|m| (m.i, m.kind.as_str(), m.t)).collect::<Vec<_>>(), [(1, "talk", 0), (2, "talk", 1)]);
     }
 }
