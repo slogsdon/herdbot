@@ -307,7 +307,6 @@ pub fn paths_rewrites() -> BTreeMap<String, String> {
 
 /// `[cua]` in herdbot.toml: where computer_use subagents reach cua-driver. No host means this
 /// Mac; `command` defaults to `cua-driver` on PATH.
-#[allow(dead_code)] // Task 2 wires this config into computer_use launches.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct Cua {
     #[serde(default)]
@@ -316,7 +315,6 @@ pub struct Cua {
     pub command: Option<String>,
 }
 
-#[allow(dead_code)] // Task 2 wires this parser into computer_use launches.
 pub fn parse_cua(text: &str) -> Cua {
     #[derive(Deserialize, Default)]
     struct Config {
@@ -326,7 +324,6 @@ pub fn parse_cua(text: &str) -> Cua {
     toml::from_str::<Config>(text).unwrap_or_default().cua
 }
 
-#[allow(dead_code)] // Task 2 wires this config into computer_use launches.
 pub fn cua_config() -> Cua {
     parse_cua(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default())
 }

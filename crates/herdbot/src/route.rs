@@ -217,6 +217,7 @@ pub struct Launch {
 ///
 /// herdr rejects agent args it cannot quote safely for the shell (newlines, for one), so
 /// instructions and MCP config go in files under `.state/launch/` named after `agent`.
+#[allow(clippy::too_many_arguments)]
 pub fn launch(
     table: &Value,
     route: &Route,
@@ -225,6 +226,7 @@ pub fn launch(
     tool_args: &[String],
     cwd: &str,
     approvals: home::Approvals,
+    class: &str,
 ) -> Result<Launch> {
     let exe = std::env::current_exe()?.to_string_lossy().into_owned();
     let mcp_args: Vec<String> = std::iter::once("mcp".to_owned())
@@ -233,7 +235,8 @@ pub fn launch(
     // Harnesses may not pass the pane environment to MCP servers (codex does not), so the
     // home directory travels in the server config.
     let home_dir = home::root().to_string_lossy().into_owned();
-    let mcp = mcp_config(&exe, &mcp_args, &home_dir, None);
+    let cua = cua_for(class, &route.harness)?.then(|| cua_server(&home::cua_config()));
+    let mcp = mcp_config(&exe, &mcp_args, &home_dir, cua);
     let dir = home::root().join(".state").join("launch");
     std::fs::create_dir_all(&dir)?;
     let prompt_file = dir.join(format!("{agent}.md"));
@@ -350,8 +353,19 @@ pub fn launch(
     })
 }
 
+/// Whether this launch gets cua. computer_use on another harness is an error rather than a
+/// subagent that silently has no way to see the screen.
+fn cua_for(class: &str, harness: &str) -> std::result::Result<bool, String> {
+    match (class_key(class) == "computer_use", harness) {
+        (false, _) => Ok(false),
+        (true, "claude") => Ok(true),
+        (true, other) => Err(format!(
+            "computer_use runs on claude only (cua is wired for claude), not {other}"
+        )),
+    }
+}
+
 /// cua-driver's stdio MCP server, locally or through `ssh -T` (no tty, so stdio stays clean).
-#[allow(dead_code)] // Task 2 wires this entry into computer_use launches.
 pub fn cua_server(cua: &home::Cua) -> serde_json::Value {
     let command = cua.command.clone().unwrap_or_else(|| "cua-driver".into());
     match &cua.host {
@@ -438,6 +452,18 @@ fn pi_extension() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_claude_takes_computer_use() {
+        assert_eq!(cua_for("computer_use", "claude"), Ok(true));
+        assert_eq!(cua_for("code", "claude"), Ok(false));
+        assert_eq!(cua_for("code", "codex"), Ok(false));
+        assert!(
+            cua_for("computer_use", "codex")
+                .unwrap_err()
+                .contains("claude")
+        );
+    }
 
     #[test]
     fn cua_server_local_and_ssh() {
