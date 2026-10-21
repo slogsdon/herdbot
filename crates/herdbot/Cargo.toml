@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+herdbot-core = { path = "../herdbot-core" }
 herdr-client = { path = "../herdr-client" }
 serde.workspace = true
 serde_json.workspace = true

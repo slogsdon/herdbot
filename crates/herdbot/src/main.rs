@@ -1,10 +1,8 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
-mod cooldown;
 mod daemon;
 mod fm;
 mod grok;
-mod home;
 mod hook;
 mod mcp;
 mod memory;
@@ -15,6 +13,7 @@ mod service;
 mod tools;
 
 use herdr_client::Client;
+use herdbot_core::{cooldown, home};
 
 use home::Result;
 

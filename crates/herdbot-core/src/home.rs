@@ -292,6 +292,11 @@ pub fn queue_dir() -> PathBuf {
     sub(".queue")
 }
 
+/// The daemon's single-instance lock; a live daemon accepts connections on it.
+pub fn daemon_lock() -> PathBuf {
+    root().join(".state").join("daemon.lock")
+}
+
 pub fn paths_rewrites() -> BTreeMap<String, String> {
     #[derive(Deserialize, Default)]
     struct Config {
@@ -400,12 +405,12 @@ pub fn approvals(bot: &Bot) -> Approvals {
     }
 }
 
-pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
+pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
 /// Write via rename so concurrent readers never see a half-written file.
-pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
     fs::rename(tmp, path)?;

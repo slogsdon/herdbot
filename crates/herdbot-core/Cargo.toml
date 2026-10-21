@@ -1,0 +1,13 @@
+[package]
+name = "herdbot-core"
+description = "herdbot's on-disk state and the read layer that UIs share"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml = "1"
+chrono = "0.4"

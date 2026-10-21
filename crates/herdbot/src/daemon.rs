@@ -24,7 +24,7 @@ const LAUNCH_READY_SECS: i64 = 600;
 /// One daemon at a time: the memory files have a single writer (OptChat spec §2's method).
 fn take_lock() -> Result<std::os::unix::net::UnixListener> {
     use std::os::unix::net::{UnixListener, UnixStream};
-    let path = home::root().join(".state").join("daemon.lock");
+    let path = home::daemon_lock();
     fs::create_dir_all(path.parent().unwrap())?;
     match UnixListener::bind(&path) {
         Ok(listener) => Ok(listener),

@@ -211,10 +211,21 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "croner",
+ "herdbot-core",
  "herdr-client",
  "serde",
  "serde_json",
  "tokio",
+ "toml",
+]
+
+[[package]]
+name = "herdbot-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
  "toml",
 ]
 
