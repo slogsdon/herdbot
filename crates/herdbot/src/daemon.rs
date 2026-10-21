@@ -1,6 +1,6 @@
-//! One loop, three jobs: deliver queued prompts to idle agents, watch subagent runs, fire
-//! schedules. It also re-imports the Grok Bot roster when that file changes, and cools down
-//! a harness whose agent just hit a subscription quota or auth failure.
+//! One loop, four jobs: deliver queued prompts to idle agents, watch subagent runs, fire
+//! schedules, route room messages. It also re-imports the Grok Bot roster when that file
+//! changes, and cools down a harness whose agent just hit a subscription quota or auth failure.
 
 use std::collections::HashMap;
 use std::fs;
@@ -9,7 +9,7 @@ use std::time::Duration;
 use herdr_client::Client;
 
 use crate::home::{self, Result, Run};
-use crate::{cooldown, fm, grok, run};
+use crate::{cooldown, fm, grok, rooms, run};
 
 const TICK: Duration = Duration::from_secs(2);
 /// After a delivery, give the agent this long to pick it up before delivering again.
@@ -43,6 +43,9 @@ pub async fn run() -> Result<()> {
         }
         if let Err(e) = fire_schedules(&mut last_fired, started) {
             eprintln!("schedules: {e}");
+        }
+        if let Err(e) = rooms::tick(home::now()) {
+            eprintln!("rooms: {e}");
         }
         let mtime = grok::roster_mtime();
         if mtime.is_some() && mtime != roster_seen {

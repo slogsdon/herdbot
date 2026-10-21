@@ -1,8 +1,6 @@
 //! Rooms: group conversations between bots and Shane. Plain files under `rooms/<slug>/`; each
 //! daemon tick routes new transcript lines to members' queues. Design:
 //! docs/superpowers/specs/2026-10-20-rooms-design.md.
-// Until Task 5 wires `tick` into the daemon, routing is only reached from tests.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -341,6 +339,65 @@ pub fn route(
     (deliveries, notices, st)
 }
 
+/// The queued prompt for one delivery: every line in range not written by the member.
+pub fn delivery_prompt(slug: &str, room: &Room, entries: &[Option<Entry>], d: &Delivery) -> Option<String> {
+    let lines: Vec<String> = entries
+        .get(d.after..d.through.min(entries.len()))?
+        .iter()
+        .flatten()
+        .filter(|e| e.speaker != d.member)
+        .map(|e| format!("{}: {}", e.speaker, e.text))
+        .collect();
+    (!lines.is_empty()).then(|| {
+        format!(
+            "[room {slug} \"{}\"]\n{}\n(Reply with room_post room=\"{slug}\". Name members with @slug to bring them in. Members: {}.)",
+            room.name,
+            lines.join("\n"),
+            room.members.join(", ")
+        )
+    })
+}
+
+/// One daemon pass over every room.
+pub fn tick(now: i64) -> Result<()> {
+    let names: BTreeMap<String, String> = home::list_bots()
+        .into_iter()
+        .filter_map(|s| home::load_bot(&s).ok().map(|b| (s, b.name)))
+        .collect();
+    for slug in list_rooms() {
+        let room = match load_room(&slug) {
+            Ok(room) => room,
+            Err(e) => {
+                eprintln!("room {slug}: {e}");
+                continue;
+            }
+        };
+        let entries = read_entries(&slug);
+        let state = load_state(&slug);
+        let start = state.cursor.min(entries.len());
+        let new = &entries[start..];
+        if new.iter().any(Option::is_none) {
+            eprintln!("room {slug}: skipped malformed transcript line(s)");
+        }
+        let (deliveries, notices, state) = route(&room, &names, state, new, start + 1, now);
+        for d in &deliveries {
+            if let Some(text) = delivery_prompt(&slug, &room, &entries, d) {
+                home::enqueue(&crate::run::main_agent(&d.member), &text)?;
+                println!("room {slug}: called {}", d.member);
+            }
+        }
+        for n in &notices {
+            append(&slug, "herdbot", n)?;
+        }
+        // ponytail: state is saved after enqueueing, so a crash in between re-delivers once.
+        save_state(&slug, &state)?;
+        if !new.is_empty() || !notices.is_empty() {
+            fs::write(room_dir(&slug).join("transcript.md"), render_md(&read_entries(&slug)))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +552,20 @@ mod tests {
         let (d, n, _) = route(&rr, &no_ann, State::default(), &[e("you", "go", 1)], 1, 1);
         assert_eq!(called(&d), ["bob"]);
         assert_eq!(n, ["[herdbot: ann is not a bot any more; skipped]"]);
+    }
+
+    #[test]
+    fn delivery_prompt_lists_unseen_lines_from_others() {
+        let r = room(Mode::Channel);
+        let entries = [e("you", "hi @bob", 1), None, e("bob", "earlier", 2), e("cy", "@bob +1", 3)];
+        let d = Delivery { member: "bob".into(), after: 0, through: 4 };
+        assert_eq!(
+            delivery_prompt("crew", &r, &entries, &d).unwrap(),
+            "[room crew \"Crew\"]\nyou: hi @bob\ncy: @bob +1\n(Reply with room_post room=\"crew\". Name members with @slug to bring them in. Members: ann, bob, cy.)"
+        );
+        // Only its own posts in range: nothing to send.
+        let own = Delivery { member: "bob".into(), after: 2, through: 3 };
+        assert_eq!(delivery_prompt("crew", &r, &entries, &own), None);
     }
 
     #[test]
