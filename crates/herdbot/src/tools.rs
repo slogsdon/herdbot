@@ -156,10 +156,12 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
     };
     match name {
         "task" => {
-            let class = args
-                .get("subagent_type")
-                .and_then(Value::as_str)
-                .unwrap_or("default");
+            let named = args.get("subagent_type").and_then(Value::as_str);
+            let picked = match named {
+                Some(_) => None,
+                None => crate::fm::pick_class(arg(args, "description")?, arg(args, "prompt")?).await,
+            };
+            let class = named.or(picked).unwrap_or("default");
             let model = args.get("model").and_then(Value::as_str);
             let run = run::spawn(
                 &herdr,

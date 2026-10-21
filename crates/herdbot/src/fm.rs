@@ -167,6 +167,30 @@ pub fn hold(verdict: Option<&Verdict>, tail: &str, times_held: u32) -> bool {
         && verdict.is_some_and(|v| v.kind == TailKind::Approval && accepted(v, tail))
 }
 
+const CLASSES: &[&str] = &["explore", "shell", "plan", "code", "review", "debug", "research", "media_review", "browser_use", "computer_use", "custom"];
+
+const CLASS_SCHEMA: &str = r#"{
+  "title": "Class", "type": "object", "additionalProperties": false,
+  "required": ["class"], "x-order": ["class"],
+  "properties": { "class": { "type": "string", "description": "explore, shell, plan, code, review, debug, research, media_review, browser_use, computer_use or custom" } }
+}"#;
+
+const CLASS_INSTRUCTIONS: &str = "Pick the task class for a coding-agent subagent. explore: read-only search of files or code. shell: run commands. plan: design an approach. code: write or change code. review: review code or text. debug: find a bug's cause. research: web search and synthesis. media_review: look at images or video. browser_use: drive a web browser. computer_use: drive desktop apps. custom: none of these.";
+
+pub fn parse_class(json: &str) -> Option<&'static str> {
+    let v: Value = serde_json::from_str(json.trim()).ok()?;
+    let wanted = v["class"].as_str()?.trim().to_ascii_lowercase();
+    CLASSES.iter().copied().find(|c| *c == wanted)
+}
+
+/// A class fm picked for a task that named none. Always one of `CLASSES`, or None.
+pub async fn pick_class(description: &str, prompt: &str) -> Option<&'static str> {
+    // The prompt can be long; its start says what the task is.
+    let head: String = prompt.chars().take(2000).collect();
+    let text = format!("{description}\n\n{head}");
+    parse_class(&respond(CLASS_INSTRUCTIONS, "class", CLASS_SCHEMA, &text).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +266,12 @@ mod tests {
         let idle = Verdict { kind: TailKind::Done, line: String::new() };
         assert!(!hold(Some(&idle), tail, 0));
         assert!(!hold(None, tail, 0));
+    }
+
+    #[test]
+    fn class_must_be_known() {
+        assert_eq!(parse_class(r#"{"class": "explore"}"#), Some("explore"));
+        assert_eq!(parse_class(r#"{"class": " Review "}"#), Some("review"));
+        assert_eq!(parse_class(r#"{"class": "watch_video"}"#), None);
     }
 }
