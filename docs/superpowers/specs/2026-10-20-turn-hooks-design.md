@@ -25,18 +25,25 @@ All three stay harness-agnostic. A capability goes behind something every harnes
 - Replacing herdr's agent status for the "idle, so deliver" decision.
 - Tool-call events. OptChat may want them later; no harness-wide hook covers them yet.
 
-## Verified facts (2026-10-20, from installed binaries, not live runs)
+## Verified facts (2026-10-20, from installed binaries; live captures marked)
 
 | Harness | Turn-end hook and reply | Waiting on you | Per-agent config path |
 |---|---|---|---|
-| claude 2.1.304 | `Stop`; the payload has `last_assistant_message`, `transcript_path`, `stop_hook_active` | `PermissionRequest`, `Notification` | `--settings <file-or-json>` |
-| codex 0.163.0 | `notify` program, last argv is JSON with `"type": "agent-turn-complete"`, `last-assistant-message`, `thread-id`, `turn-id` | `approval-requested` (notification type) | `-c notify=[…]` |
+| claude 2.1.304 (live: 2.1.305) | `Stop`; the payload has `last_assistant_message`, `transcript_path`, `stop_hook_active` | `PermissionRequest`, `Notification` | `--settings <file-or-json>` |
+| codex 0.163.0 | `notify` program, last argv is JSON with `"type": "agent-turn-complete"`, `last-assistant-message`, `thread-id`, `turn-id` | `approval-requested` (notification type): **not seen in a live capture** | `-c notify=[…]` |
 | pi 1.2.0 | extension event `agent_end { messages }` | `ui_prompt_start { kind, title }` | `herdbot-pi.ts` (after the pi-MCP plan) |
-| cursor-agent 2026.10.19 | Likely: `hooks.json` with `afterAgentResponse` / `stop` (strings in its bundle); file location and payload unverified | unknown | Likely `<cwd>/.cursor/hooks.json` |
+| cursor-agent 2026.10.19 | Likely: `hooks.json` with `afterAgentResponse` / `stop` (strings in its bundle); file location and payload unverified. Live check skipped by instruction. | unknown | Likely `<cwd>/.cursor/hooks.json` |
 
 Shane's own config, which must keep working:
 - `~/.codex/config.toml` sets `notify = ["…/SkyComputerUseClient", "turn-ended"]`.
 - `~/.claude/settings.json` defines hooks including `Stop` and `PermissionRequest`.
+
+Live captures (2026-10-20; fixtures in `crates/herdbot/fixtures/hooks/`, redacted):
+- claude `Stop` payload keys: `hook_event_name`, `stop_hook_active`, `last_assistant_message`, `transcript_path`, `cwd`, `session_id`, `prompt_id`, `permission_mode`, `effort`, `background_tasks`, `session_crons`, `scratchpad_dir`. Reply `"PONG"`.
+- claude `PermissionRequest` payload keys: `hook_event_name`, `tool_name`, `tool_input` (for Bash, `command` and `description`), `permission_suggestions`, `permission_mode`, `transcript_path`, `cwd`, `session_id`, `prompt_id`, `effort`, `scratchpad_dir`. No `last_assistant_message`.
+- claude `--settings` hooks stack with the user's own hooks. The user's `~/.claude/settings.json` `Stop` hook `berthd hook claude Stop` ran alongside the `--settings` hook; berth's journal logged `agent.finished` for the capture session. The orca `Stop` hook was not checked.
+- codex `notify` fires one `agent-turn-complete` per turn, but also for internal side turns. A title-generation turn (`input-messages` starts with "Generate a concise, single-line task title", `last-assistant-message` is `{"title": "…"}`) fired its own `agent-turn-complete`, with its own `thread-id` (`01a15bdc-31ff…`) that differs from the main turn's (`01a15bdb-a0c3…`). In the approval run it fired while the main turn was still waiting on approval, before any real reply existed. A consumer must not treat every `notify` call as the reply to the user's prompt. Filter on the title prompt, and do not rely on `thread-id` alone, since it may change between versions.
+- codex approval: with `-a on-request -s read-only`, a Bash approval prompt appeared and was denied. No `approval-requested` payload reached `notify`. The denied turn ended with "Conversation interrupted" and emitted no `agent-turn-complete` for the user's turn. That applies to option 3 ("No"), the only deny path exercised; other deny paths are unverified. So `blocked` for codex has no notify source in this version; codex keeps herdr status for blocked.
 
 ## Design
 
@@ -69,8 +76,8 @@ Payload mapping:
 | claude | `hook_event_name: "PermissionRequest"` | `blocked`, `reason` = the tool name plus a short input summary |
 | claude | `Notification` whose message asks for permission or input | `blocked` |
 | claude | `Stop` with `stop_hook_active: true` | none (another hook is continuing the turn) |
-| codex | `type: "agent-turn-complete"` | `turn_end`, `text = last-assistant-message` |
-| codex | `type: "approval-requested"` | `blocked` |
+| codex | `type: "agent-turn-complete"` | `turn_end`, `text = last-assistant-message`. Skip it when `input-messages` starts with the title-generation prompt (live capture): side turns send it too. |
+| codex | `type: "approval-requested"` | `blocked`. Unverified: not seen in a live capture, so no codex `blocked` source is confirmed. |
 | pi | `{event: "agent_end", text}`, which herdbot-pi.ts builds from the last assistant message | `turn_end` |
 | pi | `{event: "ui_prompt_start", title}` | `blocked` |
 | cursor | as found in the live check | `turn_end` / `blocked`, or no hook |
