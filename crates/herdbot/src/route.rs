@@ -322,6 +322,16 @@ pub fn launch(
                 std::fs::create_dir_all(path.parent().unwrap())?;
                 std::fs::write(&path, serde_json::to_vec_pretty(&config)?)?;
             }
+            let hooks_path = std::path::Path::new(cwd).join(".cursor").join("hooks.json");
+            let hooks_config: serde_json::Value = std::fs::read_to_string(&hooks_path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_else(|| serde_json::json!({ "version": 1, "hooks": {} }));
+            let merged_hooks = cursor_hook_config(hooks_config.clone(), &exe);
+            if merged_hooks != hooks_config {
+                std::fs::create_dir_all(hooks_path.parent().unwrap())?;
+                std::fs::write(&hooks_path, serde_json::to_vec_pretty(&merged_hooks)?)?;
+            }
             Launch {
                 kind: "cursor",
                 // --trust: a first run in a new cwd otherwise opens a trust modal that eats the
@@ -390,6 +400,31 @@ pub fn mcp_config(
     config
 }
 
+fn cursor_hook_config(mut config: serde_json::Value, exe: &str) -> serde_json::Value {
+    let hooks = config
+        .as_object_mut()
+        .expect("cursor hooks config is an object")
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks = hooks.as_object_mut().expect("cursor hooks is an object");
+    let entries = hooks
+        .entry("afterAgentResponse")
+        .or_insert_with(|| serde_json::json!([]));
+    let entries = entries
+        .as_array_mut()
+        .expect("cursor afterAgentResponse is an array");
+    if !entries.iter().any(|entry| {
+        entry["command"]
+            .as_str()
+            .is_some_and(|command| command.contains("hook cursor"))
+    }) {
+        entries.push(serde_json::json!({
+            "command": format!("'{}' hook cursor", exe.replace('\'', r"'\''"))
+        }));
+    }
+    config
+}
+
 /// claude `--settings` content adding herdbot's hooks. claude runs `command` through a shell,
 /// so the exe path is single-quoted.
 fn claude_hook_settings(exe: &str) -> serde_json::Value {
@@ -452,6 +487,22 @@ fn pi_extension() -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_hook_config_preserves_and_adds_once() {
+        let user_hook = serde_json::json!({ "command": "user-hook" });
+        let config = serde_json::json!({
+            "version": 1,
+            "hooks": { "afterAgentResponse": [user_hook.clone()] }
+        });
+        let merged = cursor_hook_config(config, "/path/with space/herdbot");
+        assert_eq!(merged["hooks"]["afterAgentResponse"][0], user_hook);
+        assert_eq!(merged["hooks"]["afterAgentResponse"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            cursor_hook_config(merged.clone(), "/path/with space/herdbot"),
+            merged
+        );
+    }
 
     #[test]
     fn only_claude_takes_computer_use() {

@@ -15,7 +15,7 @@ pub const HOOK_GRACE: i64 = 5;
 
 /// Harnesses whose launch installs a hook (see route::launch). Others use the pane tail.
 pub fn installed(harness: &str) -> bool {
-    matches!(harness, "claude" | "codex" | "pi")
+    matches!(harness, "claude" | "codex" | "pi" | "cursor")
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,6 +98,10 @@ pub fn parse_hook(harness: &str, payload: &Value) -> Option<Parsed> {
         "pi" => match str_at(payload, "event") {
             "agent_end" => Some(Parsed::TurnEnd(str_at(payload, "text").to_owned())),
             "ui_prompt_start" => Some(Parsed::Blocked(str_at(payload, "title").to_owned())),
+            _ => None,
+        },
+        "cursor" => match str_at(payload, "hook_event_name") {
+            "afterAgentResponse" => Some(Parsed::TurnEnd(str_at(payload, "text").to_owned())),
             _ => None,
         },
         _ => None,
@@ -341,6 +345,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_cursor() {
+        let payload: serde_json::Value = serde_json::from_str(include_str!(
+            "../fixtures/hooks/cursor-after-response.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            parse_hook("cursor", &payload),
+            Some(Parsed::TurnEnd("PONG".into()))
+        );
+        assert!(installed("cursor"));
+        let stop: serde_json::Value =
+            serde_json::from_str(include_str!("../fixtures/hooks/cursor-stop.json")).unwrap();
+        assert_eq!(parse_hook("cursor", &stop), None);
+    }
+
+    #[test]
     fn caps_long_text_on_char_boundaries() {
         assert_eq!(cap("short"), "short");
         let long = "é".repeat(40_000);
@@ -437,7 +457,8 @@ mod tests {
 
     #[test]
     fn grace_only_for_hooked_harnesses() {
-        assert!(grace_over("cursor", None, 100));
+        assert!(!grace_over("cursor", None, 100));
+        assert!(grace_over("cursor", Some(95), 100));
         assert!(!grace_over("claude", None, 100));
         assert!(!grace_over("claude", Some(97), 100));
         assert!(grace_over("claude", Some(95), 100));

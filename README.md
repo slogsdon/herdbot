@@ -180,7 +180,7 @@ Each harness's own hook reports two things to herdbot: a finished turn with its 
 | codex | `notify` `agent-turn-complete`, reply from `last-assistant-message` | none. `approval-requested` never reached `notify` in a live capture, so herdr's status is used | `-c notify=[<herdbot>, hook, codex]` |
 | pi | `agent_end`, reply from the last assistant text | `ui_prompt_start` is wired but not seen live | `herdbot-pi.ts`, which pipes each event to `herdbot hook pi` |
 
-cursor-agent is not wired: herdbot installs no hook for it, so its results come from the pane fallback.
+cursor-agent is wired via `<cwd>/.cursor/hooks.json` from verified captures; the end-to-end run has not yet been verified live.
 
 - `herdbot hook` always exits 0 and prints nothing. Its own errors go to `.state/events/hook-errors.log`. Each payload becomes at most one line in `.state/events/<agent>.jsonl`, which the daemon drains on each tick. Text is capped at 64 KB, keeping the head and tail.
 - codex side turns are filtered. Codex sends `agent-turn-complete` for its own title-generation turn too, and herdbot skips those.
