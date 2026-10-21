@@ -32,7 +32,7 @@ All three stay harness-agnostic. A capability goes behind something every harnes
 | claude 2.1.304 (live: 2.1.305) | `Stop`; the payload has `last_assistant_message`, `transcript_path`, `stop_hook_active` | `PermissionRequest`, `Notification` | `--settings <file-or-json>` |
 | codex 0.163.0 | `notify` program, last argv is JSON with `"type": "agent-turn-complete"`, `last-assistant-message`, `thread-id`, `turn-id` | `approval-requested` (notification type): **not seen in a live capture** | `-c notify=[…]` |
 | pi 1.2.0 | extension event `agent_end { messages }` | `ui_prompt_start { kind, title }` | `herdbot-pi.ts` (after the pi-MCP plan) |
-| cursor-agent 2026.10.19 | Cursor's installed hook documentation lists `afterAgentResponse` and `stop`; project hooks use `<cwd>/.cursor/hooks.json` with `{"version":1,"hooks":...}`. Live firing and payload remain unverified: a print-mode capture attempt lost its connection before producing a response or hook file. | unknown (approval/block event unverified) | `<cwd>/.cursor/hooks.json` (documented) |
+| cursor-agent 2026.10.19 (verified, interactive pane, model composer-2.5) | `afterAgentResponse` fires with the reply in `text`; `stop` fires with `status: "completed"` and no reply text. Both share `generation_id`, so they correlate. Both fired on the launch turn and on a no-tool "PONG" turn. Multi-tool turns: not tested. Payloads: `crates/herdbot/fixtures/hooks/cursor-after-response.json`, `cursor-stop.json`. | unknown (approval/block event not provoked) | `<cwd>/.cursor/hooks.json` (verified) |
 
 Shane's own config, which must keep working:
 - `~/.codex/config.toml` sets `notify = ["…/SkyComputerUseClient", "turn-ended"]`.
@@ -88,7 +88,7 @@ Payload mapping:
 - **claude:** add `--settings <file>` pointing to `.state/launch/<agent>.settings.json`, which contains only `{"hooks": {"Stop": [...], "PermissionRequest": [...], "Notification": [...]}}`. Each entry runs `<herdbot exe> hook claude`. Your `~/.claude/settings.json` hooks must keep firing, and the live check confirms they stack.
 - **codex:** add `-c notify=["<herdbot exe>","hook","codex"]`.
 - **pi:** `herdbot-pi.ts` subscribes to `agent_end` and `ui_prompt_start`, and pipes the JSON above to `<HERDBOT_EXE> hook pi`.
-- **cursor:** if the live check passes, merge a herdbot entry into `<cwd>/.cursor/hooks.json` the way `mcp.json` is merged today: added once, identity from the pane environment. Otherwise cursor has no hook and uses the pane fallback.
+- **cursor:** the live check passed. Merge a herdbot entry into `<cwd>/.cursor/hooks.json` the way `mcp.json` is merged today: added once, identity from the pane environment. `herdbot up` left an existing `hooks.json` intact. A `command` value with arguments runs correctly.
 
 ### Daemon consumption
 
@@ -134,5 +134,5 @@ Live checks (Task 1 of the plan, recorded in the README):
 - claude: a subagent's `turn_end` arrives with the reply, and your own `Stop` hook still fires.
 - codex: the same, and Codex Computer Use's notify still receives `turn-ended`.
 - pi: the same, after the pi-MCP plan.
-- cursor: find whether `hooks.json` fires and with what payload. Wire it only if it gives the reply.
+- cursor: verified. `afterAgentResponse` carries the reply in `text`, and `stop` fires too (`status: "completed"`, no reply). Approval/block events are still unverified.
 - Each harness: a tool approval produces one `blocked` event.
