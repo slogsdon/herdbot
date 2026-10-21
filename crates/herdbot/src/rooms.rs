@@ -189,9 +189,248 @@ pub fn render_md(entries: &[Option<Entry>]) -> String {
         .collect()
 }
 
+/// A member to prompt with transcript lines `after + 1 ..= through`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Delivery {
+    pub member: String,
+    pub after: usize,
+    pub through: usize,
+}
+
+/// `needle` occurs in `hay` with no word character (alphanumeric, `-`, `_`) on either side.
+fn has_word(hay: &str, needle: &str) -> bool {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '-' || c == '_');
+    !needle.is_empty()
+        && hay.match_indices(needle).any(|(i, _)| {
+            !word(hay[..i].chars().next_back()) && !word(hay[i + needle.len()..].chars().next())
+        })
+}
+
+/// Members named in `text` by `@slug`, or by display name as a whole word, case-insensitive.
+/// Deleted members (absent from `names`) are still found by `@slug`.
+pub fn mentioned(text: &str, members: &[String], names: &BTreeMap<String, String>) -> Vec<String> {
+    let text = text.to_lowercase();
+    members
+        .iter()
+        .filter(|m| {
+            has_word(&text, &format!("@{}", m.to_lowercase()))
+                || names.get(*m).is_some_and(|n| has_word(&text, &n.to_lowercase()))
+        })
+        .cloned()
+        .collect()
+}
+
+fn missing_notice(member: &str) -> String {
+    format!("[herdbot: {member} is not a bot any more; skipped]")
+}
+
+/// round_robin: call the first existing member at or after `from`, or end the round.
+fn start_at(
+    room: &Room,
+    names: &BTreeMap<String, String>,
+    st: &mut State,
+    from: usize,
+    now: i64,
+    notices: &mut Vec<String>,
+) -> Vec<String> {
+    for (i, m) in room.members.iter().enumerate().skip(from) {
+        if names.contains_key(m) {
+            st.round = Some(Round { next: i, called_at: now });
+            return vec![m.clone()];
+        }
+        if st.missing_notified.insert(m.clone()) {
+            notices.push(missing_notice(m));
+        }
+    }
+    st.round = None;
+    Vec::new()
+}
+
+/// Who speaks next. Pure: the daemon reads the files, calls this, then writes notices,
+/// queues prompts and saves the returned state.
+pub fn route(
+    room: &Room,
+    names: &BTreeMap<String, String>,
+    mut st: State,
+    new: &[Option<Entry>],
+    first_seq: usize,
+    now: i64,
+) -> (Vec<Delivery>, Vec<String>, State) {
+    let mut notices = Vec::new();
+    let mut calls: BTreeSet<String> = BTreeSet::new();
+    for entry in new.iter().flatten() {
+        let speaker = entry.speaker.as_str();
+        match speaker {
+            "herdbot" => continue,
+            "you" => {
+                st.bot_turns = 0;
+                st.paused = false;
+            }
+            bot => {
+                st.last_post.insert(bot.to_owned(), entry.at);
+                if st.paused {
+                    continue;
+                }
+                st.bot_turns += 1;
+                if st.bot_turns >= room.max_turns {
+                    st.paused = true;
+                    notices.push(format!(
+                        "[room paused: {} bot turns since your last message. Post to resume.]",
+                        st.bot_turns
+                    ));
+                    continue;
+                }
+            }
+        }
+        let named = || mentioned(&entry.text, &room.members, names);
+        let next: Vec<String> = match room.mode {
+            Mode::Channel => named(),
+            Mode::Moderated => {
+                let moderator = room.moderator.clone().unwrap_or_default();
+                if speaker == moderator { named() } else { vec![moderator] }
+            }
+            Mode::RoundRobin => {
+                let turn = st.round.as_ref().map(|r| r.next);
+                if speaker == "you" {
+                    start_at(room, names, &mut st, 0, now, &mut notices)
+                } else if let Some(i) = turn
+                    && room.members.get(i).is_some_and(|m| m == speaker)
+                {
+                    start_at(room, names, &mut st, i + 1, now, &mut notices)
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        calls.extend(next.into_iter().filter(|m| m != speaker));
+    }
+    if !st.paused
+        && let Some(r) = st.round.clone()
+        && now - r.called_at >= room.turn_timeout_secs
+    {
+        notices.push(format!("[herdbot: {} did not answer]", room.members[r.next]));
+        calls.extend(start_at(room, names, &mut st, r.next + 1, now, &mut notices));
+    }
+    for m in &calls {
+        if !names.contains_key(m) && st.missing_notified.insert(m.clone()) {
+            notices.push(missing_notice(m));
+        }
+    }
+    calls.retain(|m| names.contains_key(m));
+    if !new.is_empty() {
+        st.cursor = first_seq + new.len() - 1;
+    }
+    let through = st.cursor;
+    let due: BTreeSet<String> = calls.into_iter().chain(std::mem::take(&mut st.pending)).collect();
+    let mut deliveries = Vec::new();
+    for m in due {
+        let cooling = st
+            .last_post
+            .get(&m)
+            .is_some_and(|&t| now - t < room.member_cooldown_secs);
+        if cooling {
+            st.pending.insert(m);
+            continue;
+        }
+        let after = st.last_seen.get(&m).copied().unwrap_or(0);
+        if after < through {
+            st.last_seen.insert(m.clone(), through);
+            deliveries.push(Delivery { member: m, after, through });
+        }
+    }
+    (deliveries, notices, st)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn room(mode: Mode) -> Room {
+        Room {
+            name: "Crew".into(),
+            members: vec!["ann".into(), "bob".into(), "cy".into()],
+            mode,
+            moderator: (mode == Mode::Moderated).then(|| "ann".into()),
+            ..Default::default()
+        }
+    }
+
+    fn names() -> BTreeMap<String, String> {
+        [("ann", "Ann"), ("bob", "Bob"), ("cy", "Cy")]
+            .map(|(s, n)| (s.to_owned(), n.to_owned()))
+            .into()
+    }
+
+    fn e(speaker: &str, text: &str, at: i64) -> Option<Entry> {
+        Some(Entry { at, speaker: speaker.into(), text: text.into() })
+    }
+
+    fn called(d: &[Delivery]) -> Vec<&str> {
+        d.iter().map(|d| d.member.as_str()).collect()
+    }
+
+    #[test]
+    fn mentions_are_whole_words() {
+        let m = room(Mode::Channel).members;
+        assert_eq!(mentioned("@bob, and Cy?", &m, &names()), ["bob", "cy"]);
+        assert_eq!(mentioned("ANN please", &m, &names()), ["ann"]);
+        assert!(mentioned("Bobby and email@bobcat", &m, &names()).is_empty());
+        // A deleted member is still named by @slug, so routing can report it.
+        let mut gone = names();
+        gone.remove("cy");
+        assert_eq!(mentioned("@cy", &m, &gone), ["cy"]);
+    }
+
+    #[test]
+    fn channel_calls_named_members_only() {
+        let r = room(Mode::Channel);
+        let (d, n, st) = route(&r, &names(), State::default(), &[e("you", "hi @bob and Cy", 100)], 1, 100);
+        assert_eq!(called(&d), ["bob", "cy"]);
+        assert!(n.is_empty());
+        assert_eq!((d[0].after, d[0].through, st.cursor), (0, 1, 1));
+        // Naming nobody calls nobody.
+        let (d, _, st) = route(&r, &names(), st, &[e("you", "anyone?", 101)], 2, 101);
+        assert!(d.is_empty());
+        assert_eq!(st.cursor, 2);
+        // A speaker never calls itself.
+        let (d, _, _) = route(&r, &names(), st, &[e("bob", "@bob @ann thoughts?", 102)], 3, 102);
+        assert_eq!(called(&d), ["ann"]);
+        assert_eq!((d[0].after, d[0].through), (0, 3));
+    }
+
+    #[test]
+    fn pauses_after_max_turns_until_you_post() {
+        let mut r = room(Mode::Channel);
+        r.max_turns = 2;
+        r.member_cooldown_secs = 0;
+        let new = [e("ann", "@bob", 1), e("bob", "@ann", 2), e("ann", "@bob", 3)];
+        let (d, n, st) = route(&r, &names(), State::default(), &new, 1, 3);
+        // Turn 1 calls bob; turn 2 pauses the room and calls nobody; turn 3 is paused.
+        assert_eq!(called(&d), ["bob"]);
+        assert_eq!(n, ["[room paused: 2 bot turns since your last message. Post to resume.]"]);
+        assert!(st.paused);
+        // The herdbot notice neither counts nor resumes; your message does.
+        let (d, _, st) = route(&r, &names(), st, &[e("herdbot", &n[0], 4), e("you", "go on @ann", 5)], 4, 5);
+        assert!(!st.paused);
+        assert_eq!(st.bot_turns, 0);
+        assert_eq!(called(&d), ["ann"]);
+    }
+
+    #[test]
+    fn cooldown_defers_and_coalesces() {
+        let r = room(Mode::Channel); // 30 s cooldown
+        let new = [e("bob", "done", 100), e("ann", "@bob again", 105)];
+        let (d, _, st) = route(&r, &names(), State::default(), &new, 1, 105);
+        assert!(d.is_empty());
+        assert!(st.pending.contains("bob"));
+        let (d, _, st) = route(&r, &names(), st, &[e("cy", "@bob too", 110)], 3, 110);
+        assert!(d.is_empty());
+        // Cooldown over: one delivery covering everything bob has not seen.
+        let (d, _, st) = route(&r, &names(), st, &[], 4, 131);
+        assert_eq!(called(&d), ["bob"]);
+        assert_eq!((d[0].after, d[0].through), (0, 3));
+        assert!(st.pending.is_empty());
+    }
 
     #[test]
     fn room_toml_defaults_and_validation() {
