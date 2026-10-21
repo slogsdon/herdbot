@@ -433,6 +433,38 @@ mod tests {
     }
 
     #[test]
+    fn round_robin_goes_in_order_once() {
+        let mut r = room(Mode::RoundRobin);
+        r.member_cooldown_secs = 0;
+        let (d, _, st) = route(&r, &names(), State::default(), &[e("you", "topic @cy", 1)], 1, 1);
+        assert_eq!(called(&d), ["ann"]); // names are ignored
+        let (d, _, st) = route(&r, &names(), st, &[e("cy", "jumping in", 2)], 2, 2);
+        assert!(d.is_empty()); // not cy's turn
+        let (d, _, st) = route(&r, &names(), st, &[e("ann", "my take", 3)], 3, 3);
+        assert_eq!(called(&d), ["bob"]);
+        let (d, _, st) = route(&r, &names(), st, &[e("bob", "mine", 4)], 4, 4);
+        assert_eq!(called(&d), ["cy"]);
+        let (d, _, st) = route(&r, &names(), st, &[e("cy", "last", 5)], 5, 5);
+        assert!(d.is_empty());
+        assert_eq!(st.round, None);
+    }
+
+    #[test]
+    fn round_robin_skips_a_silent_member_and_restarts_on_you() {
+        let r = room(Mode::RoundRobin); // 300 s timeout
+        let (_, _, st) = route(&r, &names(), State::default(), &[e("you", "go", 0)], 1, 0);
+        let (d, n, st) = route(&r, &names(), st, &[], 2, 299);
+        assert!(d.is_empty() && n.is_empty());
+        let (d, n, st) = route(&r, &names(), st, &[], 2, 300);
+        assert_eq!(n, ["[herdbot: ann did not answer]"]);
+        assert_eq!(called(&d), ["bob"]);
+        let new = [e("herdbot", "[herdbot: ann did not answer]", 300), e("you", "again", 301)];
+        let (d, _, st) = route(&r, &names(), st, &new, 2, 301);
+        assert_eq!(called(&d), ["ann"]);
+        assert_eq!(st.round.as_ref().unwrap().next, 0);
+    }
+
+    #[test]
     fn room_toml_defaults_and_validation() {
         let room = parse_room("name = \"Crew\"\nmembers = [\"ann\", \"bob\"]\n").unwrap();
         assert_eq!(room.mode, Mode::Channel);
