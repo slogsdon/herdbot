@@ -25,7 +25,7 @@ pub async fn serve(ctx: Ctx) -> Result<()> {
                 "serverInfo": { "name": "herdbot", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tools::list(ctx.run.is_some()) })),
+            "tools/list" => Ok(json!({ "tools": tools::list_for(&ctx) })),
             "tools/call" => {
                 let name = params["name"].as_str().unwrap_or_default();
                 let outcome = tools::call(&ctx, name, &params["arguments"]).await;

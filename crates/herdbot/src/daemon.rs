@@ -206,7 +206,11 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                 hook::Action::Defer => deferred.push(line.to_owned()),
                 hook::Action::LogTurn(reply) => {
                     let prompt = mains.delivered.remove(&event.agent);
-                    hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
+                    let marker = home::root().join(".state").join("launch").join(format!("{}.ready", event.agent));
+                    let launch_reply = prompt.is_none() && fs::remove_file(&marker).is_ok();
+                    if !launch_reply {
+                        hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
+                    }
                 }
                 hook::Action::LogBlocked(reason) => println!("blocked {}: {reason}", event.agent),
                 hook::Action::Ignore => {}
@@ -283,7 +287,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                     r.notified_blocked = true;
                 }
             }
-            ("running", _) if settled && grace_over && now - r.started_at > HARVEST_AFTER => {
+            ("running", _) if settled && grace_over && r.class != "compact" && now - r.started_at > HARVEST_AFTER => {
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if requeue_if_cooled(herdr, &mut r, &text).await? {
                     home::save_run(&r)?;
@@ -335,7 +339,9 @@ async fn requeue_if_cooled(herdr: &Client, r: &mut Run, tail: &str) -> Result<bo
     r.status = "failed".into();
     let _ = herdr.pane_close(&r.pane).await;
     r.pane_closed = true;
-    let note = if r.prompt.is_empty() {
+    let note = if r.class == "compact" {
+        "The memory tick starts a fresh compactor.".to_owned()
+    } else if r.prompt.is_empty() {
         "It predates re-queueing (no stored prompt); start it again if it is still needed."
             .to_owned()
     } else {

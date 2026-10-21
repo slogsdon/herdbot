@@ -178,11 +178,15 @@ async fn start(
     let table = route::table()?;
     let route = route::resolve(&table, class, slug, explicit_model)?;
     let instructions = match run {
-        None => format!(
-            "{}\n\n{}",
-            tools::main_preamble(slug, bot),
-            home::instructions(slug, bot)
-        ),
+        None => {
+            let mut text = format!("{}\n\n{}", tools::main_preamble(slug, bot), home::instructions(slug, bot));
+            if let Some(view) = crate::memory::view_block(slug, bot) {
+                text.push_str("\n\n");
+                text.push_str(&view);
+            }
+            text
+        }
+        Some(_) if class == "compact" => crate::memory::compact_preamble(&bot.name),
         Some(run) => tools::sub_preamble(slug, run),
     };
     let mut tool_args = vec!["--bot".to_owned(), slug.to_owned()];
@@ -204,9 +208,14 @@ async fn start(
     // One prompt only: a second prompt while the first turn runs steers it (verified with pi).
     let first = match (launch.preamble_prompt, task) {
         (Some(pre), Some(task)) => Some(format!("{pre}\n\n---\n\n{task}")),
-        (Some(pre), None) => Some(format!(
-            "{pre}\n\nThese are standing instructions, not a task. Reply READY and wait for messages."
-        )),
+        (Some(pre), None) => {
+            // The launch turn's READY is not conversation: consume_events skips the reply it marks.
+            let marker = home::root().join(".state").join("launch").join(format!("{agent}.ready"));
+            let _ = std::fs::write(&marker, "");
+            Some(format!(
+                "{pre}\n\nThese are standing instructions, not a task. Reply READY and wait for messages."
+            ))
+        }
         (None, task) => task.map(str::to_owned),
     };
     if let Some(text) = first {
@@ -288,9 +297,9 @@ pub async fn spawn(
         settled_at: None,
     };
     home::save_run(&run)?;
-    let task = format!(
+    let task = if class == "compact" { prompt.to_owned() } else { format!(
         "{prompt}\n\n---\nWhen you are done, call the herdbot `report_result` tool once with your complete answer; it is delivered to whoever started you."
-    );
+    ) };
     match start(
         herdr,
         slug,

@@ -2,9 +2,6 @@
 //! of ≤512-byte summaries, and a fixed-size view folded from them. Design:
 //! docs/superpowers/specs/2026-10-20-optchat-memory-design.md. The daemon is the only writer.
 
-// Until the daemon uses memory (Task 4).
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,14 +12,18 @@ use serde::{Deserialize, Serialize};
 use crate::home::{self, Result};
 
 pub const NODE: usize = 512;
+#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const TRIES: usize = 5;
+#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const RETRY_SECS: i64 = 10;
 /// A compactor starts after the log has been quiet this long (or at once for a recycle).
+#[allow(dead_code)] // The daemon tick consumes this in Task 5.
 pub const QUIET_SECS: i64 = 60;
 pub const DEFAULT_VIEW: usize = 64_000;
 const PLACEHOLDER: &str = "(not summarized yet: zoom it)";
 
 /// A realistic summary line of exactly NODE bytes, shown to the compactor for scale.
+#[allow(dead_code)] // Compactor job prompts are sent by the daemon tick in Task 5.
 pub const SCALE: &str = "user: keep the router table in routing.toml, never in code and route explore to cheap models first; talk: moved explore candidates to pi deepseek-v4-flash then claude haiku, kept plan on opus; user: asked why codex lost its first prompt; talk: traced it to the trust modal on first run in a new cwd, fix is --trust for cursor and a resend for codex; user: approved shipping the resend; work: subagent k3x9a1 ran the tests, 13 passed, committed 9b4b9a8; talk: still open: does claude quota text need a date parser";
 
 pub const COMPACT: &str = include_str!("../assets/optchat-compact.md");
@@ -43,6 +44,7 @@ pub struct Message {
 }
 
 impl Message {
+    #[allow(dead_code)] // The daemon tick creates messages in Task 5.
     pub fn new(i: usize, kind: &str, text: &str, date: i64) -> Self {
         Message { i, kind: kind.into(), text: text.into(), size: kind.len() + 2 + text.len(), date, t: 0 }
     }
@@ -137,6 +139,7 @@ impl Mem {
     }
 
     /// A node a compactor built.
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn insert(&mut self, k: Key, text: String) {
         self.tree.insert(k, text);
         let parent = (k.0 + 1, k.1 / 2);
@@ -180,16 +183,19 @@ impl Mem {
     }
 
     /// First message whose view part is unbuilt (the spec's `first`).
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn first_unbuilt(&self) -> usize {
         self.view.iter().find(|&&k| !self.built(k)).map_or(self.root.len(), |&k| span(k).0)
     }
 
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn settled(&self) -> bool {
         self.view.iter().all(|&k| self.built(k))
     }
 
     /// The next node for a compactor, in OptChat's order (spec §4.1 rule 3): unbuilt, its
     /// sources built, everything in the view before its end summarized, not waiting on a retry.
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn due(&self, failed: &HashMap<Key, i64>, now: i64) -> Option<Key> {
         let total = self.root.len();
         let first = self.first_unbuilt();
@@ -226,6 +232,7 @@ impl Mem {
 
     /// Where a node's compactor context ends: before message i for level 0 (the message itself
     /// comes whole in the step), through its last message for a merge.
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn job_end((l, i): Key) -> usize {
         if l == 0 { i } else { (i + 1) << l }
     }
@@ -233,6 +240,7 @@ impl Mem {
     /// The compactor's context: bare view lines (no ids, newlines flattened) of the parts that
     /// end at or before `end`. Unbuilt parts are left out; rule 3 means there are none before a
     /// due node anyway.
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn context_lines(&self, end: usize) -> Vec<String> {
         self.view
             .iter()
@@ -243,6 +251,7 @@ impl Mem {
 
     /// One job for a compactor. The first job of a run carries the whole context; later ones
     /// carry only the context lines that changed since the previous job.
+    #[allow(dead_code)] // The daemon tick uses these operations in Task 5.
     pub fn job_prompt(&self, (l, i): Key, context: &[String], first: bool) -> String {
         let context = if first {
             format!("<chat>\n{}\n</chat>\n\n", context.join("\n"))
@@ -305,11 +314,13 @@ pub fn fold(messages: Vec<Message>, nodes: Vec<Node>, budget: usize) -> Mem {
 }
 
 /// Context lines past the longest prefix the two lists share.
+#[allow(dead_code)] // The daemon tick uses this when starting compactor runs in Task 5.
 pub fn delta(prev: &[String], next: &[String]) -> Vec<String> {
     let common = prev.iter().zip(next).take_while(|(a, b)| a == b).count();
     next[common..].to_vec()
 }
 
+#[allow(dead_code)] // The daemon tick handles compactor replies in Task 5.
 #[derive(Debug)]
 pub enum Verdict {
     Accept(String),
@@ -319,6 +330,7 @@ pub enum Verdict {
     Fail,
 }
 
+#[allow(dead_code)] // The daemon tick handles compactor replies in Task 5.
 pub fn check(tries: &[String]) -> Verdict {
     let last = tries.last().map(|t| t.trim().to_owned()).unwrap_or_default();
     if last.is_empty() {
@@ -344,6 +356,7 @@ pub fn check(tries: &[String]) -> Verdict {
 
 /// One turns.jsonl line (number `t`) → its messages: `user` for the delivered prompt (absent
 /// when typed in the pane), then `talk` for the reply.
+#[allow(dead_code)] // The daemon tick imports turns in Task 5.
 pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Message> {
     let at = line["at"].as_i64().unwrap_or_default();
     let mut out = Vec::new();
@@ -359,6 +372,7 @@ pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Mes
 /// Messages from `turns.jsonl` not yet in the log. The import position is the last logged
 /// message's turn: after its `talk`, the next turn; after a lone `user` (a crash between the two
 /// appends), that turn's `talk` only.
+#[allow(dead_code)] // The daemon tick imports turns in Task 5.
 pub fn new_messages(mem: &Mem, lines: &[&str]) -> Vec<Message> {
     let (start, skip_user) = match mem.root.last() {
         None => (0, false),
@@ -381,6 +395,7 @@ pub fn new_messages(mem: &Mem, lines: &[&str]) -> Vec<Message> {
     out
 }
 
+#[allow(dead_code)] // The daemon tick decides recycling in Task 5.
 pub fn should_recycle(session_bytes: usize, budget: usize, status: &str, queue_empty: bool, settled: bool) -> bool {
     session_bytes > 2 * budget && matches!(status, "idle" | "done") && queue_empty && settled
 }
@@ -419,6 +434,47 @@ pub fn load(slug: &str, budget: usize, repair: bool) -> Mem {
         text
     };
     fold(parse_lines(&read("main.jsonl")), parse_lines(&read("tree.jsonl")), budget)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboxEntry {
+    pub run: String,
+    pub text: String,
+    pub at: i64,
+}
+
+fn inbox_path(slug: &str) -> PathBuf {
+    home::root().join(".state").join("memory").join(format!("{slug}.nodes.jsonl"))
+}
+
+/// write_node, from an MCP process: append only; the daemon validates and builds.
+pub fn push_inbox(slug: &str, run: &str, text: &str) -> Result<()> {
+    append_line(&inbox_path(slug), &InboxEntry { run: run.into(), text: text.into(), at: home::now() })
+}
+
+#[allow(dead_code)] // The daemon tick drains this inbox in Task 5.
+pub fn drain_inbox(slug: &str) -> Result<Vec<InboxEntry>> {
+    let path = inbox_path(slug);
+    let taken = path.with_extension("taking");
+    if std::fs::rename(&path, &taken).is_err() {
+        return Ok(Vec::new());
+    }
+    let entries = parse_lines(&std::fs::read_to_string(&taken)?);
+    std::fs::remove_file(taken)?;
+    Ok(entries)
+}
+
+pub fn budget(bot: &home::Bot) -> usize {
+    bot.memory_view_bytes.unwrap_or(DEFAULT_VIEW)
+}
+
+/// VIEW_DOC and the rendered view, for a memory bot's main-agent instructions.
+pub fn view_block(slug: &str, bot: &home::Bot) -> Option<String> {
+    bot.memory.then(|| format!("{VIEW_DOC}\n\n{}", load(slug, budget(bot), false).render()))
+}
+
+pub fn compact_preamble(bot_name: &str) -> String {
+    COMPACT.replace("{bot}", bot_name)
 }
 
 #[cfg(test)]

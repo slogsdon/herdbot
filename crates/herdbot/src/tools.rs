@@ -74,6 +74,33 @@ pub fn list(in_run: bool) -> Value {
     Value::Array(tools)
 }
 
+/// The tools for this agent: `list`, plus write_node for compactor runs and zoom/date for the
+/// main agent of a memory bot.
+pub fn list_for(ctx: &Ctx) -> Value {
+    let Value::Array(mut tools) = list(ctx.run.is_some()) else { unreachable!() };
+    let class = ctx.run.as_deref().and_then(home::load_run).map(|r| r.class);
+    if class.as_deref() == Some("compact") {
+        tools.push(json!({
+            "name": "write_node",
+            "description": "Deliver the summary line for your current job.",
+            "inputSchema": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } }
+        }));
+    }
+    if ctx.run.is_none() && home::load_bot(&ctx.bot).is_ok_and(|b| b.memory) {
+        tools.push(json!({
+            "name": "zoom",
+            "description": "Open the line id+n of your memory view into the two lines of n/2 under it; n = 1 gives the message whole.",
+            "inputSchema": { "type": "object", "required": ["id", "n"], "properties": { "id": { "type": "integer" }, "n": { "type": "integer" } } }
+        }));
+        tools.push(json!({
+            "name": "date",
+            "description": "The date and time of message id in your memory.",
+            "inputSchema": { "type": "object", "required": ["id"], "properties": { "id": { "type": "integer" } } }
+        }));
+    }
+    Value::Array(tools)
+}
+
 pub fn main_preamble(slug: &str, bot: &Bot) -> String {
     format!(
         "You are the bot \"{name}\" ({title}), running under herdbot in your own herdr workspace.\n\
@@ -234,6 +261,24 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 ),
             )?;
             Ok("delivered. You can stop now.".into())
+        }
+        "write_node" => {
+            let id = ctx.run.as_deref().ok_or("write_node is for compactor runs")?;
+            let run = home::load_run(id).ok_or("unknown run")?;
+            if run.class != "compact" {
+                return Err("write_node is for compactor runs".into());
+            }
+            crate::memory::push_inbox(&run.bot, id, arg(args, "text")?)?;
+            Ok("received".into())
+        }
+        "zoom" | "date" => {
+            let bot = home::load_bot(&ctx.bot)?;
+            if ctx.run.is_some() || !bot.memory {
+                return Err(format!("{name} is for a memory bot's main agent").into());
+            }
+            let mem = crate::memory::load(&ctx.bot, crate::memory::budget(&bot), false);
+            let num = |key: &str| args.get(key).and_then(Value::as_u64).map(|v| v as usize).ok_or(format!("missing integer argument {key:?}"));
+            Ok(if name == "zoom" { mem.zoom(num("id")?, num("n")?) } else { mem.date(num("id")?) })
         }
         other => Err(format!("unknown tool {other}").into()),
     }

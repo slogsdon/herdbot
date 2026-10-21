@@ -178,6 +178,8 @@ pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
     match (run, event.kind.as_str()) {
         (Some(r), _) if r.pane_closed || r.status != "running" => Action::Ignore,
         (Some(r), _) if r.route.is_empty() => Action::Defer,
+        // A compactor answers many jobs in one run; the daemon's memory tick ends it.
+        (Some(r), "turn_end") if r.class == "compact" => Action::Ignore,
         (Some(_), "turn_end") => Action::FinishRun(text()),
         (Some(r), "blocked") if !r.notified_blocked => Action::BlockRun(reason()),
         (Some(_), _) => Action::Ignore,
@@ -411,6 +413,13 @@ mod tests {
             decide(&event("turn_end"), Some(&starting), false),
             Action::Defer
         );
+    }
+
+    #[test]
+    fn compactor_turn_ends_do_not_finish_the_run() {
+        let compact = home::Run { class: "compact".into(), ..running() };
+        assert_eq!(decide(&event("turn_end"), Some(&compact), false), Action::Ignore);
+        assert_eq!(decide(&event("blocked"), Some(&compact), false), Action::BlockRun("Bash: ls".into()));
     }
 
     #[test]
