@@ -16,8 +16,9 @@ This is early, and it's macOS only for now (the daemon runs under launchd). What
 - a one-way import of the Grok Bot roster
 - herdbot working on its own repo through a `herdbot-dev` bot
 - rooms (group bots) with channel, round-robin and moderated turn-taking, verified live on 2026-10-20
+- computer use through cua (local; verified 2026-10-20)
 
-Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk), and the desktop UI. Computer use through [cua](https://cua.ai) is wired but not yet working end to end (see [Computer use](#computer-use)). cursor-agent launches, but its tools haven't been seen working end to end.
+Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk), and the desktop UI. cursor-agent launches, but its tools haven't been seen working end to end.
 
 ## Requirements
 
@@ -225,9 +226,10 @@ cua's tools are not in `--allowedTools`, which stays `mcp__herdbot`. Under the d
 Verified live on 2026-10-20:
 
 - `cua-driver mcp` (0.37.0) answers `initialize` and `tools/list`. The tools include `list_apps`, `get_window_state`, `click` and `press_key`.
-- A `computer_use` run from the shell got the `cua` entry in its MCP config and reached `done`. Its cua calls ran without an approval prompt. Each returned `permissions_pending`, because macOS hadn't granted Accessibility or Screen Recording to CuaDriver, so no app list was returned. The run's pane closed before its launch flags were recorded. The likely cause is `approvals = "auto"` on `herdbot-dev` (Likely: from `route.rs` and `bot.toml`, not from the run's argv).
+- Before the grant, a `computer_use` run returned `permissions_pending` because CuaDriver lacked Accessibility and Screen Recording permissions.
+- After `cua-driver permissions grant` granted Accessibility, Screen Recording and direct capture, a shell `computer_use` run (`0mtevz`, `claude:claude-sonnet-5-5:medium`) listed 17 running apps through `list_apps` and ended `done` with `result_source` `report`. It ran without an approval prompt because `herdbot-dev` has `approvals = "auto"`.
 
-Not verified: the `ask` approval flow end to end, and any remote host. Computer use is not listed as working until a run lists apps.
+Not verified: the `ask` approval flow end to end, and any remote host.
 
 ### Routing
 
