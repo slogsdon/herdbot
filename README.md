@@ -17,7 +17,7 @@ This is early, and it's macOS only for now (the daemon runs under launchd). What
 - herdbot working on its own repo through a `herdbot-dev` bot
 - rooms (group bots) with channel, round-robin and moderated turn-taking, verified live on 2026-10-20
 
-Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk), computer use through [cua](https://cua.ai), and the desktop UI. cursor-agent launches, but its tools haven't been seen working end to end.
+Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk), and the desktop UI. Computer use through [cua](https://cua.ai) is wired but not yet working end to end (see [Computer use](#computer-use)). cursor-agent launches, but its tools haven't been seen working end to end.
 
 ## Requirements
 
@@ -76,7 +76,7 @@ There are two crates. `herdr-client` is an async client for the herdr socket. `h
 
 ```
 routing.toml          # written from the repo default on first use; edit freely
-herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/…"
+herdbot.toml          # [paths] rewrites, e.g. "/workspace/obsidian-vault" = "~/…"; [cua] host/command for computer_use
 <slug>/bot.toml       # name, title, cwd?, class?, source = grok|local, grok_id?, [[schedules]]
 <slug>/BOT.md         # instructions; overwritten by Grok sync when source = "grok"
 <slug>/BOT.local.md   # local additions, appended, never overwritten
@@ -205,6 +205,30 @@ The model comes from OptChat, which grew out of Victor Taelin's [OptMem](https:/
 
 Verified live on 2026-10-20 on a codex-routed bot with a 1,500-byte view: 25 turns (50 log messages) built the tree through four compactor runs that opened and closed `done`, the log showed `memory: recycled mem-test onto …` once the session passed 3,000 logged bytes, the fresh session's instructions carried the `<chat>` view, and the bot answered a question about an early message with two `zoom` calls. At that budget the launch instructions were 4.5 KB; at the 64 KB default the first prompt would be far larger, and whether codex delivers a view that size intact is unverified.
 
+### Computer use
+
+`computer_use` subagents run on claude only. Any other harness for that class fails the run with an error instead of starting without cua. The run's MCP config gets a second server, `cua`, next to `herdbot`:
+
+- No `[cua]` table: `cua-driver mcp` from `PATH`, on this Mac.
+- `[cua] host`: `ssh -T <host> <command> mcp`, on a remote Mac. `command` defaults to `cua-driver`. Set it when the remote shell's `PATH` lacks `~/.local/bin`.
+
+```toml
+[cua]
+host = "user@other-mac.local"
+command = "~/.local/bin/cua-driver"
+```
+
+Each Mac needs cua-driver installed (`/bin/bash -c "$(curl -fsSL https://cua.ai/driver/install.sh)"`) and CuaDriver turned on under Accessibility and Screen & System Audio Recording (`cua-driver permissions grant`, then check with `cua-driver permissions status`). A remote host also needs key auth, so `ssh -T <host> true` runs without a password prompt.
+
+cua's tools are not in `--allowedTools`, which stays `mcp__herdbot`. Under the default `approvals = "ask"`, each cua action should wait for approval in the subagent's pane (from code; not seen live). A bot with `approvals = "auto"` launches claude with `--permission-mode auto`, so its cua actions run without a prompt. `herdbot-dev` is set to `auto` in its `bot.toml`. The parent is told once, when a run first blocks; later approvals in the same run don't notify it again (from code, `notified_blocked`; not seen live).
+
+Verified live on 2026-10-20:
+
+- `cua-driver mcp` (0.37.0) answers `initialize` and `tools/list`. The tools include `list_apps`, `get_window_state`, `click` and `press_key`.
+- A `computer_use` run from the shell got the `cua` entry in its MCP config and reached `done`. Its cua calls ran without an approval prompt. Each returned `permissions_pending`, because macOS hadn't granted Accessibility or Screen Recording to CuaDriver, so no app list was returned. The run's pane closed before its launch flags were recorded. The likely cause is `approvals = "auto"` on `herdbot-dev` (Likely: from `route.rs` and `bot.toml`, not from the run's argv).
+
+Not verified: the `ask` approval flow end to end, and any remote host. Computer use is not listed as working until a run lists apps.
+
 ### Routing
 
 The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in order:
@@ -247,7 +271,6 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 
 ## Roadmap
 
-- **Computer use through cua.** The plan is to route the `computer_use` class to a claude subagent whose MCP config runs `cua-driver mcp` on the chosen machine over SSH (`ssh -T user@host cua-driver mcp`). cua Spaces (Lume macOS VMs) are the alternative. `herdr --machine` can also run whole bots on another host.
 - **Schedule and skill import** from Grok Bot templates.
 - **A desktop UI that feels native to the Mac.** Federico Viticci's early look at his "Apple Bots" app sets a good bar: a global quick-entry window for messaging any bot, a menu bar item, and split views with one agent per pane. For herdbot that means a hotkey that queues a message to a bot, and a menu bar item showing which bots are up, which subagents are running, which harnesses are cooling down, and anything `blocked` and waiting on you. Blocked approvals should become notifications you can act on. The UI only reads the same files and calls the same herdr socket, so it can be built in either [gpui-kit](https://github.com/longbridge/gpui-kit) or SwiftUI. gpui-kit 0.8.0 builds on Zed snapshots that break their API, so it would be pinned to a git rev.
 - **pi code mode: verified on pi 1.2.0 (2026-10-20).** Three unisolated `deepseek-v4-flash` runs called `list_bots` from scripts and exited 0 in 5.48, 6.25, and 9.80 seconds; `kimi-k2.7-code` also passed in 13.08 seconds. Disabling global `rea` was unnecessary. Code mode is enabled; model-generated script errors were recovered within the gate.
