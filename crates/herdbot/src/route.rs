@@ -327,10 +327,13 @@ pub fn launch(
                 .ok()
                 .and_then(|text| serde_json::from_str(&text).ok())
                 .unwrap_or_else(|| serde_json::json!({ "version": 1, "hooks": {} }));
-            let merged_hooks = cursor_hook_config(hooks_config.clone(), &exe);
-            if merged_hooks != hooks_config {
-                std::fs::create_dir_all(hooks_path.parent().unwrap())?;
-                std::fs::write(&hooks_path, serde_json::to_vec_pretty(&merged_hooks)?)?;
+            if let Some(merged_hooks) = cursor_hook_config(hooks_config.clone(), &exe) {
+                if merged_hooks != hooks_config {
+                    std::fs::create_dir_all(hooks_path.parent().unwrap())?;
+                    std::fs::write(&hooks_path, serde_json::to_vec_pretty(&merged_hooks)?)?;
+                }
+            } else {
+                eprintln!("cursor: skipped malformed hooks config {}", hooks_path.display());
             }
             Launch {
                 kind: "cursor",
@@ -400,19 +403,11 @@ pub fn mcp_config(
     config
 }
 
-fn cursor_hook_config(mut config: serde_json::Value, exe: &str) -> serde_json::Value {
-    let hooks = config
-        .as_object_mut()
-        .expect("cursor hooks config is an object")
-        .entry("hooks")
-        .or_insert_with(|| serde_json::json!({}));
-    let hooks = hooks.as_object_mut().expect("cursor hooks is an object");
-    let entries = hooks
-        .entry("afterAgentResponse")
-        .or_insert_with(|| serde_json::json!([]));
-    let entries = entries
-        .as_array_mut()
-        .expect("cursor afterAgentResponse is an array");
+fn cursor_hook_config(mut config: serde_json::Value, exe: &str) -> Option<serde_json::Value> {
+    let hooks = config.as_object_mut()?.entry("hooks").or_insert_with(|| serde_json::json!({}));
+    let hooks = hooks.as_object_mut()?;
+    let entries = hooks.entry("afterAgentResponse").or_insert_with(|| serde_json::json!([]));
+    let entries = entries.as_array_mut()?;
     if !entries.iter().any(|entry| {
         entry["command"]
             .as_str()
@@ -422,7 +417,7 @@ fn cursor_hook_config(mut config: serde_json::Value, exe: &str) -> serde_json::V
             "command": format!("'{}' hook cursor", exe.replace('\'', r"'\''"))
         }));
     }
-    config
+    Some(config)
 }
 
 /// claude `--settings` content adding herdbot's hooks. claude runs `command` through a shell,
@@ -495,13 +490,24 @@ mod tests {
             "version": 1,
             "hooks": { "afterAgentResponse": [user_hook.clone()] }
         });
-        let merged = cursor_hook_config(config, "/path/with space/herdbot");
+        let merged = cursor_hook_config(config, "/path/with space/herdbot").unwrap();
         assert_eq!(merged["hooks"]["afterAgentResponse"][0], user_hook);
         assert_eq!(merged["hooks"]["afterAgentResponse"].as_array().unwrap().len(), 2);
         assert_eq!(
-            cursor_hook_config(merged.clone(), "/path/with space/herdbot"),
+            cursor_hook_config(merged.clone(), "/path/with space/herdbot").unwrap(),
             merged
         );
+    }
+
+    #[test]
+    fn cursor_hook_config_skips_wrong_shapes() {
+        for config in [
+            serde_json::json!([]),
+            serde_json::json!({ "hooks": [] }),
+            serde_json::json!({ "hooks": { "afterAgentResponse": {} } }),
+        ] {
+            assert_eq!(cursor_hook_config(config, "/path/herdbot"), None);
+        }
     }
 
     #[test]
