@@ -6,6 +6,7 @@ mod fm;
 mod grok;
 mod home;
 mod mcp;
+mod rooms;
 mod route;
 mod run;
 mod service;
@@ -23,6 +24,8 @@ const USAGE: &str = "usage:
   herdbot list | runs
   herdbot up <bot> | down <bot>
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
+  herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
+  herdbot room send <room> <text…> | room list
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
   herdbot route <class> [--bot BOT]      show which harness:model a class resolves to
   herdbot mcp --bot BOT [--run ID]       stdio MCP server (launched by harnesses)
@@ -173,6 +176,62 @@ async fn cli() -> Result<()> {
                 "{}",
                 route::resolve(&route::table()?, args.first().ok_or(USAGE)?, &bot, None)?
             );
+            Ok(())
+        }
+        "room" => {
+            if args.is_empty() {
+                return Err(USAGE.into());
+            }
+            let sub = args.remove(0);
+            match sub.as_str() {
+                "new" => {
+                    let members: Vec<String> = flag(&mut args, "--members")
+                        .ok_or(USAGE)?
+                        .split(',')
+                        .map(|m| home::slug(m.trim()))
+                        .collect();
+                    let mode = match flag(&mut args, "--mode").as_deref() {
+                        None | Some("channel") => rooms::Mode::Channel,
+                        Some("round_robin") => rooms::Mode::RoundRobin,
+                        Some("moderated") => rooms::Mode::Moderated,
+                        Some(other) => return Err(format!("unknown mode {other:?}").into()),
+                    };
+                    let moderator = flag(&mut args, "--moderator").map(|m| home::slug(&m));
+                    let name = rest(&args, 0);
+                    if name.is_empty() {
+                        return Err(USAGE.into());
+                    }
+                    let slug = home::slug(&name);
+                    if rooms::room_dir(&slug).join("room.toml").exists() {
+                        return Err(format!("room {slug} already exists").into());
+                    }
+                    let room = rooms::Room { name, members, mode, moderator, ..Default::default() };
+                    rooms::validate(&room, &home::list_bots())?;
+                    rooms::save_room(&slug, &room)?;
+                    std::fs::write(rooms::room_dir(&slug).join("transcript.md"), "")?;
+                    println!("created room {slug} ({:?}, {})", room.mode, room.members.join(", "));
+                }
+                "send" => {
+                    let slug = args.first().ok_or(USAGE)?.clone();
+                    rooms::load_room(&slug)?;
+                    rooms::append(&slug, "you", &rest(&args, 1))?;
+                    println!("posted to {slug} (the daemon routes it)");
+                }
+                "list" => {
+                    for slug in rooms::list_rooms() {
+                        let room = rooms::load_room(&slug)?;
+                        let state = if rooms::load_state(&slug).paused { "paused" } else { "active" };
+                        println!(
+                            "{slug:20} {:24} {:12} {:7} {}",
+                            room.name,
+                            format!("{:?}", room.mode),
+                            state,
+                            room.members.join(",")
+                        );
+                    }
+                }
+                _ => return Err(USAGE.into()),
+            }
             Ok(())
         }
         "mcp" => mcp::serve(ctx(&mut args)?).await,

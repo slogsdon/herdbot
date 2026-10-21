@@ -9,8 +9,11 @@
 //! <slug>/memory/ skills/    the bot's own files
 //! .state/<slug>.json        live herdr ids for the bot
 //! .state/cooldown/<h>.json  harness <h> hit a quota or auth failure; routing skips it until then
+//! .state/rooms/<slug>.json  the daemon's routing state for the room
 //! .runs/<id>.json           one subagent run
 //! .queue/<agent>.jsonl      prompts waiting for <agent> to go idle (daemon flushes)
+//! rooms/<slug>/room.toml    a room: members, mode, limits (see rooms.rs)
+//! rooms/<slug>/transcript.jsonl / .md   the conversation (append-only) and its rendering
 //! ```
 
 use std::collections::BTreeMap;
@@ -335,12 +338,12 @@ pub fn approvals(bot: &Bot) -> Approvals {
     }
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
+pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
 
 /// Write via rename so concurrent readers never see a half-written file.
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
     fs::rename(tmp, path)?;
