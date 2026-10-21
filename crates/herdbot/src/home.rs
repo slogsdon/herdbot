@@ -59,6 +59,12 @@ pub struct Bot {
     pub grok_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<Schedule>,
+    /// OptChat memory (see memory.rs). Off unless set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub memory: bool,
+    /// The memory view's byte budget; memory::DEFAULT_VIEW when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_view_bytes: Option<usize>,
     /// "ask" or "auto"; overrides `[approvals] mode` in herdbot.toml for this bot's agents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approvals: Option<String>,
@@ -299,6 +305,33 @@ pub fn paths_rewrites() -> BTreeMap<String, String> {
         .paths
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    /// Compactor subagents running at once, across all bots.
+    pub max_compactors: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        MemoryConfig { max_compactors: 2 }
+    }
+}
+
+pub fn parse_memory_config(text: &str) -> MemoryConfig {
+    #[derive(Deserialize, Default)]
+    struct Config {
+        #[serde(default)]
+        memory: MemoryConfig,
+    }
+    toml::from_str::<Config>(text).unwrap_or_default().memory
+}
+
+#[allow(dead_code)] // Used by the memory daemon in the next implementation task.
+pub fn memory_config() -> MemoryConfig {
+    parse_memory_config(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default())
+}
+
 /// How a bot's agents handle tool approvals. Auto uses each harness's own automatic review,
 /// never a bypass (route::approval_args).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -360,6 +393,21 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_settings_default_off() {
+        let bot: Bot = toml::from_str("name = \"x\"\n").unwrap();
+        assert!(!bot.memory);
+        assert_eq!(bot.memory_view_bytes, None);
+        let on: Bot = toml::from_str(
+            "name = \"x\"\nmemory = true\nmemory_view_bytes = 32000\n",
+        )
+        .unwrap();
+        assert!(on.memory);
+        assert_eq!(on.memory_view_bytes, Some(32000));
+        assert_eq!(parse_memory_config("").max_compactors, 2);
+        assert_eq!(parse_memory_config("[memory]\nmax_compactors = 1\n").max_compactors, 1);
+    }
 
     #[test]
     fn approvals_default_to_ask_and_bots_override() {

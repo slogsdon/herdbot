@@ -46,6 +46,10 @@ candidates = ["claude:claude-sonnet-5-5:medium"]
 [classes.custom]    # bot-defined subagents; their own `model` field wins if set
 candidates = ["claude:claude-sonnet-5-5:medium", "pi:glm-5.3:medium"]
 
+[classes.compact]   # OptChat memory compactor: cheap and steady; never print mode
+effort = "low"
+candidates = ["pi:deepseek-v4-flash:low", "claude:claude-haiku-5-5", "codex:gpt-6-luna:low"]
+
 # Per-bot overrides, e.g.:
 # [bots.seo-chief]
 # default_harness = "pi"

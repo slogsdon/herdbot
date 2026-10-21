@@ -54,7 +54,7 @@ fn class_key(class: &str) -> &str {
     match class {
         "bash" => "shell",
         "debug" | "explore" | "shell" | "plan" | "code" | "review" | "research"
-        | "media_review" | "browser_use" | "computer_use" | "custom" => class,
+        | "media_review" | "browser_use" | "computer_use" | "custom" | "compact" => class,
         _ => "default",
     }
 }
@@ -470,6 +470,7 @@ mod tests {
         assert_eq!(parse("claude:claude-opus-5-5").unwrap().effort, None);
         assert_eq!(parse("claude"), None);
         assert_eq!(class_key("bash"), "shell");
+        assert_eq!(class_key("compact"), "compact");
         assert_eq!(class_key("watch_video"), "default");
     }
 
