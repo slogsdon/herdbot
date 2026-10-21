@@ -5,6 +5,7 @@ mod daemon;
 mod fm;
 mod grok;
 mod home;
+mod hook;
 mod mcp;
 mod rooms;
 mod route;
@@ -28,6 +29,7 @@ const USAGE: &str = "usage:
   herdbot room send <room> <text…> | room list | room up <room>
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
   herdbot route <class> [--bot BOT]      show which harness:model a class resolves to
+  herdbot hook <claude|codex|pi|cursor> [payload]   a harness hook (installed by launch)
   herdbot mcp --bot BOT [--run ID]       stdio MCP server (launched by harnesses)
   herdbot tool <name> --bot BOT [--run ID] <json>   one tool call, for debugging from a shell";
 
@@ -175,6 +177,13 @@ async fn cli() -> Result<()> {
             println!(
                 "{}",
                 route::resolve(&route::table()?, args.first().ok_or(USAGE)?, &bot, None)?
+            );
+            Ok(())
+        }
+        "hook" => {
+            hook::run(
+                args.first().map(String::as_str).unwrap_or_default(),
+                args.get(1..).unwrap_or_default(),
             );
             Ok(())
         }
