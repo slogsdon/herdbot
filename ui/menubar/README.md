@@ -123,6 +123,23 @@ on the left; rooms name each speaker. A message you sent that the bot has not an
 appears when you are not at the bottom. The header's "Jump to pane" opens the bot's herdr pane, and a banner
 appears when the bot is blocked on you. Type in the composer at the bottom and press Return to send: it runs `herdbot send` or `herdbot room send`, and the message shows at once as "queued", then "working" once delivered. Each conversation keeps its own draft. Nothing is sent without Return, so dictated text can be read first. Conversations with new messages show an unread count in the sidebar; what you have open in the active window counts as read. Clicking a blocked notification opens that bot's chat (use "Jump to pane" there to answer in herdr). The Dock icon shows only while the window is open. Cmd-Q in the chat window closes it and the app keeps running; quit from the menu bar item.
 
+## Cards
+
+Pending prompts (currently Claude's folder-trust dialog) appear in the owning bot's chat as a card
+with the dialog's real text and one button per choice. Clicking a choice runs
+`herdbot card answer <card-id> <option-id>`; nothing is answered automatically and no button is the
+default action. **Jump to pane** is always available. A notification and the menu's **Waiting on you**
+list announce each new card. Unknown card kinds show their title, text and **Jump to pane**.
+
+### Manual check (for Shane, not the agent)
+
+With the new herdbot installed, create a bot whose directory has no trusted parent (for example,
+`herdbot new demo --class plan --cwd /Users/Shared/carddemo`) and send it a message from the chat.
+Expect the conversation to show a **Trust this folder?** card with the dialog text and a notification;
+the card should persist until you click a choice. Click **Yes, I trust this folder** and expect the
+card to disappear and the message to be delivered. Repeat with **No, exit** and expect the card to
+return on the next message. Remove the demo bot afterwards.
+
 ### Manual check (needs a person; install the new herdbot and restart the daemon first)
 
 1. `export HB=$(mktemp -d); for b in alpha beta; do HERDBOT_HOME=$HB herdbot new $b; done; HERDBOT_HOME=$HB herdbot room new crew --members alpha,beta`
