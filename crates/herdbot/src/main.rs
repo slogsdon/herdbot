@@ -11,6 +11,7 @@ mod rooms;
 mod route;
 mod run;
 mod service;
+mod shellenv;
 mod setup;
 mod tools;
 
