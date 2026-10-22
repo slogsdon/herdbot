@@ -15,7 +15,7 @@ mod tools;
 use std::io::Write;
 
 use herdr_client::Client;
-use herdbot_core::{cooldown, home, snapshot};
+use herdbot_core::{cooldown, history, home, snapshot};
 
 use home::Result;
 
@@ -27,6 +27,7 @@ const USAGE: &str = "usage:
   herdbot list | runs
   herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
   herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
+  herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation, newest page first
   herdbot focus <agent>                  focus an agent's pane in herdr
   herdbot up <bot> | down <bot>
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
@@ -163,6 +164,17 @@ async fn cli() -> Result<()> {
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
+        }
+        "history" => {
+            if !args.iter().any(|a| a == "--json") {
+                return Err(USAGE.into());
+            }
+            let number = |value: Option<String>| value.map(|v| v.parse::<usize>()).transpose();
+            let before = number(flag(&mut args, "--before"))?;
+            let limit = number(flag(&mut args, "--limit"))?.unwrap_or(history::DEFAULT_LIMIT);
+            let target = args.iter().find(|a| *a != "--json").ok_or(USAGE)?;
+            println!("{}", serde_json::to_string(&history::history(target, before, limit)?)?);
+            Ok(())
         }
         "focus" => {
             herdr.agent_focus(args.first().ok_or(USAGE)?).await?;

@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::cooldown;
 use crate::events::{self, Event};
+use crate::history;
 use crate::home;
 use crate::rooms;
 
@@ -21,6 +22,14 @@ pub struct BotView {
     pub slug: String,
     pub title: String,
     pub up: bool,
+    /// Persisted history items (see `history::history`'s `total`).
+    pub items: usize,
+    /// Unix seconds of the last item.
+    pub last_at: Option<i64>,
+    /// First line of the last item, up to 120 characters.
+    pub preview: String,
+    /// A prompt was delivered and its turn has not been logged yet.
+    pub working: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -29,6 +38,9 @@ pub struct RoomView {
     pub name: String,
     pub mode: rooms::Mode,
     pub paused: bool,
+    pub items: usize,
+    pub last_at: Option<i64>,
+    pub preview: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -125,11 +137,18 @@ pub fn snapshot() -> Snapshot {
     let bots = home::list_bots()
         .into_iter()
         .filter_map(|slug| match home::load_bot(&slug) {
-            Ok(bot) => Some(BotView {
-                up: home::load_state(&slug).is_some(),
-                title: bot.title,
-                slug,
-            }),
+            Ok(bot) => {
+                let (items, _) = history::bot_items(&slug);
+                Some(BotView {
+                    up: home::load_state(&slug).is_some(),
+                    title: bot.title,
+                    items: items.len(),
+                    last_at: items.last().map(|i| i.at),
+                    preview: items.last().map(|i| history::preview(&i.text)).unwrap_or_default(),
+                    working: home::read_inflight(&slug).is_some(),
+                    slug,
+                })
+            }
             Err(e) => {
                 warnings.push(format!("{slug}: {e}"));
                 None
@@ -139,12 +158,18 @@ pub fn snapshot() -> Snapshot {
     let rooms = rooms::list_rooms()
         .into_iter()
         .filter_map(|slug| match rooms::load_room(&slug) {
-            Ok(room) => Some(RoomView {
-                paused: rooms::load_state(&slug).paused,
-                name: room.name,
-                mode: room.mode,
-                slug,
-            }),
+            Ok(room) => {
+                let (items, _) = history::room_items(&slug);
+                Some(RoomView {
+                    paused: rooms::load_state(&slug).paused,
+                    name: room.name,
+                    mode: room.mode,
+                    items: items.len(),
+                    last_at: items.last().map(|i| i.at),
+                    preview: items.last().map(|i| history::preview(&i.text)).unwrap_or_default(),
+                    slug,
+                })
+            }
             Err(e) => {
                 warnings.push(format!("room {slug}: {e}"));
                 None
