@@ -8,12 +8,18 @@ public final class UnreadTracker {
     private var seen: [String: Int]
     @ObservationIgnored private let menu: MenuState
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private static let storeKey = "chat.seen"
+    @ObservationIgnored private let storeKey: String
 
-    public init(menu: MenuState, defaults: UserDefaults = .standard) {
+    /// `home` scopes the stored counts to one herdbot home, so a throwaway home with the same bot names starts clean.
+    public init(
+        menu: MenuState,
+        defaults: UserDefaults = .standard,
+        home: String = ProcessInfo.processInfo.environment["HERDBOT_HOME"] ?? ""
+    ) {
         self.menu = menu
         self.defaults = defaults
-        seen = (defaults.dictionary(forKey: Self.storeKey) as? [String: Int]) ?? [:]
+        storeKey = "chat.seen." + home
+        seen = (defaults.dictionary(forKey: storeKey) as? [String: Int]) ?? [:]
     }
 
     /// New items since you last looked, 0 for a conversation not seen before `sync` ran.
@@ -22,12 +28,13 @@ public final class UnreadTracker {
         return max(0, total - known)
     }
 
-    /// Record every conversation the snapshot has that isn't known yet as read.
+    /// Record every conversation the snapshot has that isn't known yet as read, and pull back a seen
+    /// count that is above the current total (the history was reset).
     public func sync() {
         guard let snapshot = menu.snapshot else { return }
         var changed = false
         let all = snapshot.bots.map { (Recipient.bot($0.slug), $0.items) } + snapshot.rooms.map { (Recipient.room($0.slug), $0.items) }
-        for (recipient, total) in all where seen[recipient.key] == nil {
+        for (recipient, total) in all where seen[recipient.key].map({ $0 > total }) ?? true {
             seen[recipient.key] = total
             changed = true
         }
@@ -47,5 +54,5 @@ public final class UnreadTracker {
         }
     }
 
-    private func persist() { defaults.set(seen, forKey: Self.storeKey) }
+    private func persist() { defaults.set(seen, forKey: storeKey) }
 }

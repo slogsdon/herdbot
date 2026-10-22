@@ -89,12 +89,12 @@ import Testing
 
 @MainActor
 @Suite struct Unread {
-    func make(items: Int, defaults: UserDefaults? = nil) -> (UnreadTracker, MenuState, UserDefaults) {
+    func make(items: Int, defaults: UserDefaults? = nil, home: String = "") -> (UnreadTracker, MenuState, UserDefaults) {
         let menu = MenuState()
         menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: items)],
                                  rooms: [RoomView(slug: "crew", name: "Crew", mode: "channel", paused: false, items: items)])))
         let store = defaults ?? UserDefaults(suiteName: "unread-\(UUID().uuidString)")!
-        return (UnreadTracker(menu: menu, defaults: store), menu, store)
+        return (UnreadTracker(menu: menu, defaults: store, home: home), menu, store)
     }
 
     @Test func existingHistoryIsReadTheFirstTime() {
@@ -123,9 +123,31 @@ import Testing
         tracker.sync()
         menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: 9)])))
         tracker.markSeen(.bot("alpha"))
-        let reopened = UnreadTracker(menu: menu, defaults: store)
+        let reopened = UnreadTracker(menu: menu, defaults: store, home: "")
         #expect(reopened.unread(.bot("alpha")) == 0)
         menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: 10)])))
         #expect(reopened.unread(.bot("alpha")) == 1)
+    }
+
+    @Test func countsAreNotSharedBetweenHomes() {
+        let (first, menu, store) = make(items: 9, home: "/tmp/one")
+        first.sync()
+        // Home two starts from nothing: its first sync records 9, rather than inheriting home one's.
+        let second = UnreadTracker(menu: menu, defaults: store, home: "/tmp/two")
+        #expect(store.dictionary(forKey: "chat.seen./tmp/two") == nil)
+        second.sync()
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: 12)])))
+        first.markSeen(.bot("alpha"))
+        #expect(first.unread(.bot("alpha")) == 0)
+        #expect(second.unread(.bot("alpha")) == 3)
+    }
+
+    @Test func aCountAboveTheTotalIsClampedOnSync() {
+        let (tracker, menu, _) = make(items: 40)
+        tracker.sync()
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: 3)])))
+        tracker.sync()
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "A", up: true, items: 5)])))
+        #expect(tracker.unread(.bot("alpha")) == 2)
     }
 }
