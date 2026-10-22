@@ -72,11 +72,16 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
     state.route = match started {
         Ok(route) => route.to_string(),
         Err(e) => {
-            // No recorded route would hide the agent from quota failover. Close the
-            // workspace instead; the next queued message brings the bot back up.
-            let _ = herdr.workspace_close(&state.workspace_id).await;
-            home::clear_state(slug);
-            return Err(e);
+            if let Some(blocked) = e.downcast_ref::<StartBlocked>() {
+                herdbot_core::cards::write_card(&blocked.card)?;
+                blocked.route.to_string()
+            } else {
+                // No recorded route would hide the agent from quota failover. Close the
+                // workspace instead; the next queued message brings the bot back up.
+                let _ = herdr.workspace_close(&state.workspace_id).await;
+                home::clear_state(slug);
+                return Err(e);
+            }
         }
     };
     home::save_state(slug, &state)?;
@@ -115,11 +120,16 @@ pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotS
     state.route = match started {
         Ok(route) => route.to_string(),
         Err(e) => {
-            // No recorded route would hide the agent from quota failover. Close the
-            // workspace instead; the next queued message brings the bot back up.
-            let _ = herdr.workspace_close(&state.workspace_id).await;
-            home::clear_state(slug);
-            return Err(e);
+            if let Some(blocked) = e.downcast_ref::<StartBlocked>() {
+                herdbot_core::cards::write_card(&blocked.card)?;
+                blocked.route.to_string()
+            } else {
+                // No recorded route would hide the agent from quota failover. Close the
+                // workspace instead; the next queued message brings the bot back up.
+                let _ = herdr.workspace_close(&state.workspace_id).await;
+                home::clear_state(slug);
+                return Err(e);
+            }
         }
     };
     home::save_state(slug, &state)?;
@@ -183,7 +193,11 @@ async fn start(
     let route = route::resolve(&table, class, slug, explicit_model)?;
     let instructions = match run {
         None => {
-            let mut text = format!("{}\n\n{}", tools::main_preamble(slug, bot), home::instructions(slug, bot));
+            let mut text = format!(
+                "{}\n\n{}",
+                tools::main_preamble(slug, bot),
+                home::instructions(slug, bot)
+            );
             if let Some(view) = crate::memory::view_block(slug, bot) {
                 text.push_str("\n\n");
                 text.push_str(&view);
@@ -208,13 +222,25 @@ async fn start(
         home::codex_unsandboxed(),
         class,
     )?;
-    herdr
+    let started = herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
-        .await?;
+        .await;
+    if let Err(HerdrError::Api { code, .. }) = &started
+        && run.is_none()
+    {
+        let screen = tail(herdr, agent, 60).await;
+        if let Some(card) = blocked_card(launch.kind, code, &screen, slug, agent) {
+            return Err(Box::new(StartBlocked { route, card }));
+        }
+    }
+    started?;
     // The launch turn's READY is not conversation: `consume_events` drops the turn end this
     // marker marks. Every launch clears an older mark first, so a relaunch without a READY
     // prompt must not swallow a real turn.
-    let ready = home::root().join(".state").join("launch").join(format!("{agent}.ready"));
+    let ready = home::root()
+        .join(".state")
+        .join("launch")
+        .join(format!("{agent}.ready"));
     let _ = std::fs::remove_file(&ready);
     if marks_launch_ready(launch.preamble_prompt.is_some(), task.is_none()) {
         let _ = std::fs::write(&ready, home::now().to_string());
@@ -306,9 +332,13 @@ pub async fn spawn(
         settled_at: None,
     };
     home::save_run(&run)?;
-    let task = if class == "compact" { prompt.to_owned() } else { format!(
-        "{prompt}\n\n---\nWhen you are done, call the herdbot `report_result` tool once with your complete answer; it is delivered to whoever started you."
-    ) };
+    let task = if class == "compact" {
+        prompt.to_owned()
+    } else {
+        format!(
+            "{prompt}\n\n---\nWhen you are done, call the herdbot `report_result` tool once with your complete answer; it is delivered to whoever started you."
+        )
+    };
     match start(
         herdr,
         slug,
@@ -361,9 +391,58 @@ pub async fn tail(herdr: &Client, agent: &str, lines: u32) -> String {
         .unwrap_or_default()
 }
 
+/// `start` stopped on a prompt a card can show; the agent is alive and waiting for the user.
+#[derive(Debug)]
+pub struct StartBlocked {
+    pub route: route::Route,
+    pub card: herdbot_core::cards::Card,
+}
+impl std::fmt::Display for StartBlocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} is waiting for you: {}",
+            self.card.agent, self.card.title
+        )
+    }
+}
+impl std::error::Error for StartBlocked {}
+
+fn blocked_card(
+    harness: &str,
+    error_code: &str,
+    screen: &str,
+    bot: &str,
+    agent: &str,
+) -> Option<herdbot_core::cards::Card> {
+    (harness == "claude" && error_code == "agent_blocked")
+        .then(|| crate::adapters::recognize(screen, bot, agent))
+        .flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{marks_launch_ready, prompt_taken};
+
+    #[test]
+    fn a_blocked_claude_start_with_a_matching_pane_is_a_card_otherwise_an_error() {
+        let trust = include_str!("../fixtures/panes/claude-trust.txt");
+        assert!(
+            super::blocked_card("claude", "agent_blocked", trust, "helper", "helper").is_some()
+        );
+        assert!(super::blocked_card("claude", "timeout", trust, "helper", "helper").is_none());
+        assert!(super::blocked_card("codex", "agent_blocked", trust, "helper", "helper").is_none());
+        assert!(
+            super::blocked_card(
+                "claude",
+                "agent_blocked",
+                "some other prompt",
+                "helper",
+                "helper"
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn launch_ready_marker_requires_ready_prompt_for_main_agent() {

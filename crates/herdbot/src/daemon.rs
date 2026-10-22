@@ -42,7 +42,9 @@ fn bind_lock() -> Result<std::os::unix::net::UnixListener> {
     fs::create_dir_all(path.parent().unwrap())?;
     match UnixListener::bind(&path) {
         Ok(listener) => Ok(listener),
-        Err(_) if UnixStream::connect(&path).is_ok() => Err("another herdbot daemon is running".into()),
+        Err(_) if UnixStream::connect(&path).is_ok() => {
+            Err("another herdbot daemon is running".into())
+        }
         Err(_) => {
             // A socket nobody listens on: its daemon died. Take it over.
             fs::remove_file(&path)?;
@@ -84,6 +86,9 @@ pub async fn run() -> Result<()> {
         if let Err(e) = flush_queues(&herdr, &mut delivered_at, &mut mains, &mut held).await {
             eprintln!("queue: {e}");
         }
+        if let Err(e) = prune_cards(&herdr).await {
+            eprintln!("cards: {e}");
+        }
         if let Err(e) = consume_events(&herdr, &mut mains).await {
             eprintln!("events: {e}");
         }
@@ -113,6 +118,37 @@ pub async fn run() -> Result<()> {
         }
         tokio::time::sleep(TICK).await;
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Prune {
+    Keep,
+    Remove,
+    Replace(herdbot_core::cards::Card),
+}
+
+fn prune_decision(card: &herdbot_core::cards::Card, status: Option<&str>, screen: &str) -> Prune {
+    if status != Some("blocked") {
+        return Prune::Remove;
+    }
+    match crate::adapters::recognize(screen, &card.bot, &card.agent) {
+        None => Prune::Remove,
+        Some(current) if current.id == card.id => Prune::Keep,
+        Some(current) => Prune::Replace(current),
+    }
+}
+
+async fn prune_cards(herdr: &Client) -> Result<()> {
+    for card in herdbot_core::cards::read_cards() {
+        let status = run::status(herdr, &card.agent).await;
+        let screen = run::tail(herdr, &card.agent, 60).await;
+        match prune_decision(&card, status.as_deref(), &screen) {
+            Prune::Keep => {}
+            Prune::Remove => herdbot_core::cards::remove_card(&card.agent),
+            Prune::Replace(card) => herdbot_core::cards::write_card(&card)?,
+        }
+    }
+    Ok(())
 }
 
 struct DaemonInfoGuard;
@@ -157,7 +193,9 @@ async fn flush_queues(
             continue;
         }
         let agent = path.file_stem().unwrap().to_string_lossy().into_owned();
-        if !compactors.contains(&agent) && home::now() - delivered_at.get(&agent).copied().unwrap_or(0) < DELIVERY_COOLDOWN {
+        if !compactors.contains(&agent)
+            && home::now() - delivered_at.get(&agent).copied().unwrap_or(0) < DELIVERY_COOLDOWN
+        {
             continue;
         }
         let status = match run::status(herdr, &agent).await {
@@ -187,7 +225,11 @@ async fn flush_queues(
                 held.insert(agent.clone(), times + 1);
                 // Retry after DELIVERY_COOLDOWN, not every tick.
                 delivered_at.insert(agent.clone(), home::now());
-                eprintln!("{agent}: holding delivery, its pane shows a prompt ({}/{})", times + 1, fm::MAX_HOLDS);
+                eprintln!(
+                    "{agent}: holding delivery, its pane shows a prompt ({}/{})",
+                    times + 1,
+                    fm::MAX_HOLDS
+                );
                 continue;
             }
             // Reset only once fm stops seeing a prompt. After MAX_HOLDS the count stays
@@ -280,7 +322,9 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                 eprintln!("events: skipped malformed line in {}", taken.display());
                 continue;
             };
-            let run = home::list_runs().into_iter().find(|r| r.agent == event.agent);
+            let run = home::list_runs()
+                .into_iter()
+                .find(|r| r.agent == event.agent);
             let is_main = home::load_state(&event.agent).is_some();
             match hook::decide(&event, run.as_ref(), is_main) {
                 hook::Action::FinishRun(text) => {
@@ -315,13 +359,7 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                     let marker = launch_marker(&event.agent);
                     let mark = marker_time(&marker);
                     let _ = fs::remove_file(&marker);
-                    if let Some(prompt) = turn_to_log(
-                        mains,
-                        &event.agent,
-                        mark,
-                        event.at,
-                        &reply,
-                    ) {
+                    if let Some(prompt) = turn_to_log(mains, &event.agent, mark, event.at, &reply) {
                         hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
                         home::clear_inflight(&event.agent);
                     } else {
@@ -344,10 +382,7 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                 .create(true)
                 .append(true)
                 .open(&path)?;
-            std::io::Write::write_all(
-                &mut file,
-                format!("{}\n", deferred.join("\n")).as_bytes(),
-            )?;
+            std::io::Write::write_all(&mut file, format!("{}\n", deferred.join("\n")).as_bytes())?;
         }
         fs::remove_file(taken)?;
     }
@@ -362,8 +397,8 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
         let status = run::status(herdr, &r.agent).await;
         // `spawn` records the route once the agent has taken its task. Until then an idle
         // agent is still starting (agent_start alone can take 60 s), not finished.
-        let settled = matches!(status.as_deref(), Some("idle") | Some("done"))
-            && !r.route.is_empty();
+        let settled =
+            matches!(status.as_deref(), Some("idle") | Some("done")) && !r.route.is_empty();
         let now = home::now();
         match (settled, r.settled_at) {
             (true, None) => {
@@ -407,7 +442,12 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                     r.notified_blocked = true;
                 }
             }
-            ("running", _) if settled && grace_over && r.class != "compact" && now - r.started_at > HARVEST_AFTER => {
+            ("running", _)
+                if settled
+                    && grace_over
+                    && r.class != "compact"
+                    && now - r.started_at > HARVEST_AFTER =>
+            {
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if requeue_if_cooled(herdr, &mut r, &text).await? {
                     home::save_run(&r)?;
@@ -607,10 +647,28 @@ fn fire_schedules(last_fired: &mut HashMap<String, i64>, started: i64) -> Result
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn prune_keeps_a_card_only_while_the_same_prompt_is_on_a_blocked_agent() {
+        let trust = include_str!("../fixtures/panes/claude-trust.txt");
+        let card = crate::adapters::recognize(trust, "helper", "helper").unwrap();
+        assert_eq!(prune_decision(&card, Some("blocked"), trust), Prune::Keep);
+        assert_eq!(prune_decision(&card, Some("idle"), trust), Prune::Remove);
+        assert_eq!(prune_decision(&card, None, trust), Prune::Remove);
+        assert_eq!(
+            prune_decision(&card, Some("blocked"), "gone"),
+            Prune::Remove
+        );
+        let moved = trust.replace("trustfresh-92905", "trustfresh-1");
+        assert!(
+            matches!(prune_decision(&card, Some("blocked"), &moved), Prune::Replace(c) if c.id != card.id)
+        );
+    }
     #[test]
     fn liveness_probes_never_fill_the_lock_backlog() {
         use std::os::unix::net::{UnixListener, UnixStream};
-        let path = std::env::temp_dir().join(format!("herdbot-lock-test-{}.sock", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("herdbot-lock-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
         drain_in_background(&listener).unwrap();
@@ -663,7 +721,10 @@ mod tests {
             ),
             Some(None)
         );
-        assert_eq!(turn_to_log(&mut stale, "mem-test", None, 104, "READY"), Some(None));
+        assert_eq!(
+            turn_to_log(&mut stale, "mem-test", None, 104, "READY"),
+            Some(None)
+        );
         let mut fresh = MainAgents::default();
         fresh.delivered.insert("mem-test".into(), "q".into());
         assert_eq!(
