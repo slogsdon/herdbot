@@ -36,6 +36,10 @@ fn snapshot_and_watch_over_a_fixture_home() {
             r#"{{"id":"{id}","bot":"alpha","parent_agent":"alpha-main","agent":"alpha-{id}","pane":"p2","class":"code","route":"claude:sonnet","description":"do it","status":"{status}","started_at":1}}"#
         )
     };
+    write(&root.join("rooms/crew/room.toml"), "name = \"Crew\"\nmembers = [\"alpha\", \"beta\"]\nmode = \"round_robin\"\n");
+    write(&root.join("rooms/quiet/room.toml"), "name = \"Quiet\"\nmembers = [\"alpha\", \"beta\"]\n");
+    write(&root.join(".state/rooms/quiet.json"), r#"{"paused":true}"#);
+    write(&root.join("rooms/torn/room.toml"), "mode = \"chaos\"");
     write(&root.join(".runs/r1.json"), &run("r1", "running"));
     write(&root.join(".runs/r2.json"), &run("r2", "done"));
     write(&root.join(".state/cooldown/claude.json"), r#"{"until":4102444800,"reason":"limit"}"#);
@@ -53,6 +57,9 @@ fn snapshot_and_watch_over_a_fixture_home() {
     assert_eq!(snap.daemon, "down");
     let bots: Vec<_> = snap.bots.iter().map(|b| (b.slug.as_str(), b.up)).collect();
     assert_eq!(bots, vec![("alpha", true), ("beta", false)]);
+    let rooms: Vec<_> = snap.rooms.iter().map(|r| (r.slug.as_str(), r.name.as_str(), r.paused)).collect();
+    assert_eq!(rooms, vec![("crew", "Crew", false), ("quiet", "Quiet", true)]);
+    assert!(snap.warnings.iter().any(|w| w.starts_with("room torn:")));
     assert_eq!(snap.runs.len(), 1);
     assert_eq!(snap.runs[0].id, "r1");
     assert_eq!(snap.cooldowns.len(), 1);
@@ -67,7 +74,9 @@ fn snapshot_and_watch_over_a_fixture_home() {
     let json = serde_json::to_value(&snap).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(keys, ["at", "blocked", "bots", "cooldowns", "daemon", "runs", "v", "warnings"]);
+    assert_eq!(keys, ["at", "blocked", "bots", "cooldowns", "daemon", "rooms", "runs", "v", "warnings"]);
+
+    assert_eq!(json["rooms"][0], serde_json::json!({"slug":"crew","name":"Crew","mode":"round_robin","paused":false}));
 
     // Watcher: first poll is the snapshot only, then quiet, then changes.
     let mut watcher = snapshot::Watcher::default();

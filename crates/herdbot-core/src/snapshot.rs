@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::cooldown;
 use crate::events::{self, Event};
 use crate::home;
+use crate::rooms;
 
 /// Bumped on any breaking change to the JSON the CLI prints.
 pub const VERSION: u32 = 1;
@@ -20,6 +21,14 @@ pub struct BotView {
     pub slug: String,
     pub title: String,
     pub up: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RoomView {
+    pub slug: String,
+    pub name: String,
+    pub mode: rooms::Mode,
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -46,6 +55,7 @@ pub struct Snapshot {
     /// "up" when something accepts connections on the daemon's lock socket, else "down".
     pub daemon: &'static str,
     pub bots: Vec<BotView>,
+    pub rooms: Vec<RoomView>,
     /// Running subagent runs only.
     pub runs: Vec<RunView>,
     /// Harnesses still cooling down.
@@ -126,6 +136,21 @@ pub fn snapshot() -> Snapshot {
             }
         })
         .collect();
+    let rooms = rooms::list_rooms()
+        .into_iter()
+        .filter_map(|slug| match rooms::load_room(&slug) {
+            Ok(room) => Some(RoomView {
+                paused: rooms::load_state(&slug).paused,
+                name: room.name,
+                mode: room.mode,
+                slug,
+            }),
+            Err(e) => {
+                warnings.push(format!("room {slug}: {e}"));
+                None
+            }
+        })
+        .collect();
     let mut runs: Vec<RunView> = home::list_runs()
         .into_iter()
         .filter(|run| run.status == "running")
@@ -148,6 +173,7 @@ pub fn snapshot() -> Snapshot {
         at: home::now(),
         daemon: if UnixStream::connect(home::daemon_lock()).is_ok() { "up" } else { "down" },
         bots,
+        rooms,
         runs,
         cooldowns: cooldowns(),
         blocked,
