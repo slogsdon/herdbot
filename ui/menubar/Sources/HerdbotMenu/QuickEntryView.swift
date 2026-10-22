@@ -32,6 +32,14 @@ struct QuickEntryView: View {
         .padding(16)
         .frame(width: 480)
         .onAppear { focused = true }
+        // onAppear runs before the panel is key, and SwiftUI drops a focus request made then. The first
+        // show becomes key after activation (the notification); later shows become key at once, before
+        // this view subscribes, so ask again once the panel has settled.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in focused = true }
+        .task {
+            try? await Task.sleep(for: .milliseconds(80))
+            focused = true
+        }
     }
 
     @ViewBuilder private var status: some View {
