@@ -25,12 +25,14 @@ public struct BotView: Codable, Hashable, Sendable {
     public let preview: String
     /// A prompt was delivered and its turn has not been logged yet.
     public let working: Bool
+    /// Messages waiting in the bot's queue, not yet delivered.
+    public let queued: Int
 
     enum CodingKeys: String, CodingKey {
-        case slug, title, up, items, lastAt = "last_at", preview, working
+        case slug, title, up, items, lastAt = "last_at", preview, working, queued
     }
 
-    public init(slug: String, title: String, up: Bool, items: Int = 0, lastAt: Int? = nil, preview: String = "", working: Bool = false) {
+    public init(slug: String, title: String, up: Bool, items: Int = 0, lastAt: Int? = nil, preview: String = "", working: Bool = false, queued: Int = 0) {
         self.slug = slug
         self.title = title
         self.up = up
@@ -38,6 +40,7 @@ public struct BotView: Codable, Hashable, Sendable {
         self.lastAt = lastAt
         self.preview = preview
         self.working = working
+        self.queued = queued
     }
 }
 
@@ -130,7 +133,8 @@ extension BotView {
             items: try c.decodeIfPresent(Int.self, forKey: .items) ?? 0,
             lastAt: try c.decodeIfPresent(Int.self, forKey: .lastAt),
             preview: try c.decodeIfPresent(String.self, forKey: .preview) ?? "",
-            working: try c.decodeIfPresent(Bool.self, forKey: .working) ?? false)
+            working: try c.decodeIfPresent(Bool.self, forKey: .working) ?? false,
+            queued: try c.decodeIfPresent(Int.self, forKey: .queued) ?? 0)
     }
 }
 

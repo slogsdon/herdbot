@@ -95,7 +95,7 @@ The Dock icon shows only while the window is open.
    Give alpha a history: append a few JSON lines like `{"at":<unix seconds>,"prompt":"hi","reply":"Hello **there**\n\n```rust\nfn x() {}\n```"}` to `$HB/alpha/turns.jsonl` (use times from today and from two days ago), and a line to `$HB/rooms/crew/transcript.jsonl` such as `{"at":<now>,"speaker":"you","text":"hi crew"}`.
 2. `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`. No window appears at launch. Menu → "Open herdbot": the window opens and a Dock icon appears.
 3. The sidebar lists Bots and Rooms with avatars, previews and times; type in the filter field and rows narrow. Click alpha: bubbles, bold text, the code block in monospace, "Yesterday"/"Today" separators, scrolled to the bottom.
-4. `HERDBOT_HOME=$HB herdbot send alpha "queued one"`: within a second a lighter "queued" bubble appears (the daemon is not delivering for this home). Click crew: speaker names in colour.
+4. After `HERDBOT_HOME=$HB herdbot send alpha "queued one"`, a lighter "queued" bubble appears in alpha's open chat within about a second (the daemon is not delivering for this home, so it stays queued). Click crew: speaker names in colour.
 5. Add more than 50 items to alpha's `turns.jsonl` and scroll up: older messages load and your place holds. Scroll up, then add a line: "jump to latest" appears, and the view does not jump while you are scrolled up.
 6. Close the window: the Dock icon goes away and the menu bar item stays. Reopen from the menu.
 7. System Settings → Accessibility → Display: Reduce Transparency and Increase Contrast change the sidebar and window; Reduce Motion removes the jump button's animation. Light mode stays readable.

@@ -99,13 +99,21 @@ pub fn pending_items(slug: &str) -> Vec<Item> {
     if let Some(sent) = home::read_inflight(slug) {
         out.push(item(sent.at, "user", None, &sent.prompt, Some("inflight")));
     }
-    let queue = fs::read_to_string(home::queue_dir().join(format!("{slug}.jsonl"))).unwrap_or_default();
-    for queued in queue.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
-        if let Some(text) = queued["text"].as_str() {
-            out.push(item(queued["at"].as_i64().unwrap_or_default(), "user", None, text, Some("queued")));
-        }
-    }
+    out.extend(queued_items(slug));
     out
+}
+
+/// The messages waiting in a bot's queue, not yet delivered.
+pub fn queued_items(slug: &str) -> Vec<Item> {
+    let queue = fs::read_to_string(home::queue_dir().join(format!("{slug}.jsonl"))).unwrap_or_default();
+    queue
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|queued| {
+            let text = queued["text"].as_str()?;
+            Some(item(queued["at"].as_i64().unwrap_or_default(), "user", None, text, Some("queued")))
+        })
+        .collect()
 }
 
 /// The first line of `text`, cut to 120 characters, for a list row.

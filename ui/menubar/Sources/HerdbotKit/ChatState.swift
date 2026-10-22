@@ -23,6 +23,7 @@ public final class ChatState {
     struct Counts: Equatable {
         let items: Int
         let working: Bool
+        let queued: Int
     }
 
     public init(menu: MenuState, cli: (any HerdbotCLI)?) {
@@ -96,9 +97,9 @@ public final class ChatState {
         guard let snapshot = menu.snapshot, let recipient else { return nil }
         switch recipient {
         case .bot(let slug):
-            return snapshot.bots.first { $0.slug == slug }.map { Counts(items: $0.items, working: $0.working) }
+            return snapshot.bots.first { $0.slug == slug }.map { Counts(items: $0.items, working: $0.working, queued: $0.queued) }
         case .room(let slug):
-            return snapshot.rooms.first { $0.slug == slug }.map { Counts(items: $0.items, working: false) }
+            return snapshot.rooms.first { $0.slug == slug }.map { Counts(items: $0.items, working: false, queued: 0) }
         }
     }
 

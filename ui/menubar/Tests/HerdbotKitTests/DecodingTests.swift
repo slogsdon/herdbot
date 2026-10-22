@@ -42,16 +42,17 @@ import Testing
     @Test func conversationCountsDecodeAndDefaultForAnOlderHerdbot() throws {
         let new = """
         {"v":1,"type":"snapshot","snapshot":{"v":1,"at":1,"daemon":"up",\
-        "bots":[{"slug":"a","title":"A","up":true,"items":3,"last_at":7,"preview":"hi","working":true}],\
+        "bots":[{"slug":"a","title":"A","up":true,"items":3,"last_at":7,"preview":"hi","working":true,"queued":2}],\
         "rooms":[{"slug":"c","name":"C","mode":"channel","paused":false,"items":2,"last_at":9,"preview":"yo"}],\
         "runs":[],"cooldowns":[],"blocked":[],"warnings":[]}}
         """
         let snap = try #require(try StreamParser.parse(new)?.snapshot)
-        #expect(snap.bots == [BotView(slug: "a", title: "A", up: true, items: 3, lastAt: 7, preview: "hi", working: true)])
+        #expect(snap.bots == [BotView(slug: "a", title: "A", up: true, items: 3, lastAt: 7, preview: "hi", working: true, queued: 2)])
         #expect(snap.rooms == [RoomView(slug: "c", name: "C", mode: "channel", paused: false, items: 2, lastAt: 9, preview: "yo")])
         let old = try #require(try StreamParser.parse(snapshotLine)?.snapshot)
         #expect(old.bots == [BotView(slug: "alpha", title: "Alpha", up: true)])
         #expect(old.bots[0].lastAt == nil)
+        #expect(old.bots[0].queued == 0)
     }
 
     @Test func historyPageDecodesPersistedAndPendingItems() throws {

@@ -44,6 +44,7 @@ fn snapshot_and_watch_over_a_fixture_home() {
         &root.join("alpha/turns.jsonl"),
         "{\"at\":5,\"prompt\":\"hi\",\"reply\":\"\\n  Hello there\\nmore\"}\nnot json\n{\"at\":7,\"prompt\":null,\"reply\":\"typed in the pane\"}\n",
     );
+    write(&root.join(".queue/alpha.jsonl"), "{\"text\":\"first\",\"at\":30}\n{\"text\":\"second\",\"at\":31}\n");
     write(&root.join(".state/inflight/beta.json"), &format!(r#"{{"prompt":"p","at":{}}}"#, home::now()));
     write(&root.join("rooms/crew/transcript.jsonl"), "{\"at\":9,\"speaker\":\"you\",\"text\":\"hello crew\"}\n");
     write(&root.join(".runs/r1.json"), &run("r1", "running"));
@@ -66,6 +67,7 @@ fn snapshot_and_watch_over_a_fixture_home() {
     // alpha: user+bot from the first turn, bot only from the second; one bad line skipped.
     assert_eq!((snap.bots[0].items, snap.bots[0].last_at, snap.bots[0].preview.as_str()), (3, Some(7), "typed in the pane"));
     assert!(!snap.bots[0].working);
+    assert_eq!((snap.bots[0].queued, snap.bots[1].queued), (2, 0));
     assert_eq!((snap.bots[1].items, snap.bots[1].last_at, snap.bots[1].preview.as_str()), (0, None, ""));
     assert!(snap.bots[1].working);
     let rooms: Vec<_> = snap.rooms.iter().map(|r| (r.slug.as_str(), r.name.as_str(), r.paused)).collect();
@@ -90,7 +92,7 @@ fn snapshot_and_watch_over_a_fixture_home() {
 
     assert_eq!(
         json["bots"][0],
-        serde_json::json!({"slug":"alpha","title":"Alpha","up":true,"items":3,"last_at":7,"preview":"typed in the pane","working":false})
+        serde_json::json!({"slug":"alpha","title":"Alpha","up":true,"items":3,"last_at":7,"preview":"typed in the pane","working":false,"queued":2})
     );
     assert_eq!(json["rooms"][0], serde_json::json!({"slug":"crew","name":"Crew","mode":"round_robin","paused":false,"items":1,"last_at":9,"preview":"hello crew"}));
 

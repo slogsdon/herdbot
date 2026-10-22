@@ -99,6 +99,19 @@ func turns(_ count: Int, from start: Int = 0) -> [HistoryItem] {
         #expect(cli.historyCalls.count == 3)
     }
 
+    @Test func observeRefetchesWhenOnlyTheQueuedCountChanges() async {
+        let cli = FakeCLI()
+        let (chat, menu) = make(cli)
+        await chat.select(.bot("alpha"))
+        #expect(cli.historyCalls.count == 1)
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "Alpha", up: true, items: 0, queued: 1)])))
+        await chat.observe()
+        #expect(cli.historyCalls.count == 2)
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "Alpha", up: true, items: 0, queued: 1)])))
+        await chat.observe()
+        #expect(cli.historyCalls.count == 2)
+    }
+
     @Test func switchingConversationsClearsTheOldOne() async {
         let cli = FakeCLI()
         cli.pages[.bot("alpha")] = turns(3)

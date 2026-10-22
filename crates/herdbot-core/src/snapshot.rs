@@ -30,6 +30,8 @@ pub struct BotView {
     pub preview: String,
     /// A prompt was delivered and its turn has not been logged yet.
     pub working: bool,
+    /// Messages waiting in the bot's queue, not yet delivered.
+    pub queued: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -146,6 +148,7 @@ pub fn snapshot() -> Snapshot {
                     last_at: items.last().map(|i| i.at),
                     preview: items.last().map(|i| history::preview(&i.text)).unwrap_or_default(),
                     working: home::read_inflight(&slug).is_some(),
+                    queued: history::queued_items(&slug).len(),
                     slug,
                 })
             }
