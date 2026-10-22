@@ -1,6 +1,7 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
 mod daemon;
+mod doctor;
 mod fm;
 mod grok;
 mod hook;
@@ -21,6 +22,7 @@ use home::Result;
 
 const USAGE: &str = "usage:
   herdbot --version
+  herdbot doctor [--json]               first-run and health checks (exit 1 if any fail)
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
   herdbot service install|uninstall|status   run the daemon as a launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
@@ -75,6 +77,18 @@ async fn cli() -> Result<()> {
     match command.as_str() {
         "--version" | "-V" | "version" => {
             println!("herdbot {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        "doctor" => {
+            let checks = doctor::evaluate(&doctor::gather().await);
+            if args.iter().any(|arg| arg == "--json") {
+                println!("{}", doctor::to_json(&checks));
+            } else {
+                print!("{}", doctor::render(&checks));
+            }
+            if checks.iter().any(|check| check.status == doctor::Status::Fail) {
+                std::process::exit(1);
+            }
             Ok(())
         }
         "daemon" => daemon::run().await,
