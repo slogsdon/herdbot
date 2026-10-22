@@ -54,6 +54,14 @@ struct HerdbotMenuApp: App {
         Window("herdbot", id: "chat") {
             ChatWindow(menu: state, chat: chat, unread: unread, cli: cli)
         }
+        .commands {
+            CommandGroup(replacing: .appTermination) {
+                Button("Close Window") {
+                    if let window = NSApp.keyWindow, window.title == "herdbot" { window.performClose(nil) }
+                }
+                .keyboardShortcut("q")
+            }
+        }
         .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
             MenuContent(state: state, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
