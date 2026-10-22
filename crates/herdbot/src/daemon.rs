@@ -22,7 +22,21 @@ const STARTUP_GRACE: i64 = 90;
 const LAUNCH_READY_SECS: i64 = 600;
 
 /// One daemon at a time: the memory files have a single writer (OptChat spec §2's method).
+/// Other processes probe liveness by connecting, so the socket must be drained: an unaccepted
+/// connection stays queued, and once the backlog fills every later probe is refused.
 fn take_lock() -> Result<std::os::unix::net::UnixListener> {
+    let listener = bind_lock()?;
+    drain_in_background(&listener)?;
+    Ok(listener)
+}
+
+fn drain_in_background(listener: &std::os::unix::net::UnixListener) -> Result<()> {
+    let drain = listener.try_clone()?;
+    std::thread::spawn(move || while drain.accept().is_ok() {});
+    Ok(())
+}
+
+fn bind_lock() -> Result<std::os::unix::net::UnixListener> {
     use std::os::unix::net::{UnixListener, UnixStream};
     let path = home::daemon_lock();
     fs::create_dir_all(path.parent().unwrap())?;
@@ -593,6 +607,20 @@ fn fire_schedules(last_fired: &mut HashMap<String, i64>, started: i64) -> Result
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn liveness_probes_never_fill_the_lock_backlog() {
+        use std::os::unix::net::{UnixListener, UnixStream};
+        let path = std::env::temp_dir().join(format!("herdbot-lock-test-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        drain_in_background(&listener).unwrap();
+        // More than the 128-entry backlog; each probe is dropped, as `status` and `doctor` do.
+        for n in 0..400 {
+            assert!(UnixStream::connect(&path).is_ok(), "probe {n} refused");
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+
     use super::*;
     use chrono::TimeZone;
 
