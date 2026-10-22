@@ -128,6 +128,14 @@ fn arg<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
         .ok_or_else(|| format!("missing string argument {key:?}").into())
 }
 
+/// A main agent messaging itself would queue the prompt to its own pane and loop.
+fn refuse_self(target: &str, ctx: &Ctx) -> Result<()> {
+    if target == ctx.bot && ctx.run.is_none() {
+        return Err(format!("send_to_agent: {target} is you; act on the task directly").into());
+    }
+    Ok(())
+}
+
 /// Resolve a bot name or slug to an existing slug.
 fn find_bot(name: &str) -> Result<String> {
     let wanted = home::slug(name);
@@ -207,6 +215,7 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
         "send_to_agent" => {
             // Enqueue only; the daemon starts the target if it is down (one launcher, no races).
             let target = find_bot(arg(args, "bot")?)?;
+            refuse_self(&target, ctx)?;
             home::enqueue(
                 &run::main_agent(&target),
                 &format!(
@@ -283,5 +292,22 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             Ok(if name == "zoom" { mem.zoom(num("id")?, num("n")?) } else { mem.date(num("id")?) })
         }
         other => Err(format!("unknown tool {other}").into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuse_self_only_for_a_main_agent_naming_itself() {
+        let main = Ctx { bot: "alpha".into(), run: None };
+        let sub = Ctx { bot: "alpha".into(), run: Some("run1".into()) };
+        assert_eq!(
+            refuse_self("alpha", &main).unwrap_err().to_string(),
+            "send_to_agent: alpha is you; act on the task directly"
+        );
+        assert!(refuse_self("alpha", &sub).is_ok());
+        assert!(refuse_self("beta", &main).is_ok());
     }
 }
