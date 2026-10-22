@@ -31,17 +31,21 @@ Not built yet: importing Grok Bot's schedules and skills (they aren't stored on 
 
 ```bash
 cargo install --path crates/herdbot
-herdbot service install
-herdbot new helper
+herdbot setup
+# Accept the starter-bot prompt to create helper.
 $EDITOR ~/Bots/helper/BOT.md
 herdbot send helper "What can you do?"
 ```
 
-`service install` runs the daemon as a launchd agent, and the daemon is what delivers messages, so `send` needs it. The bot's workspace opens in herdr the first time a message arrives.
+`herdbot setup` checks herdr and the harness CLIs, creates `~/Bots` and a commented `herdbot.toml`, links the CLI, installs the launchd service and offers a starter bot. The daemon delivers messages, so `send` needs it. The bot's workspace opens in herdr the first time a message arrives.
 
 Other commands:
 
 ```
+herdbot --version                       print the installed version
+herdbot doctor [--json]                 first-run and health checks (exit 1 if any fail)
+herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
+herdbot uninstall [--purge]             remove the service and the herdbot link; --purge also deletes the home
 herdbot list | runs                    bots and subagent runs
 herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
 herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
@@ -52,10 +56,11 @@ herdbot room new | send | list | up    group conversations between bots and you
 herdbot task <bot> <class> <prompt…>   start a subagent from the shell
 herdbot route <class> [--bot BOT]      which harness:model a task class resolves to
 herdbot import-grok                    import the Grok Bot roster once
+herdbot service install                install the launchd service manually
 herdbot service status | uninstall
 ```
 
-Set `HERDBOT_HOME` to keep bots somewhere other than `~/Bots`.
+Set `HERDBOT_HOME` to keep bots somewhere other than `~/Bots`. `HERDBOT_LINK_DIR` is a test hook for choosing the CLI-link directory.
 
 ---
 
@@ -111,7 +116,7 @@ A bot's `cwd` defaults to its own folder. You can point it at a repo instead, fo
 
 **Run from an installed binary.** Every MCP config and pane records the path of the running `herdbot`. If the daemon ran from `target/debug`, a bot that rebuilds herdbot would swap the binary out from under its own subagents. That's why `service install` refuses to run from `target/`. After a `cargo install`, restart the daemon onto the new binary with `launchctl kickstart -k gui/$(id -u)/dev.herdbot.daemon`.
 
-**The service.** `herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it. The daemon starts at login and restarts 10 s after any exit, which includes the times herdr isn't running yet. launchd starts agents with a bare `PATH` that can't find the harness CLIs, so the plist records the installing shell's `PATH`, `HERDBOT_HOME` and `HERDR_SOCKET`.
+**The service.** `herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it. The plist records the binary path as invoked, without resolving symlinks. The daemon starts at login and restarts 10 s after any exit, which includes the times herdr isn't running yet. launchd starts agents with a bare `PATH` that can't find the harness CLIs, so the plist records the installing shell's `PATH`, `HERDBOT_HOME` and `HERDR_SOCKET`. `herdbot doctor` flags a daemon older than the binary on disk; restart it with `herdbot setup --only restart-daemon`.
 
 ### Delivery goes through a queue
 
