@@ -75,3 +75,13 @@ public func fixLabel(_ fix: String) -> String {
     default: "Fix"
     }
 }
+
+/// What the user must do for a failing check that has no automatic fix.
+public func hint(for check: DoctorCheck) -> String? {
+    guard check.status != .ok, check.fix == nil else { return nil }
+    return switch check.id {
+    case "herdr": "Start herdr, then this check clears by itself."
+    case "harnesses": "Install claude, codex, cursor-agent or pi, and make sure it is on your PATH."
+    default: nil
+    }
+}

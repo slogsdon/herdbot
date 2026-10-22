@@ -18,6 +18,8 @@ public final class SetupState {
     public private(set) var problem: String?
     public private(set) var fixing: Set<String> = []
     public private(set) var fixError: String?
+    public private(set) var fixingAll = false
+    public private(set) var lastResult: String?
     private var loginItemStatus: LoginItemStatus = .unavailable
     @ObservationIgnored private let cli: (any SetupCLI)?
     @ObservationIgnored private let loginItem: LoginItemControl?
@@ -33,6 +35,8 @@ public final class SetupState {
 
     public var worst: DoctorStatus { checks.map(\.status).max() ?? .ok }
     public var needsAttention: Bool { worst != .ok }
+    /// Something the "Set up everything" button can actually do.
+    public var hasFixable: Bool { checks.contains { $0.status != .ok && $0.fix != nil } }
 
     public func shouldAutoOpen(dismissedVersion: String?) -> Bool {
         guard let report, worst == .fail else { return false }
@@ -71,12 +75,18 @@ public final class SetupState {
     }
 
     public func fixAll() async {
+        guard !fixingAll else { return }
+        fixingAll = true
         fixError = nil
+        lastResult = nil
+        var messages: [String] = []
         do {
-            _ = try await cli?.setup(fix: nil)
+            let output = try await cli?.setup(fix: nil) ?? ""
+            messages = output.split(separator: "\n").map(String.init)
         } catch {
             fixError = "setup: \(error.localizedDescription)"
             await refresh()
+            fixingAll = false
             return
         }
         if case .notRegistered = loginItemStatus {
@@ -87,6 +97,8 @@ public final class SetupState {
             }
         }
         await refresh()
+        lastResult = messages.isEmpty ? "Nothing to fix automatically." : messages.joined(separator: "\n")
+        fixingAll = false
     }
 
     public func follow(every interval: Duration = .seconds(60)) async {

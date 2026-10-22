@@ -69,6 +69,55 @@ let doctorJSON = """
         #expect(cli.fixes.count == 1 && cli.fixes[0] == nil)
     }
 
+    @Test func theAllButtonNeedsSomethingFixable() async {
+        let onlyUnfixable = SetupState(cli: FakeSetupCLI([report(okCheck, failHarnesses)]))
+        await onlyUnfixable.refresh()
+        #expect(onlyUnfixable.needsAttention)
+        #expect(!onlyUnfixable.hasFixable)
+        let fixable = SetupState(cli: FakeSetupCLI([report(failHarnesses, failService)]))
+        await fixable.refresh()
+        #expect(fixable.hasFixable)
+        let fine = SetupState(cli: FakeSetupCLI([report(okCheck)]))
+        await fine.refresh()
+        #expect(!fine.hasFixable)
+    }
+
+    @Test func fixAllReportsWhatSetupDidAndClearsWhenDone() async {
+        let cli = FakeSetupCLI([report(failService), report(okCheck)])
+        cli.output = "service: installed\ncli-link: linked /opt/homebrew/bin/herdbot"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.fixAll()
+        #expect(state.lastResult == "service: installed\ncli-link: linked /opt/homebrew/bin/herdbot")
+        #expect(!state.fixingAll)
+    }
+
+    @Test func fixAllWithNothingToDoSaysSo() async {
+        let cli = FakeSetupCLI([report(failHarnesses)])
+        cli.output = ""
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.fixAll()
+        #expect(state.lastResult == "Nothing to fix automatically.")
+    }
+
+    @Test func fixAllKeepsTheErrorAndNoResult() async {
+        let cli = FakeSetupCLI([report(failService)])
+        cli.failure = "service: build output"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.fixAll()
+        #expect(state.fixError == "setup: service: build output")
+        #expect(state.lastResult == nil)
+    }
+
+    @Test func hintsExplainChecksWithoutAFix() {
+        #expect(hint(for: failHarnesses)?.contains("PATH") == true)
+        #expect(hint(for: DoctorCheck(id: "herdr", status: .fail, message: "x"))?.contains("herdr") == true)
+        #expect(hint(for: failService) == nil)
+        #expect(hint(for: okCheck) == nil)
+    }
+
     @Test func fixAllAlsoRegistersAnUnregisteredLoginItem() async {
         let cli = FakeSetupCLI([report(failService), report(okCheck)])
         var status = LoginItemStatus.notRegistered

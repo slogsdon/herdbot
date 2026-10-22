@@ -47,6 +47,7 @@ final class FakeSetupCLI: SetupCLI, @unchecked Sendable {
     nonisolated(unsafe) var fixes: [String?] = []
     nonisolated(unsafe) var failure: String?
     nonisolated(unsafe) var doctorFailure: String?
+    nonisolated(unsafe) var output = "ok"
     init(_ reports: [DoctorReport]) { self.reports = reports }
     func doctor() async throws -> DoctorReport {
         if let doctorFailure { throw CLIError.failed(doctorFailure) }
@@ -55,7 +56,7 @@ final class FakeSetupCLI: SetupCLI, @unchecked Sendable {
     func setup(fix: String?) async throws -> String {
         fixes.append(fix)
         if let failure { throw CLIError.failed(failure) }
-        return "ok"
+        return output
     }
 }
 
@@ -63,6 +64,7 @@ func report(_ checks: DoctorCheck...) -> DoctorReport { DoctorReport(version: "0
 let okCheck = DoctorCheck(id: "herdr", status: .ok, message: "herdr 0.9.1")
 let failService = DoctorCheck(id: "service", status: .fail, message: "not installed", fix: "service")
 let warnLink = DoctorCheck(id: "cli-link", status: .warn, message: "no herdbot on PATH", fix: "cli-link")
+let failHarnesses = DoctorCheck(id: "harnesses", status: .fail, message: "none of claude, codex, cursor-agent, pi is on PATH")
 
 /// Records what quick entry sends; `failure` makes the next send throw.
 final class FakeCLI: HerdbotCLI, @unchecked Sendable {
