@@ -47,6 +47,36 @@ import Testing
         #expect(announced == ["new"])
     }
 
+    @Test func menuStateAnnouncesNewCardsOnly() {
+        let state = MenuState()
+        var announced: [String] = []
+        state.onCard = { announced.append($0.id) }
+        state.apply(line(snapshot(cards: [])))
+        state.apply(line(snapshot(cards: [card(id: "a")])))
+        state.apply(line(snapshot(cards: [card(id: "a")])))
+        #expect(announced == ["a"])
+    }
+
+    @Test func aPendingCardCountsAsWaitingOnYou() {
+        let state = MenuState()
+        state.apply(line(snapshot(cards: [card(id: "a")])))
+        #expect(state.icon == .blocked(1))
+        state.apply(line(snapshot(blocked: [blockedEvent("x")], cards: [card(id: "a")])))
+        #expect(state.icon == .blocked(2))
+        state.apply(line(snapshot()))
+        #expect(state.icon == .idle)
+    }
+
+    @Test func chatShowsOnlyTheOpenBotsCards() async {
+        let menu = MenuState()
+        menu.apply(line(snapshot(bots: [BotView(slug: "helper", title: "Helper", up: true), BotView(slug: "other", title: "Other", up: true)],
+                                 cards: [card(id: "a", bot: "helper"), card(id: "b", bot: "other")])))
+        let chat = ChatState(menu: menu, cli: FakeCLI())
+        #expect(chat.cards(for: .bot("helper")).map(\.id) == ["a"])
+        #expect(chat.cards(for: .bot("other")).map(\.id) == ["b"])
+        #expect(chat.cards(for: .room("crew")).isEmpty)
+    }
+
     @Test func eventLinesAreIgnored() throws {
         let state = MenuState()
         state.apply(try #require(try StreamParser.parse(eventLine)))

@@ -33,3 +33,41 @@ func card(id: String = "c1", bot: String = "helper", kind: String = "approval", 
         #expect(try JSONDecoder().decode(StreamLine.self, from: Data(line.utf8)).snapshot?.cards.map(\.id) == ["9f3a000000000001"])
     }
 }
+
+@MainActor
+@Suite struct Cards {
+    @Test func notifiesOncePerCardIdAndNotOnLaunch() {
+        var tracker = CardTracker()
+        #expect(tracker.fresh([card(id: "a")]).isEmpty)
+        #expect(tracker.fresh([card(id: "a")]).isEmpty)
+        #expect(tracker.fresh([card(id: "a"), card(id: "b")]).map(\.id) == ["b"])
+        #expect(tracker.fresh([]).isEmpty)
+        #expect(tracker.fresh([card(id: "a")]).map(\.id) == ["a"])
+    }
+
+    @Test func answeringTracksProgressAndFailure() async {
+        let answers = CardAnswers()
+        let cli = FakeCardCLI()
+        let a = card(id: "a")
+        #expect(answers.state(for: a) == .idle)
+        await answers.answer(a, option: a.options[0], using: cli)
+        #expect(cli.answers.count == 1 && cli.answers[0] == ("a", "trust"))
+        #expect(answers.state(for: a) == .answering("trust"))
+        await answers.answer(a, option: a.options[1], using: cli)
+        #expect(cli.answers.count == 1, "an answering card ignores a second answer")
+
+        let b = card(id: "b")
+        cli.failure = "the prompt changed or is gone; nothing was sent"
+        await answers.answer(b, option: b.options[1], using: cli)
+        #expect(answers.state(for: b) == .failed("the prompt changed or is gone; nothing was sent"))
+        #expect(!cli.answers.contains(where: { $0.0 == "b" }))
+        cli.failure = nil
+        await answers.answer(b, option: b.options[0], using: cli)
+        #expect(cli.answers.contains(where: { $0 == ("b", "trust") }))
+        #expect(answers.state(for: b) == .answering("trust"))
+
+        let c = card(id: "c")
+        await answers.answer(c, option: c.options[0], using: nil)
+        #expect(answers.state(for: c) == .failed(CLIError.notFound.localizedDescription))
+    }
+}

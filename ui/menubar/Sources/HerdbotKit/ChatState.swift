@@ -87,6 +87,11 @@ public final class ChatState {
     /// Persisted items oldest first, then pending ones.
     public var items: [HistoryItem] { persisted + pending }
 
+    public func cards(for recipient: Recipient) -> [Card] {
+        guard case .bot(let slug) = recipient else { return [] }
+        return (menu.snapshot?.cards ?? []).filter { $0.bot == slug }
+    }
+
     public var canLoadOlder: Bool { (persisted.first?.n ?? 0) > 0 }
 
     public func select(_ recipient: Recipient?) async {

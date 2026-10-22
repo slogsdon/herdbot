@@ -48,12 +48,15 @@ public final class MenuState {
     /// Called once per newly blocked agent.
     @ObservationIgnored public var onBlocked: (Event) -> Void = { _ in }
     @ObservationIgnored private var tracker = NotificationTracker()
+    @ObservationIgnored public var onCard: (Card) -> Void = { _ in }
+    @ObservationIgnored private var cardTracker = CardTracker()
 
     public init() {}
 
     public var icon: IconState {
         guard problem == nil, let snapshot else { return .unavailable }
-        if !snapshot.blocked.isEmpty { return .blocked(snapshot.blocked.count) }
+        let waiting = snapshot.blocked.count + snapshot.cards.count
+        if waiting > 0 { return .blocked(waiting) }
         if snapshot.daemon == "down" { return .daemonDown }
         return snapshot.runs.isEmpty ? .idle : .running
     }
@@ -64,6 +67,7 @@ public final class MenuState {
         problem = nil
         self.snapshot = snapshot
         for event in tracker.fresh(snapshot.blocked) { onBlocked(event) }
+        for card in cardTracker.fresh(snapshot.cards) { onCard(card) }
     }
 
     public func fail(_ message: String) {
