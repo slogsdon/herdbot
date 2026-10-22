@@ -28,7 +28,6 @@ struct SetupView: View {
                     if setup.fixingAll { ProgressView().controlSize(.small) }
                     else { Text("Set up everything") }
                 }
-                    .buttonStyle(.borderedProminent)
                     .disabled(!setup.hasFixable || setup.fixingAll || setup.problem != nil)
                     .help(setup.hasFixable ? "Run every automatic fix" : "Nothing here can be fixed automatically")
                 Spacer()

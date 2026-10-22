@@ -6,6 +6,7 @@ struct ChatView: View {
     let menu: MenuState
     let chat: ChatState
     let cli: ProcessCLI?
+    let answers: CardAnswers
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -88,6 +89,9 @@ struct ChatView: View {
                         case .item(let item): MessageRow(item: item, showSpeaker: isRoom).id(item.id)
                         }
                     }
+                    ForEach(chat.cards(for: selection)) { card in
+                        CardView(card: card, answers: answers, cli: cli).id(card.id)
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(16)
@@ -101,6 +105,9 @@ struct ChatView: View {
             }
             .id(selection)
             .onChange(of: chat.items.last?.id) {
+                if chat.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: chat.cards(for: selection).map(\.id)) {
                 if chat.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .overlay(alignment: .bottomTrailing) {
@@ -177,6 +184,7 @@ struct ChatWindow: View {
     let chat: ChatState
     let unread: UnreadTracker
     let cli: ProcessCLI?
+    let answers: CardAnswers
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -184,7 +192,7 @@ struct ChatWindow: View {
             SidebarView(menu: menu, chat: chat, unread: unread)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            ChatView(menu: menu, chat: chat, cli: cli)
+            ChatView(menu: menu, chat: chat, cli: cli, answers: answers)
         }
         .frame(minWidth: 720, minHeight: 480)
         .task(id: menu.snapshot) {

@@ -9,6 +9,7 @@ struct MenuContent: View {
     let cli: ProcessCLI?
     let hotkeyRegistered: Bool
     let openQuickEntry: () -> Void
+    let openChatForBot: (String) -> Void
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -25,10 +26,13 @@ struct MenuContent: View {
             if snapshot.daemon == "down" {
                 Text("daemon not running; messages won't deliver")
             }
-            if !snapshot.blocked.isEmpty {
+            if !snapshot.blocked.isEmpty || !snapshot.cards.isEmpty {
                 Section("Waiting on you") {
                     ForEach(snapshot.blocked, id: \.self) { event in
                         Button("\(event.agent): \(event.reason ?? "waiting")") { focus(event.agent) }
+                    }
+                    ForEach(snapshot.cards) { card in
+                        Button("\(card.bot): \(card.title)") { openChatForBot(card.bot) }
                     }
                 }
             }

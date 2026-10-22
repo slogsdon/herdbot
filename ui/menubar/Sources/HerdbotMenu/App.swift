@@ -14,6 +14,7 @@ struct HerdbotMenuApp: App {
     private let quickEntry: QuickEntryController
     private let chat: ChatState
     private let unread: UnreadTracker
+    private let answers: CardAnswers
     private let opener = WindowOpener()
     private let hotkeyRegistered: Bool
 
@@ -25,6 +26,7 @@ struct HerdbotMenuApp: App {
         let notificationStatus = NotificationStatus()
         let notifier = Notifier(cli: cli, status: notificationStatus)
         state.onBlocked = { notifier.post($0) }
+        state.onCard = { notifier.post($0) }
         if let cli {
             Task { await state.follow(cli) }
         } else {
@@ -41,6 +43,8 @@ struct HerdbotMenuApp: App {
         self.quickEntry = quickEntry
         let chat = ChatState(menu: state, cli: cli)
         self.chat = chat
+        let answers = CardAnswers()
+        self.answers = answers
         unread = UnreadTracker(menu: state)
         let opener = self.opener
         // A blocked notification opens that bot's chat; an agent we can't place still focuses its pane.
@@ -56,7 +60,7 @@ struct HerdbotMenuApp: App {
     var body: some Scene {
         // Opened from the menu, not at launch.
         Window("herdbot", id: "chat") {
-            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli)
+            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers)
         }
         .commands {
             CommandGroup(replacing: .appTermination) {
@@ -73,7 +77,11 @@ struct HerdbotMenuApp: App {
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
-            MenuContent(state: state, setup: setup, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
+            MenuContent(state: state, setup: setup, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() }, openChatForBot: { slug in
+                Task { await chat.select(.bot(slug)) }
+                NSApp.activate(ignoringOtherApps: true)
+                opener.open()
+            })
         } label: {
             MenuIcon(icon: state.icon.with(attention: setup.needsAttention)).modifier(OpenerCapture(opener: opener, onReady: { autoOpenSetup() }))
         }

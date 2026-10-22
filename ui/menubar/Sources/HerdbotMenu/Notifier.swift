@@ -60,6 +60,25 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    func post(_ card: Card) {
+        guard enabled else { return }
+        Task {
+            await refreshStatus()
+            guard authorized else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "\(card.bot) needs your approval"
+            content.body = card.title
+            content.sound = .default
+            content.userInfo = ["agent": card.agent]
+            let request = UNNotificationRequest(identifier: "card-\(card.id)", content: content, trigger: nil)
+            do {
+                try await UNUserNotificationCenter.current().add(request)
+            } catch {
+                fputs("herdbot menu: notification failed: \(error)\n", stderr)
+            }
+        }
+    }
+
     private func add(_ event: Event) async {
         let content = UNMutableNotificationContent()
         content.title = "\(event.agent) is waiting"
