@@ -6,11 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 
-use serde::{Deserialize, Serialize};
-
 use crate::home::{self, Result};
 pub use herdbot_core::rooms::{
-    Mode, Room, Round, State, list_rooms, load_room, load_state, room_dir,
+    Entry, Mode, Room, Round, State, list_rooms, load_room, load_state, read_entries, room_dir,
 };
 use herdbot_core::rooms::state_path;
 
@@ -18,14 +16,6 @@ pub fn save_room(slug: &str, room: &Room) -> Result<()> {
     fs::create_dir_all(room_dir(slug))?;
     fs::write(room_dir(slug).join("room.toml"), toml::to_string_pretty(room)?)?;
     Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Entry {
-    pub at: i64,
-    /// "you", a bot slug, or "herdbot".
-    pub speaker: String,
-    pub text: String,
 }
 
 pub fn validate(room: &Room, bots: &[String]) -> std::result::Result<(), String> {
@@ -58,15 +48,6 @@ pub fn append(slug: &str, speaker: &str, text: &str) -> Result<()> {
         .open(room_dir(slug).join("transcript.jsonl"))?;
     file.write_all(entry_line(speaker, text, home::now()).as_bytes())?;
     Ok(())
-}
-
-/// Every line, `None` for a malformed one, so index `i` is always sequence `i + 1`.
-pub fn read_entries(slug: &str) -> Vec<Option<Entry>> {
-    fs::read_to_string(room_dir(slug).join("transcript.jsonl"))
-        .unwrap_or_default()
-        .lines()
-        .map(|l| serde_json::from_str(l).ok())
-        .collect()
 }
 
 pub fn save_state(slug: &str, state: &State) -> Result<()> {

@@ -448,6 +448,37 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     Ok(())
 }
 
+/// A delivered prompt whose turn has not ended yet. `turns.jsonl` only gets the prompt with its
+/// reply, so this is how a UI shows the message while the bot works.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Inflight {
+    pub prompt: String,
+    pub at: i64,
+}
+
+/// A marker older than this is a crash's leftover, not a bot still working.
+pub const INFLIGHT_STALE_SECS: i64 = 3600;
+
+fn inflight_path(bot: &str) -> PathBuf {
+    root().join(".state").join("inflight").join(format!("{bot}.json"))
+}
+
+/// Mark `prompt` as delivered to `bot`'s main agent. A later delivery replaces it.
+pub fn write_inflight(bot: &str, prompt: &str) -> Result<()> {
+    let path = inflight_path(bot);
+    fs::create_dir_all(path.parent().unwrap())?;
+    write_json(&path, &Inflight { prompt: prompt.to_owned(), at: now() })
+}
+
+pub fn clear_inflight(bot: &str) {
+    let _ = fs::remove_file(inflight_path(bot));
+}
+
+/// The marker, unless it is stale.
+pub fn read_inflight(bot: &str) -> Option<Inflight> {
+    read_json::<Inflight>(&inflight_path(bot)).filter(|m| now() - m.at < INFLIGHT_STALE_SECS)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

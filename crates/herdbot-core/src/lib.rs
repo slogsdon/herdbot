@@ -2,6 +2,7 @@
 
 pub mod cooldown;
 pub mod events;
+pub mod history;
 pub mod home;
 pub mod rooms;
 pub mod snapshot;

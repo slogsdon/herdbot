@@ -76,6 +76,14 @@ pub struct State {
     pub missing_notified: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Entry {
+    pub at: i64,
+    /// "you", a bot slug, or "herdbot".
+    pub speaker: String,
+    pub text: String,
+}
+
 pub fn parse_room(text: &str) -> Result<Room> {
     Ok(toml::from_str(text)?)
 }
@@ -109,4 +117,13 @@ pub fn state_path(slug: &str) -> PathBuf {
 
 pub fn load_state(slug: &str) -> State {
     home::read_json(&state_path(slug)).unwrap_or_default()
+}
+
+/// Every transcript line, `None` for a malformed one, so index `i` is always sequence `i + 1`.
+pub fn read_entries(slug: &str) -> Vec<Option<Entry>> {
+    fs::read_to_string(room_dir(slug).join("transcript.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|l| serde_json::from_str(l).ok())
+        .collect()
 }
