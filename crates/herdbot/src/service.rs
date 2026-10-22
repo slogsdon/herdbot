@@ -59,9 +59,9 @@ pub fn install() -> Result<String> {
     // Keep the path as invoked so a stable link remains the plist's program path.
     let exe = std::env::current_exe()?;
     reject_build_output(&exe)?;
-    // launchd starts agents with a bare PATH; the harness CLIs need this shell's.
+    // launchd and the menu bar app start with a bare PATH, so record the effective PATH.
     let mut env = vec![
-        ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
+        ("PATH".to_owned(), crate::shellenv::effective_path(true)),
         ("HOME".to_owned(), home::home_dir().to_string_lossy().into_owned()),
         ("HERDBOT_HOME".to_owned(), home::root().to_string_lossy().into_owned()),
     ];

@@ -1,6 +1,7 @@
 //! `herdbot setup`: run the fixes `doctor` names (spec: packaging design).
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::doctor::{self, Check, Status};
 use crate::home::{self, Result};
@@ -97,7 +98,7 @@ fn fix_home() -> Result<String> {
 
 fn fix_cli_link() -> Result<String> {
     let exe = std::env::current_exe()?;
-    let path_var = std::env::var("PATH").unwrap_or_default();
+    let path_var = crate::shellenv::effective_path(true);
     let (dir, on_path) = link_dir(&link_candidates(), &path_var, writable)
         .ok_or("no writable directory for the herdbot link (tried /opt/homebrew/bin, /usr/local/bin, ~/.local/bin)")?;
     let link = dir.join("herdbot");
@@ -112,12 +113,33 @@ fn fix_cli_link() -> Result<String> {
     Ok(format!("linked {} -> {}{note}", link.display(), exe.display()))
 }
 
+pub fn wait_until(timeout: Duration, interval: Duration, mut probe: impl FnMut() -> bool) -> bool {
+    let started = Instant::now();
+    loop {
+        if probe() { return true; }
+        if started.elapsed() >= timeout { return false; }
+        std::thread::sleep(interval);
+    }
+}
+
+fn daemon_current() -> bool {
+    std::os::unix::net::UnixStream::connect(home::daemon_lock()).is_ok()
+        && home::read_daemon_info().is_some_and(|info| info.version == env!("CARGO_PKG_VERSION"))
+}
+
+fn wait_for_daemon(done: String) -> Result<String> {
+    if wait_until(Duration::from_secs(15), Duration::from_millis(250), daemon_current) { return Ok(done); }
+    let log = home::root().join(".state/daemon.log");
+    let tail: Vec<String> = std::fs::read_to_string(&log).unwrap_or_default().lines().rev().take(5).map(str::to_owned).collect::<Vec<_>>().into_iter().rev().collect();
+    Err(format!("the daemon did not come up within 15 s; last log lines ({}):\n{}", log.display(), tail.join("\n")).into())
+}
+
 fn run_fix(fix: &str) -> Result<String> {
     match fix {
         "home" => fix_home(),
         "cli-link" => fix_cli_link(),
-        "service" => service::install(),
-        "restart-daemon" => service::restart(),
+        "service" => service::install().and_then(wait_for_daemon),
+        "restart-daemon" => service::restart().and_then(wait_for_daemon),
         other => Err(format!("unknown fix {other}; one of {}", FIX_ORDER.join(", ")).into()),
     }
 }
@@ -205,6 +227,18 @@ pub fn uninstall(purge: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn wait_until_returns_as_soon_as_the_probe_passes() {
+        let mut calls = 0;
+        let up = wait_until(Duration::from_secs(5), Duration::from_millis(1), || { calls += 1; calls == 3 });
+        assert!(up); assert_eq!(calls, 3);
+    }
+    #[test]
+    fn wait_until_gives_up_after_the_timeout() {
+        let mut calls = 0; let started = Instant::now();
+        let up = wait_until(Duration::from_millis(30), Duration::from_millis(5), || { calls += 1; false });
+        assert!(!up); assert!(calls >= 2); assert!(started.elapsed() < Duration::from_secs(2));
+    }
     #[test]
     fn the_toml_template_parses_and_enables_nothing() {
         let table: toml::Table = herdbot_toml_template().parse().unwrap();

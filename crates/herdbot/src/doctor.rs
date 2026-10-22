@@ -224,7 +224,7 @@ fn is_executable(path: &Path) -> bool {
 pub async fn gather() -> Facts {
     let exe = std::env::current_exe().unwrap_or_default();
     let herdr = Client::from_env().ping().await.map_err(|e| e.to_string());
-    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    let path_var = crate::shellenv::effective_path(false);
     let on_path = |name: &str| {
         std::env::split_paths(&path_var)
             .map(|dir| dir.join(name))
