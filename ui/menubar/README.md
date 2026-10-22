@@ -13,11 +13,36 @@ Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has 
 open build/HerdbotMenu.app
 ```
 
-The app finds herdbot at `$HERDBOT_BIN`, `~/.cargo/bin/herdbot`, `/opt/homebrew/bin/herdbot` or
-`/usr/local/bin/herdbot`. To start it at login, add it in System Settings → General → Login Items
-(the app does not register itself).
+The app finds herdbot at `$HERDBOT_BIN`, then `Herdbot.app/Contents/Helpers/herdbot` inside the
+bundle, then `~/.cargo/bin/herdbot`, `/opt/homebrew/bin/herdbot` or `/usr/local/bin/herdbot`.
 
 Icon: `○` idle, `●` subagents running, `⚠ N` agents blocked, `⊘` daemon down, `?` herdbot missing.
+
+## Setup
+
+The Setup window shows the checklist from `herdbot doctor --json`. A Fix button runs
+`herdbot setup --only <fix> --yes`; **Set up everything** runs `herdbot setup --yes`, which also
+creates a starter bot named `helper` when there are none. The window opens by itself once per
+herdbot version when a check fails. The menu bar icon shows a triangle while any check is not ok.
+
+To start the app at login, open Setup and choose **Start at login**. The app registers itself with
+`SMAppService.mainApp`; macOS may require approval in System Settings → General → Login Items.
+
+### Manual check (needs a person)
+
+Use a throwaway home and the plan-1 build of herdbot:
+
+```bash
+export HB=$(mktemp -d)
+export LINKS=$(mktemp -d)
+mkdir -p "$HB/.state/events"
+HERDBOT_HOME="$HB" HERDBOT_LINK_DIR="$LINKS" HERDBOT_BIN=/path/to/plan-1/herdbot build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu
+```
+
+Expect the Setup window to open with `service` and `daemon` failing and `cli-link` warning. Choose **Link herdbot**;
+after refresh that row should be ok. Confirm the menu bar shows the triangle while any check fails
+and returns to its normal icon after all checks are ok. Do not choose **Install service** with a real
+home: it would replace the running daemon.
 
 ## Manual check (needs a person: notification permission and a click)
 
