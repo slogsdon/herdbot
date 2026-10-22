@@ -86,8 +86,7 @@ herdbot that has it (otherwise the chat says "update herdbot"). Your messages ar
 on the left; rooms name each speaker. A message you sent that the bot has not answered shows lighter,
 "queued" until the daemon delivers it and then "working". Scroll up to load older messages; "jump to latest"
 appears when you are not at the bottom. The header's "Jump to pane" opens the bot's herdr pane, and a banner
-appears when the bot is blocked on you. This window is read-only; sending is the quick-entry panel for now.
-The Dock icon shows only while the window is open.
+appears when the bot is blocked on you. Type in the composer at the bottom and press Return to send: it runs `herdbot send` or `herdbot room send`, and the message shows at once as "queued", then "working" once delivered. Each conversation keeps its own draft. Nothing is sent without Return, so dictated text can be read first. Conversations with new messages show an unread count in the sidebar; what you have open in the active window counts as read. Clicking a blocked notification opens that bot's chat (use "Jump to pane" there to answer in herdr). The Dock icon shows only while the window is open.
 
 ### Manual check (needs a person; install the new herdbot and restart the daemon first)
 
@@ -99,4 +98,8 @@ The Dock icon shows only while the window is open.
 5. Add more than 50 items to alpha's `turns.jsonl` and scroll up: older messages load and your place holds. Scroll up, then add a line: "jump to latest" appears, and the view does not jump while you are scrolled up.
 6. Close the window: the Dock icon goes away and the menu bar item stays. Reopen from the menu.
 7. System Settings → Accessibility → Display: Reduce Transparency and Increase Contrast change the sidebar and window; Reduce Motion removes the jump button's animation. Light mode stays readable.
-8. Quit from the menu; `rm -r $HB`.
+9. Composer: select a bot, type `hello "quoted" world`, press Return. A lighter "queued" bubble appears and `cat $HB/.queue/alpha.jsonl` shows the text. Select another bot and back: each keeps its draft. Type right after selecting a conversation: the first characters are not lost (the field has focus).
+10. Unread: with the window open on alpha, `HERDBOT_HOME=$HB herdbot send beta "x"` does nothing to unread (queued items are not counted), but appending a line to `$HB/beta/turns.jsonl` gives beta an unread count in the sidebar; clicking beta clears it. A bot with history you have never opened starts at no count.
+11. Notification: append `{"at":1,"agent":"alpha","kind":"blocked","reason":"approval: demo","harness":"claude"}` to `$HB/.state/events/alpha.jsonl` (create the directory). Click the notification: the window opens on alpha with the blocked banner. Clear it with a later `turn_end` line.
+12. Dictation (MacWhisper, hold Right ⌘): click in the composer, dictate, read the text, press Return.
+13. Quit from the menu; `rm -r $HB`.

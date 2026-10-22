@@ -14,6 +14,9 @@ Written 2026-10-20 for the roadmap items in the top-level README.
 | [Desktop UI, phase 0: core + CLI](2026-10-21-ui-core-and-cli.md) ([spec](../specs/2026-10-21-ui-layer-design.md)) | done (committed on feature/ui-core), 2026-10-21 | new `herdbot-core` crate (`home.rs`, `cooldown.rs` move), `hook.rs`, `main.rs`, `herdr-client`, README |
 | [Desktop UI, phase 1: menu bar app](2026-10-21-menubar-app.md) | done (committed on feature/ui-menubar), 2026-10-21 | new `ui/menubar` Swift package, README |
 | [Desktop UI, phase 2: quick entry](2026-10-22-quick-entry.md) | done (committed on feature/ui-quickentry), 2026-10-22 | `herdbot-core` (`rooms.rs` moves in), `herdbot` `rooms.rs`, `ui/menubar` quick-entry files, README |
+| [Desktop UI, phase 3.1: chat data seam](2026-10-22-chat-data-seam.md) ([spec](../specs/2026-10-22-chat-app-design.md)) | done (committed on feature/ui-chat), 2026-10-22 | `herdbot-core` (`history.rs`, `rooms.rs`, `home.rs`, `snapshot.rs`), `main.rs`, `daemon.rs`, README |
+| [Desktop UI, phase 3.2: chat window](2026-10-22-chat-window.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` sidebar, chat view, history models; macOS floor 15 |
+| [Desktop UI, phase 3.3: composer, unread, notifications](2026-10-22-chat-composer.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` composer, unread tracker, notifier |
 | Grok Bot schedule/skill import | blocked: no data on disk | — |
 
 Run them one after another, in the order **pi → fm → rooms → turn hooks → OptChat memory → cua**, each starting from the previous one's merge. cua goes last because its live checks wait on Shane installing cua-driver and granting it permissions. All six edit `README.md`, and turn hooks also edits `route::launch` and the daemon loop. pi and cua both edit `route::launch`. pi, fm and rooms touch `main.rs` and `tools.rs`. fm and rooms both add to the daemon loop. Running them in parallel only trades the waiting for merge conflicts.

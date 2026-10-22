@@ -1,6 +1,6 @@
 # Chat App (UI phase 3): Design
 
-Approved 2026-10-22. Follows the [UI layer design](2026-10-21-ui-layer-design.md); this replaces its deferred "Phase 3" paragraph. The toolkit changed from gpui to SwiftUI (see Decisions).
+Approved 2026-10-22; built across three plans (data seam, window, composer). Follows the [UI layer design](2026-10-21-ui-layer-design.md); this replaces its deferred "Phase 3" paragraph. The toolkit changed from gpui to SwiftUI (see Decisions).
 
 ## Goals
 

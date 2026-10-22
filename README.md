@@ -18,7 +18,7 @@ This is early, and it's macOS only for now (the daemon runs under launchd). What
 - rooms (group bots) with channel, round-robin and moderated turn-taking, verified live on 2026-10-20
 - computer use through cua (local; verified 2026-10-20)
 
-Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk). The menu bar app, with a ⌥Space quick-entry panel, exists in ui/menubar (built separately with Swift; see its README), and the full desktop app is not built. cursor-agent launches, but its tools haven't been seen working end to end.
+Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk). The menu bar app, with a ⌥Space quick-entry panel and a chat window for your bots and rooms, exists in ui/menubar (built separately with Swift; see its README), and the full desktop app is not built. cursor-agent launches, but its tools haven't been seen working end to end.
 
 ## Requirements
 
