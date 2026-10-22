@@ -1,6 +1,6 @@
 # UI Layer: Design
 
-Approved 2026-10-21 (phases 0–2). Phase 3 gets its own spec.
+Approved 2026-10-21 (phases 0–2). Phase 3 is specified in [2026-10-22-chat-app-design.md](2026-10-22-chat-app-design.md).
 
 ## Goals
 
@@ -61,7 +61,7 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 - If `daemon` is `down`, the panel warns that messages won't deliver until it's up.
 - `status --json` and `watch --json` gain `rooms` (`slug`, `name`, `mode`, `paused`); `v` stays 1 because the field is additive, and the Swift app reads a missing `rooms` as none.
 
-**Phase 3 (deferred):** gpui app with per-bot and per-room views over `transcript.md`, `turns.jsonl` and run history, linking `herdbot-core`. Separate spec.
+**Phase 3:** a chat window with a sidebar of bots and rooms and a scrollable chat per conversation. Now SwiftUI inside the menu bar app, over a new `herdbot history` command, not gpui; see [the chat app design](2026-10-22-chat-app-design.md).
 
 ## Errors
 
