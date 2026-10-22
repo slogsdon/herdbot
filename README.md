@@ -45,6 +45,7 @@ Other commands:
 herdbot list | runs                    bots and subagent runs
 herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
 herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
+herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation's items, newest page first (for UIs)
 herdbot focus <agent>                  focus an agent's pane in herdr
 herdbot up <bot> | down <bot>          start or stop a bot's workspace
 herdbot room new | send | list | up    group conversations between bots and you
@@ -115,6 +116,8 @@ A bot's `cwd` defaults to its own folder. You can point it at a repo instead, fo
 ### Delivery goes through a queue
 
 A prompt sent to a busy agent steers its current turn, and the answer it was working on is lost. I confirmed this with pi on 2026-10-20 (`crates/herdr-client/examples/busy.rs` reproduces it). So nothing prompts an agent directly except its very first prompt at launch. Messages, subagent results and schedule firings go into `.queue/<agent>.jsonl`. The daemon flushes a queue only when the agent is `idle` or `done`, joins the pending items into one prompt, and waits 15 s before delivering to that agent again. A message for a bot that isn't running brings it up. Since the daemon is the only process that launches bots, two senders can't race to start the same one.
+
+When the daemon delivers a prompt to a bot's main agent it also writes `.state/inflight/<bot>.json` (`{"prompt","at"}`), and removes it when that turn is logged to `turns.jsonl`. `turns.jsonl` only gets a line when a turn ends, so this marker is how a UI shows your message while the bot works (`working` in `status --json`, and an `inflight` item in `history`). A marker older than an hour is ignored. If two prompts are delivered before a turn ends, only the latest is shown.
 
 Two known limitations:
 

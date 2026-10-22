@@ -174,6 +174,8 @@ async fn flush_queues(
             if home::load_state(&agent).is_some() {
                 mains.status.insert(agent.clone(), "working".into());
                 mains.prompt.insert(agent.clone(), text.clone());
+                // Mirror `delivered` on disk so a UI can show the prompt while the turn runs.
+                home::write_inflight(&agent, &text)?;
                 mains.delivered.insert(agent.clone(), text);
             }
             println!("delivered {} message(s) to {agent}", texts.len());
@@ -282,6 +284,7 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                         &reply,
                     ) {
                         hook::append_turn(&event.agent, event.at, prompt.as_deref(), &reply)?;
+                        home::clear_inflight(&event.agent);
                     } else {
                         println!(
                             "launch {}: dropped READY reply: {}",
