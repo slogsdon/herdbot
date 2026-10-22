@@ -53,10 +53,12 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 - A `blocked` event posts a user notification; clicking it runs `herdbot focus <agent>`.
 - Add it as a login item by hand (System Settings → Login Items); registering one in code is deferred. Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff.
 
-**Phase 2: quick-entry.**
-- A global hotkey opens a floating panel with a bot/room picker and a text field.
-- Submit calls `herdbot send` / `herdbot room send`; the panel shows "queued".
+**Phase 2: quick-entry** (refined 2026-10-22).
+- ⌥Space (Carbon `RegisterEventHotKey`, no Accessibility permission) opens a floating panel: a bot/room picker preselected to the last recipient, and a multi-line text field.
+- Return or ⌘Return submits through `herdbot send` / `herdbot room send`; the panel shows "queued" and closes. Esc cancels. Nothing is sent without a keypress, so dictated text can be reviewed first.
+- Dictation (MacWhisper: hold Right ⌘; it types or pastes into the focused field): the hotkey is not a bare modifier; the panel activates the app and becomes key; it stays open if a dictation HUD takes focus; the field is a standard text field. Unverified until a person tests it with MacWhisper.
 - If `daemon` is `down`, the panel warns that messages won't deliver until it's up.
+- `status --json` and `watch --json` gain `rooms` (`slug`, `name`, `mode`, `paused`); `v` stays 1 because the field is additive, and the Swift app reads a missing `rooms` as none.
 
 **Phase 3 (deferred):** gpui app with per-bot and per-room views over `transcript.md`, `turns.jsonl` and run history, linking `herdbot-core`. Separate spec.
 
