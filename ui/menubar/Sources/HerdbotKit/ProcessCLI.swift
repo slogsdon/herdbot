@@ -1,5 +1,79 @@
 import Foundation
 
+private final class ProcessOutput: @unchecked Sendable {
+    private let continuation: CheckedContinuation<Data, Error>
+    private let accepted: Set<Int32>
+    private let lock = NSLock()
+    private var process: Process?
+    private var output = Data()
+    private var errors = Data()
+    private var status: Int32?
+    private var outputEnded = false
+    private var errorsEnded = false
+    private var completed = false
+
+    init(process: Process, continuation: CheckedContinuation<Data, Error>, accepted: Set<Int32>) {
+        self.process = process
+        self.continuation = continuation
+        self.accepted = accepted
+    }
+
+    func appendOutput(_ data: Data) { append(data, toErrors: false) }
+    func appendErrors(_ data: Data) { append(data, toErrors: true) }
+    func finishOutput() { finish(errors: false) }
+    func finishErrors() { finish(errors: true) }
+
+    func terminate(_ status: Int32) {
+        lock.lock()
+        self.status = status
+        lock.unlock()
+        resumeIfReady()
+    }
+
+    func fail(_ error: Error) {
+        lock.lock()
+        guard !completed else { lock.unlock(); return }
+        completed = true
+        let process = process
+        self.process = nil
+        lock.unlock()
+        process?.terminationHandler = nil
+        continuation.resume(throwing: error)
+    }
+
+    private func append(_ data: Data, toErrors: Bool) {
+        lock.lock()
+        if toErrors { errors.append(data) } else { output.append(data) }
+        lock.unlock()
+    }
+
+    private func finish(errors: Bool) {
+        lock.lock()
+        if errors { errorsEnded = true } else { outputEnded = true }
+        lock.unlock()
+        resumeIfReady()
+    }
+
+    private func resumeIfReady() {
+        lock.lock()
+        guard !completed, let status, outputEnded, errorsEnded else { lock.unlock(); return }
+        completed = true
+        let output = output
+        let errors = errors
+        let process = process
+        self.process = nil
+        lock.unlock()
+        process?.terminationHandler = nil
+
+        if accepted.contains(status) && (status == 0 || !output.isEmpty) {
+            continuation.resume(returning: output)
+        } else {
+            let text = String(decoding: errors, as: UTF8.self)
+            continuation.resume(throwing: CLIError.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+    }
+}
+
 public struct ProcessCLI: HerdbotCLI {
     public let binary: URL
     public let environment: [String: String]
@@ -81,8 +155,7 @@ public struct ProcessCLI: HerdbotCLI {
     }
 
     /// Run `herdbot <arguments>` to completion and return its stdout; a non-zero exit throws its
-    /// stderr. Stdout is read to its end while the process runs, so a large page can't stall it; stderr
-    /// (herdbot's errors are one line) is read after it.
+    /// stderr. Both streams are drained while the process runs, so a large page can't stall it.
     private func output(_ arguments: [String], acceptingExit accepted: Set<Int32> = [0]) async throws -> Data {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let process = Process()
@@ -93,22 +166,36 @@ public struct ProcessCLI: HerdbotCLI {
             process.environment = environment
             process.standardOutput = outputs
             process.standardError = errors
+            let result = ProcessOutput(process: process, continuation: continuation, accepted: accepted)
+            outputs.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    result.finishOutput()
+                } else {
+                    result.appendOutput(data)
+                }
+            }
+            errors.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    result.finishErrors()
+                } else {
+                    result.appendErrors(data)
+                }
+            }
+            process.terminationHandler = { terminatedProcess in
+                result.terminate(terminatedProcess.terminationStatus)
+            }
             do {
                 try process.run()
             } catch {
-                continuation.resume(throwing: CLIError.failed("could not start herdbot: \(error.localizedDescription)"))
-                return
-            }
-            DispatchQueue.global().async {
-                let data = outputs.fileHandleForReading.readDataToEndOfFile()
-                let errorText = errors.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                if accepted.contains(process.terminationStatus) && (process.terminationStatus == 0 || !data.isEmpty) {
-                    continuation.resume(returning: data)
-                } else {
-                    let text = String(decoding: errorText, as: UTF8.self)
-                    continuation.resume(throwing: CLIError.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
+                outputs.fileHandleForReading.readabilityHandler = nil
+                errors.fileHandleForReading.readabilityHandler = nil
+                try? outputs.fileHandleForReading.close()
+                try? errors.fileHandleForReading.close()
+                result.fail(CLIError.failed("could not start herdbot: \(error.localizedDescription)"))
             }
         }
     }
