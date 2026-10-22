@@ -297,6 +297,26 @@ pub fn daemon_lock() -> PathBuf {
     root().join(".state").join("daemon.lock")
 }
 
+/// What the running daemon reports about itself; `doctor` compares its version with the binary on disk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonInfo {
+    pub version: String,
+    pub exe: String,
+    pub pid: u32,
+}
+
+pub fn daemon_info_path() -> PathBuf {
+    root().join(".state").join("daemon.json")
+}
+
+pub fn write_daemon_info(info: &DaemonInfo) -> Result<()> {
+    write_json(&daemon_info_path(), info)
+}
+
+pub fn read_daemon_info() -> Option<DaemonInfo> {
+    read_json(&daemon_info_path())
+}
+
 pub fn paths_rewrites() -> BTreeMap<String, String> {
     #[derive(Deserialize, Default)]
     struct Config {
@@ -482,6 +502,12 @@ pub fn read_inflight(bot: &str) -> Option<Inflight> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_info_round_trips() {
+        let info = DaemonInfo { version: "0.1.0".into(), exe: "/bin/herdbot".into(), pid: 42 };
+        assert_eq!(serde_json::from_str::<DaemonInfo>(&serde_json::to_string(&info).unwrap()).unwrap(), info);
+    }
 
     #[test]
     fn cua_table_is_optional() {

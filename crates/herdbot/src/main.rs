@@ -20,6 +20,7 @@ use herdbot_core::{cooldown, history, home, snapshot};
 use home::Result;
 
 const USAGE: &str = "usage:
+  herdbot --version
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
   herdbot service install|uninstall|status   run the daemon as a launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
@@ -72,6 +73,10 @@ async fn cli() -> Result<()> {
     let herdr = Client::from_env();
     let rest = |args: &[String], from: usize| args.get(from..).unwrap_or_default().join(" ");
     match command.as_str() {
+        "--version" | "-V" | "version" => {
+            println!("herdbot {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         "daemon" => daemon::run().await,
         "service" => {
             let out = match args.first().map(String::as_str) {

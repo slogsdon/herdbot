@@ -39,6 +39,19 @@ fn take_lock() -> Result<std::os::unix::net::UnixListener> {
 
 pub async fn run() -> Result<()> {
     let _lock = take_lock()?;
+    let _daemon_info = match home::write_daemon_info(&home::DaemonInfo {
+        version: env!("CARGO_PKG_VERSION").into(),
+        exe: std::env::current_exe()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        pid: std::process::id(),
+    }) {
+        Ok(()) => Some(DaemonInfoGuard),
+        Err(error) => {
+            eprintln!("daemon.json: {error}");
+            None
+        }
+    };
     let herdr = Client::from_env();
     println!(
         "herdbot daemon: herdr {} at {}",
@@ -85,6 +98,18 @@ pub async fn run() -> Result<()> {
             }
         }
         tokio::time::sleep(TICK).await;
+    }
+}
+
+struct DaemonInfoGuard;
+
+impl Drop for DaemonInfoGuard {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_file(home::daemon_info_path())
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("daemon.json cleanup: {error}");
+        }
     }
 }
 

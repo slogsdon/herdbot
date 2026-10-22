@@ -2,14 +2,14 @@
 //! that starts at login and restarts if it exits.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::home::{self, Result};
 
 const LABEL: &str = "dev.herdbot.daemon";
 
-fn plist_path() -> PathBuf {
+pub fn plist_path() -> PathBuf {
     home::home_dir().join(format!("Library/LaunchAgents/{LABEL}.plist"))
 }
 
@@ -22,6 +22,24 @@ fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+}
+
+/// A rebuild would swap a build output's bytes under the running daemon.
+pub fn reject_build_output(exe: &Path) -> Result<()> {
+    if exe.components().any(|c| c.as_os_str() == "target") {
+        return Err(format!(
+            "{} is a build output; a rebuild would swap the daemon's binary under it. Run `cargo install --path crates/herdbot` and install from ~/.cargo/bin/herdbot",
+            exe.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+#[allow(dead_code)] // Used by setup in Task 3.
+pub fn restart() -> Result<String> {
+    launchctl(&["kickstart", "-k", &format!("{}/{LABEL}", domain()?)])?;
+    Ok("restarted the daemon".into())
 }
 
 fn launchctl(args: &[&str]) -> Result<String> {
@@ -38,14 +56,9 @@ fn launchctl(args: &[&str]) -> Result<String> {
 }
 
 pub fn install() -> Result<String> {
-    let exe = std::env::current_exe()?.canonicalize()?;
-    if exe.components().any(|c| c.as_os_str() == "target") {
-        return Err(format!(
-            "{} is a build output; a rebuild would swap the daemon's binary under it. Run `cargo install --path crates/herdbot` and install from ~/.cargo/bin/herdbot",
-            exe.display()
-        )
-        .into());
-    }
+    // Keep the path as invoked so a stable link remains the plist's program path.
+    let exe = std::env::current_exe()?;
+    reject_build_output(&exe)?;
     // launchd starts agents with a bare PATH; the harness CLIs need this shell's.
     let mut env = vec![
         ("PATH".to_owned(), std::env::var("PATH").unwrap_or_default()),
@@ -124,4 +137,14 @@ pub fn status() -> Result<String> {
         })
         .collect::<Vec<_>>()
         .join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn build_outputs_are_rejected_installed_paths_are_not() {
+        assert!(super::reject_build_output(std::path::Path::new("/Users/a/Code/herdbot/target/debug/herdbot")).is_err());
+        assert!(super::reject_build_output(std::path::Path::new("/Applications/Herdbot.app/Contents/Helpers/herdbot")).is_ok());
+        assert!(super::reject_build_output(std::path::Path::new("/opt/homebrew/bin/herdbot")).is_ok());
+    }
 }
