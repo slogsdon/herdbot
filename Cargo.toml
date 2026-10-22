@@ -4,7 +4,7 @@ members = ["crates/herdr-client", "crates/herdbot", "crates/herdbot-core"]
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 repository = "https://github.com/slogsdon/herdbot"
 
