@@ -5,13 +5,19 @@ import SwiftUI
 @MainActor
 final class WindowOpener {
     var open: () -> Void = {}
+    var openSetup: () -> Void = {}
 }
 
 struct OpenerCapture: ViewModifier {
     let opener: WindowOpener
+    let onReady: () -> Void
     @Environment(\.openWindow) private var openWindow
 
     func body(content: Content) -> some View {
-        content.task { opener.open = { openWindow(id: "chat") } }
+        content.task {
+            opener.open = { openWindow(id: "chat") }
+            opener.openSetup = { openWindow(id: "setup") }
+            onReady()
+        }
     }
 }

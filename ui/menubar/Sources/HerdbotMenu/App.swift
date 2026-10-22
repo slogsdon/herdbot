@@ -8,6 +8,7 @@ struct HerdbotMenuApp: App {
     // A plain `let`: the App struct is built once, and @State is a macro whose plugin needs full Xcode.
     private let state: MenuState
     private let cli: ProcessCLI?
+    private let setup: SetupState
     private let notifier: Notifier
     private let notificationStatus: NotificationStatus
     private let quickEntry: QuickEntryController
@@ -19,6 +20,8 @@ struct HerdbotMenuApp: App {
     init() {
         let state = MenuState()
         let cli = ProcessCLI.locate().map { ProcessCLI(binary: $0) }
+        let setup = SetupState(cli: cli, loginItem: makeLoginItemControl())
+        Task { await setup.follow() }
         let notificationStatus = NotificationStatus()
         let notifier = Notifier(cli: cli, status: notificationStatus)
         state.onBlocked = { notifier.post($0) }
@@ -32,6 +35,7 @@ struct HerdbotMenuApp: App {
         hotkeyRegistered = GlobalHotkey().register(keyCode: kVK_Space, modifiers: optionKey) { quickEntry.toggle() }
         self.state = state
         self.cli = cli
+        self.setup = setup
         self.notifier = notifier
         self.notificationStatus = notificationStatus
         self.quickEntry = quickEntry
@@ -63,10 +67,24 @@ struct HerdbotMenuApp: App {
             }
         }
         .defaultLaunchBehavior(.suppressed)
+        Window("Set up herdbot", id: "setup") {
+            SetupView(setup: setup)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
-            MenuContent(state: state, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
+            MenuContent(state: state, setup: setup, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
         } label: {
-            MenuIcon(icon: state.icon).modifier(OpenerCapture(opener: opener))
+            MenuIcon(icon: state.icon.with(attention: setup.needsAttention)).modifier(OpenerCapture(opener: opener, onReady: { autoOpenSetup() }))
+        }
+    }
+
+    private func autoOpenSetup() {
+        Task {
+            await setup.refresh()
+            if setup.shouldAutoOpen(dismissedVersion: UserDefaults.standard.string(forKey: "setupDismissedVersion")) {
+                opener.openSetup()
+            }
         }
     }
 }

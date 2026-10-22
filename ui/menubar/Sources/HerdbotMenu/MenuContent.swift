@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MenuContent: View {
     let state: MenuState
+    let setup: SetupState
     let notifications: NotificationStatus
     let cli: ProcessCLI?
     let hotkeyRegistered: Bool
@@ -57,6 +58,10 @@ struct MenuContent: View {
             Text("waiting for herdbot…")
         }
         Divider()
+        Button(setup.needsAttention ? "Finish setup…" : "Setup…") {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "setup")
+        }
         Button("Open herdbot") {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "chat")

@@ -15,6 +15,7 @@ struct MenuIcon: View {
             }
         case .daemonDown: Image(systemName: "circle.slash")
         case .unavailable: Image(systemName: "questionmark.circle")
+        case .attention: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
     }
 }
