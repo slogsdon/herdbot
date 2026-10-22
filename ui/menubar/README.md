@@ -37,31 +37,43 @@ Icon: `○` idle, `●` subagents running, `⚠ N` agents blocked, `⊘` daemon 
 
 ## Quick entry
 
-⌥Space (or the menu's "Quick entry") opens a panel: pick a bot or room, type or dictate, press Return
-(or ⌘Return). It runs `herdbot send <bot> <text>` or `herdbot room send <room> <text>`, shows "queued"
-and closes. Esc cancels. The last recipient is remembered. If the daemon is down the panel warns that
-nothing is delivered until it is up. Nothing is ever sent without a keypress, so you can read a
-dictated message before it goes.
+⌥Space (or the menu's "Quick entry") opens a Spotlight-style panel: a large message field, and beneath
+it a gear menu on the left and a "To" menu (bots, then rooms) on the right. Return sends it with
+`herdbot send <bot> <text>` or `herdbot room send <room> <text>`; a "Queued to ..." overlay covers the
+panel and it closes. A failure shows its error over the panel; click it or start typing to edit
+(your text is kept). Esc closes the panel. The last recipient is remembered. If the daemon is down a
+note says messages wait until it is up. Nothing is ever sent without a keypress, so you can read a
+dictated message before it goes. The gear menu shows the hotkey and has Quit.
+
+The panel uses the system material (Liquid Glass on macOS 26 and later, the HUD blur before that), so
+Reduce Transparency, Increase Contrast, Reduce Motion, light/dark and your accent colour apply to it.
 
 Dictation (MacWhisper, hold Right ⌘): the hotkey is not a bare modifier, so it can't collide with the
 dictation key; the panel activates the app and takes key focus, so dictated text lands in its field; and the
 panel stays open if a dictation HUD takes focus for a moment.
 
-### Manual check (needs a person; MacWhisper for steps 6-7)
+### Manual check (needs a person; MacWhisper for steps 7-8)
 
-1. `cargo install --path crates/herdbot`, restart the daemon, and quit any running HerdbotMenu. Then
-   `./scripts/build-app.sh`.
+1. `./scripts/build-app.sh`, and quit any running HerdbotMenu first. Use a herdbot with rooms in
+   `status --json` (`cargo install --path crates/herdbot`, restart the daemon).
 2. Throwaway state with two bots and a room:
    `export HB=$(mktemp -d); for b in scratch other; do HERDBOT_HOME=$HB herdbot new $b; done; HERDBOT_HOME=$HB herdbot room new crew --members scratch,other`
 3. `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`. Press ⌥Space. Expect a
-   floating panel with the text field focused, a picker listing `scratch`, `other` and `Crew (room)`, and a
-   "daemon not running" warning. If the menu says "⌥Space is taken by another app", free the key first.
-4. Type `hello "quoted" world`, press Return. Expect "queued" and the panel closes. Check
-   `cat $HB/.queue/scratch.jsonl` shows the text.
-5. Open it again: the picker still shows `scratch`. Choose `Crew (room)`, type `to the room`, press ⌘Return.
-   Check `tail -1 $HB/rooms/crew/transcript.jsonl` shows it from `you`. Press ⌥Space, then Esc: it closes and sends nothing.
-6. MacWhisper: open the panel, hold Right ⌘ and speak. Expect the text to appear in the field and nothing
-   to send. Release; read it; press Return to send. If the text goes elsewhere, the panel is not key: report that.
-7. Repeat 6 while another app is frontmost before pressing ⌥Space (the usual case). If the transcript
-   lands in the other app, or the panel closes when MacWhisper's HUD appears, report it.
-8. Quit from the menu; `rm -r $HB`.
+   translucent rounded panel near the top of the screen with a hairline border, the cursor in a large
+   field, a gear at the lower left, a "daemon not running" note, and `To ⌃ scratch` (borderless) at the
+   lower right. If the menu says "⌥Space is taken by another app", free the key first.
+4. Type `hello "quoted" world`, press Return. Expect a "Queued to scratch" overlay over the whole panel,
+   then the panel closes. `cat $HB/.queue/scratch.jsonl` shows the text.
+5. Reopen several times (send, then Esc, then send again): the cursor is in the field every time. Open the
+   "To" menu, pick `Crew (room)`, send `to the room`; `tail -1 $HB/rooms/crew/transcript.jsonl` shows it
+   from `you`. Reopen: the picker still shows `Crew (room)`.
+6. Make a send fail: `chmod 000 $HB/.queue`, send, and expect an error overlay that stays; click it (or type) and the
+   text is still there. `chmod 755 $HB/.queue` afterwards. Open the gear: it lists the hotkey and Quit.
+   Type enough text (or paste several lines) to see the field grow up to 6 lines while the panel's top
+   edge stays put.
+7. MacWhisper: open the panel, hold Right ⌘ and speak. The text appears in the field and nothing sends;
+   press Return to send. Repeat with another app in front before pressing ⌥Space.
+8. System Settings → Accessibility → Display: turn on Reduce Transparency, then Increase Contrast, then
+   Reduce Motion, one at a time, reopening the panel each time. Expect an opaque panel, a stronger border,
+   and no fade, respectively. Switch to light mode: the panel stays readable. Switch them back.
+9. Quit from the gear menu; `rm -r $HB`.

@@ -54,8 +54,9 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 - Add it as a login item by hand (System Settings → Login Items); registering one in code is deferred. Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff.
 
 **Phase 2: quick-entry** (refined 2026-10-22).
-- ⌥Space (Carbon `RegisterEventHotKey`, no Accessibility permission) opens a floating panel: a bot/room picker preselected to the last recipient, and a multi-line text field.
-- Return or ⌘Return submits through `herdbot send` / `herdbot room send`; the panel shows "queued" and closes. Esc cancels. Nothing is sent without a keypress, so dictated text can be reviewed first.
+- ⌥Space (Carbon `RegisterEventHotKey`, no Accessibility permission) opens a Spotlight-style floating panel (redesigned 2026-10-22): a large full-width message field, then a row with a gear menu (hotkey, Quit) on the left and a borderless "To" bot/room menu on the right, preselected to the last recipient. There are no buttons, 8 pt padding and a hairline border.
+- Return submits through `herdbot send` / `herdbot room send`. A success or error overlay covers the whole panel: success closes it after a moment; an error stays until a click or a keystroke, and the text is kept. Esc closes. Nothing is sent without a keypress, so dictated text can be reviewed first.
+- The panel uses the system material (`NSGlassEffectView` on macOS 26+, `NSVisualEffectView` before) and semantic colours, so Reduce Transparency, Increase Contrast, Reduce Motion, light/dark and the accent colour follow the system.
 - Dictation (MacWhisper: hold Right ⌘; it types or pastes into the focused field): the hotkey is not a bare modifier; the panel activates the app and becomes key; it stays open if a dictation HUD takes focus; the field is a standard text field. Unverified until a person tests it with MacWhisper.
 - If `daemon` is `down`, the panel warns that messages won't deliver until it's up.
 - `status --json` and `watch --json` gain `rooms` (`slug`, `name`, `mode`, `paused`); `v` stays 1 because the field is additive, and the Swift app reads a missing `rooms` as none.
