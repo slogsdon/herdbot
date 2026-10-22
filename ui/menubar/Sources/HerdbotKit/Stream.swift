@@ -22,6 +22,8 @@ public protocol HerdbotCLI: Sendable {
     func focus(agent: String) async throws
     /// `herdbot send <bot> <text>` or `herdbot room send <room> <text>`: queues the text.
     func send(to recipient: Recipient, text: String) async throws
+    /// `herdbot history <target> --json`: the newest page, or the `limit` items before item `before`.
+    func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage
 }
 
 public enum StreamParser {

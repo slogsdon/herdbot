@@ -65,28 +65,48 @@ public struct ProcessCLI: HerdbotCLI {
         }
     }
 
-    /// Run `herdbot <arguments>` to completion; a non-zero exit throws its stderr.
+    public func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage {
+        var arguments = ["history", target.historyTarget, "--json", "--limit", String(limit)]
+        if let before { arguments += ["--before", String(before)] }
+        let data = try await output(arguments)
+        let page = try JSONDecoder().decode(HistoryPage.self, from: data)
+        guard page.v == supportedVersion else { throw CLIError.unsupported(page.v) }
+        return page
+    }
+
     private func run(_ arguments: [String]) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        _ = try await output(arguments)
+    }
+
+    /// Run `herdbot <arguments>` to completion and return its stdout; a non-zero exit throws its
+    /// stderr. Stdout is read to its end while the process runs, so a large page can't stall it; stderr
+    /// (herdbot's errors are one line) is read after it.
+    private func output(_ arguments: [String]) async throws -> Data {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let process = Process()
+            let outputs = Pipe()
             let errors = Pipe()
             process.executableURL = binary
             process.arguments = arguments
             process.environment = environment
-            process.standardOutput = FileHandle.nullDevice
+            process.standardOutput = outputs
             process.standardError = errors
-            process.terminationHandler = { finished in
-                if finished.terminationStatus == 0 {
-                    continuation.resume()
-                } else {
-                    let text = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                    continuation.resume(throwing: CLIError.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)))
-                }
-            }
             do {
                 try process.run()
             } catch {
                 continuation.resume(throwing: CLIError.failed("could not start herdbot: \(error.localizedDescription)"))
+                return
+            }
+            DispatchQueue.global().async {
+                let data = outputs.fileHandleForReading.readDataToEndOfFile()
+                let errorText = errors.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                if process.terminationStatus == 0 {
+                    continuation.resume(returning: data)
+                } else {
+                    let text = String(decoding: errorText, as: UTF8.self)
+                    continuation.resume(throwing: CLIError.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+                }
             }
         }
     }

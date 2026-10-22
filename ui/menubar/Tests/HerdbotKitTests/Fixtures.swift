@@ -52,4 +52,17 @@ final class FakeCLI: HerdbotCLI, @unchecked Sendable {
         if let failure { throw CLIError.failed(failure) }
         sent.append((recipient, text))
     }
+    /// What `history` answers, keyed by target; an absent target is an empty conversation.
+    nonisolated(unsafe) var pages: [Recipient: [HistoryItem]] = [:]
+    nonisolated(unsafe) var pending: [Recipient: [HistoryItem]] = [:]
+    nonisolated(unsafe) var historyCalls: [(Recipient, Int?, Int)] = []
+    nonisolated(unsafe) var historyFailure: String?
+    func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage {
+        historyCalls.append((target, before, limit))
+        if let historyFailure { throw CLIError.failed(historyFailure) }
+        let all = pages[target] ?? []
+        let end = min(before ?? all.count, all.count)
+        let slice = Array(all[max(0, end - limit)..<end])
+        return HistoryPage(target: target.historyTarget, total: all.count, items: slice + (before == nil ? pending[target] ?? [] : []))
+    }
 }

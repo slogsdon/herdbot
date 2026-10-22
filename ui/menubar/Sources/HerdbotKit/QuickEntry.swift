@@ -14,6 +14,14 @@ public enum Recipient: Hashable, Sendable {
         }
     }
 
+    /// The `<target>` argument of `herdbot history`.
+    var historyTarget: String {
+        switch self {
+        case .bot(let slug): slug
+        case .room(let slug): "room:\(slug)"
+        }
+    }
+
     init?(key: String) {
         if key.hasPrefix("bot:") { self = .bot(String(key.dropFirst(4))) }
         else if key.hasPrefix("room:") { self = .room(String(key.dropFirst(5))) }

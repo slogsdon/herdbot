@@ -38,4 +38,34 @@ import Testing
         #expect(try StreamParser.parse("not json") == nil)
         #expect(try StreamParser.parse(#"{"hello":1}"#) == nil)
     }
+
+    @Test func conversationCountsDecodeAndDefaultForAnOlderHerdbot() throws {
+        let new = """
+        {"v":1,"type":"snapshot","snapshot":{"v":1,"at":1,"daemon":"up",\
+        "bots":[{"slug":"a","title":"A","up":true,"items":3,"last_at":7,"preview":"hi","working":true}],\
+        "rooms":[{"slug":"c","name":"C","mode":"channel","paused":false,"items":2,"last_at":9,"preview":"yo"}],\
+        "runs":[],"cooldowns":[],"blocked":[],"warnings":[]}}
+        """
+        let snap = try #require(try StreamParser.parse(new)?.snapshot)
+        #expect(snap.bots == [BotView(slug: "a", title: "A", up: true, items: 3, lastAt: 7, preview: "hi", working: true)])
+        #expect(snap.rooms == [RoomView(slug: "c", name: "C", mode: "channel", paused: false, items: 2, lastAt: 9, preview: "yo")])
+        let old = try #require(try StreamParser.parse(snapshotLine)?.snapshot)
+        #expect(old.bots == [BotView(slug: "alpha", title: "Alpha", up: true)])
+        #expect(old.bots[0].lastAt == nil)
+    }
+
+    @Test func historyPageDecodesPersistedAndPendingItems() throws {
+        let json = """
+        {"v":1,"target":"alpha","total":2,"items":[
+        {"n":0,"at":1,"kind":"user","text":"hi"},
+        {"n":1,"at":2,"kind":"bot","speaker":"alpha","text":"hello"},
+        {"n":null,"at":3,"kind":"user","text":"later","state":"queued"}],"warnings":["w"]}
+        """
+        let page = try JSONDecoder().decode(HistoryPage.self, from: Data(json.utf8))
+        #expect(page.total == 2)
+        #expect(page.items.map(\.id) == ["n0", "n1", "p:queued:3:later"])
+        #expect(page.items.map(\.isPending) == [false, false, true])
+        #expect(page.items[1].speaker == "alpha")
+        #expect(page.warnings == ["w"])
+    }
 }
