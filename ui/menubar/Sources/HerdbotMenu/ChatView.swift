@@ -89,12 +89,16 @@ struct ChatView: View {
                         }
                     }
                     Color.clear.frame(height: 1).id("bottom")
-                        .onAppear { chat.atBottom = true }
-                        .onDisappear { chat.atBottom = false }
                 }
                 .padding(16)
             }
             .defaultScrollAnchor(.bottom)
+            // Content no taller than the container leaves offset 0, so the inequality holds: at the bottom.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 24
+            } action: { _, nearBottom in
+                chat.atBottom = nearBottom
+            }
             .id(selection)
             .onChange(of: chat.items.last?.id) {
                 if chat.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
@@ -135,8 +139,13 @@ struct Composer: View {
                 .font(.system(size: 15))
                 .lineLimit(1...6)
                 .focused($focused)
-                .disabled(chat.sendStatus == .sending)
-                .onSubmit { Task { await chat.send() } }
+                // Not disabled while sending: that drops focus. canSend already ignores a second Return.
+                .onSubmit {
+                    Task {
+                        await chat.send()
+                        focused = true
+                    }
+                }
                 .onChange(of: chat.draft) { chat.dismissSendFailure() }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
