@@ -51,7 +51,7 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 - `MenuBarExtra` whose icon shows idle, running, or blocked (with a count).
 - The menu lists bots, running subagents and cooling harnesses with time left.
 - A `blocked` event posts a user notification; clicking it runs `herdbot focus <agent>`.
-- Runs as a login item. Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff.
+- Add it as a login item by hand (System Settings → Login Items); registering one in code is deferred. Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff.
 
 **Phase 2: quick-entry.**
 - A global hotkey opens a floating panel with a bot/room picker and a text field.
