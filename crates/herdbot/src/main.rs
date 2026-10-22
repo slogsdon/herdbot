@@ -11,6 +11,7 @@ mod rooms;
 mod route;
 mod run;
 mod service;
+mod setup;
 mod tools;
 
 use std::io::Write;
@@ -23,6 +24,7 @@ use home::Result;
 const USAGE: &str = "usage:
   herdbot --version
   herdbot doctor [--json]               first-run and health checks (exit 1 if any fail)
+  herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
   herdbot service install|uninstall|status   run the daemon as a launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
@@ -91,6 +93,11 @@ async fn cli() -> Result<()> {
             }
             Ok(())
         }
+        "setup" => {
+            let only = flag(&mut args, "--only");
+            let yes = args.iter().any(|arg| arg == "--yes" || arg == "-y");
+            setup::run(only, yes).await
+        }
         "daemon" => daemon::run().await,
         "service" => {
             let out = match args.first().map(String::as_str) {
@@ -113,25 +120,8 @@ async fn cli() -> Result<()> {
             if name.is_empty() {
                 return Err(USAGE.into());
             }
-            let slug = home::slug(&name);
-            if home::bot_dir(&slug).join("bot.toml").exists() {
-                return Err(format!("bot {slug} already exists").into());
-            }
-            home::save_bot(
-                &slug,
-                &home::Bot {
-                    name,
-                    cwd,
-                    class,
-                    source: "local".into(),
-                    ..Default::default()
-                },
-            )?;
-            std::fs::write(home::bot_dir(&slug).join("BOT.md"), "")?;
-            println!(
-                "created {} (edit BOT.md for its instructions)",
-                home::bot_dir(&slug).display()
-            );
+            let dir = setup::create_bot(&name, cwd, class, "")?;
+            println!("created {} (edit BOT.md for its instructions)", dir.display());
             Ok(())
         }
         "list" => {
