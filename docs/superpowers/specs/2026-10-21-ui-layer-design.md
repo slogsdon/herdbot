@@ -51,7 +51,7 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 - `MenuBarExtra` whose icon shows idle, running, or blocked (with a count).
 - The menu lists bots, running subagents and cooling harnesses with time left.
 - A `blocked` event posts a user notification; clicking it runs `herdbot focus <agent>`.
-- Runs as a login item. Polls `status --json` about every 2 s and tails `watch --json` for blocked events.
+- Runs as a login item. Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff.
 
 **Phase 2: quick-entry.**
 - A global hotkey opens a floating panel with a bot/room picker and a text field.
@@ -74,6 +74,6 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 ## Risks and assumptions
 
 - **Focus** is `agent.focus` on herdr's socket (verified 2026-10-21, protocol 22).
-- **Assumption:** the Swift target lives in `ui/menubar/` in this repo and builds separately from cargo. A login item needs a signed app bundle, so signing is an open item. If it moves to its own repo, the CLI contract still holds.
+- **Assumption:** the Swift package lives in `ui/menubar/` and builds with Command Line Tools (`./scripts/build-app.sh`); login-item registration is deferred (add the app in System Settings → Login Items).
 - **Assumption:** about 1 s polling for `watch` is enough; the event volume is tiny.
 - The README's open question (gpui-kit vs SwiftUI) is answered by this design: SwiftUI for the menu bar and quick-entry, gpui for the phase 3 app. Update the README when phase 0 lands.
