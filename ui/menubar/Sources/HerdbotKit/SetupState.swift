@@ -75,7 +75,16 @@ public final class SetupState {
         do {
             _ = try await cli?.setup(fix: nil)
         } catch {
-            fixError = error.localizedDescription
+            fixError = "setup: \(error.localizedDescription)"
+            await refresh()
+            return
+        }
+        if case .notRegistered = loginItemStatus {
+            do {
+                try loginItem?.register()
+            } catch {
+                fixError = "login-item: \(error.localizedDescription)"
+            }
         }
         await refresh()
     }

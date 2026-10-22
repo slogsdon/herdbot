@@ -69,6 +69,19 @@ let doctorJSON = """
         #expect(cli.fixes.count == 1 && cli.fixes[0] == nil)
     }
 
+    @Test func fixAllAlsoRegistersAnUnregisteredLoginItem() async {
+        let cli = FakeSetupCLI([report(failService), report(okCheck)])
+        var status = LoginItemStatus.notRegistered
+        var registered = 0
+        let control = LoginItemControl(status: { status }, register: { registered += 1; status = .enabled })
+        let state = SetupState(cli: cli, loginItem: control)
+        await state.refresh()
+        await state.fixAll()
+        #expect(cli.fixes.count == 1 && cli.fixes[0] == nil)
+        #expect(registered == 1)
+        #expect(state.worst == .ok)
+    }
+
     @Test func aMissingCLIIsAProblemNotACrash() async {
         let state = SetupState(cli: nil)
         await state.refresh()

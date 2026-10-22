@@ -23,7 +23,8 @@ Icon: `○` idle, `●` subagents running, `⚠ N` agents blocked, `⊘` daemon 
 The Setup window shows the checklist from `herdbot doctor --json`. A Fix button runs
 `herdbot setup --only <fix> --yes`; **Set up everything** runs `herdbot setup --yes`, which also
 creates a starter bot named `helper` when there are none. The window opens by itself once per
-herdbot version when a check fails. The menu bar icon shows a triangle while any check is not ok.
+herdbot version when a check fails. If the app is not registered to start at login, **Set up
+everything** also registers it. The menu bar icon shows a triangle while any check is not ok.
 
 To start the app at login, open Setup and choose **Start at login**. The app registers itself with
 `SMAppService.mainApp`; macOS may require approval in System Settings → General → Login Items.
