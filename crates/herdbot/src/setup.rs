@@ -170,6 +170,38 @@ pub async fn run(only: Option<String>, yes: bool) -> Result<()> {
     if failed { Err("some fixes failed".into()) } else { Ok(()) }
 }
 
+/// `herdbot` links in the candidate directories that point at this exact binary path.
+pub fn own_links(candidates: &[PathBuf], exe: &Path) -> Vec<PathBuf> {
+    candidates.iter().map(|dir| dir.join("herdbot")).filter(|link| {
+        std::fs::symlink_metadata(link).is_ok_and(|metadata| metadata.file_type().is_symlink())
+            && std::fs::read_link(link).is_ok_and(|target| target == exe)
+    }).collect()
+}
+
+pub fn uninstall(purge: bool) -> Result<()> {
+    println!("{}", service::uninstall()?);
+    for link in own_links(&link_candidates(), &std::env::current_exe()?) {
+        std::fs::remove_file(&link)?;
+        println!("removed {}", link.display());
+    }
+    if purge {
+        use std::io::{BufRead, Write};
+        let root = home::root();
+        print!("This deletes every bot, memory and room under {}. Type the path to confirm: ", root.display());
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        if line.trim() != root.to_string_lossy() {
+            return Err("path did not match; nothing deleted".into());
+        }
+        std::fs::remove_dir_all(&root)?;
+        println!("removed {}", root.display());
+    } else {
+        println!("kept {} (bots and memory); --purge removes it", home::root().display());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +236,24 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("BOT.md")).unwrap(), "Be helpful.");
         assert!(bot_files(&root, "helper", "x").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn own_links_are_only_symlinks_to_this_binary() {
+        let dir = std::env::temp_dir().join(format!("herdbot-links-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("real-herdbot");
+        std::fs::write(&exe, "").unwrap();
+        let other = dir.join("other-herdbot");
+        std::fs::write(&other, "").unwrap();
+        let mine = dir.join("a");
+        let theirs = dir.join("b");
+        let plain = dir.join("c");
+        for candidate in [&mine, &theirs, &plain] { std::fs::create_dir_all(candidate).unwrap(); }
+        std::os::unix::fs::symlink(&exe, mine.join("herdbot")).unwrap();
+        std::os::unix::fs::symlink(&other, theirs.join("herdbot")).unwrap();
+        std::fs::write(plain.join("herdbot"), "").unwrap();
+        let found = own_links(&[mine.clone(), theirs, plain], &exe);
+        assert_eq!(found, vec![mine.join("herdbot")]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
