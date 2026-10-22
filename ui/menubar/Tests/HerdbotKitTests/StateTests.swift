@@ -52,4 +52,13 @@ import Testing
         state.apply(try #require(try StreamParser.parse(eventLine)))
         #expect(state.snapshot == nil)
     }
+
+    @Test func attentionReplacesQuietIconsButNotBlockedOrUnavailable() {
+        #expect(IconState.idle.with(attention: true) == .attention)
+        #expect(IconState.running.with(attention: true) == .attention)
+        #expect(IconState.daemonDown.with(attention: true) == .attention)
+        #expect(IconState.blocked(2).with(attention: true) == .blocked(2))
+        #expect(IconState.unavailable.with(attention: true) == .unavailable)
+        #expect(IconState.idle.with(attention: false) == .idle)
+    }
 }

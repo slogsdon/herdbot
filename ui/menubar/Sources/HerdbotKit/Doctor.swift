@@ -52,3 +52,26 @@ public protocol SetupCLI: Sendable {
     func doctor() async throws -> DoctorReport
     func setup(fix: String?) async throws -> String
 }
+
+public enum LoginItemStatus: Sendable { case enabled, notRegistered, requiresApproval, unavailable }
+
+/// The one check the app owns. An unavailable login item means the app is not installed as a bundle.
+public func loginItemCheck(_ status: LoginItemStatus) -> DoctorCheck? {
+    switch status {
+    case .enabled: DoctorCheck(id: "login-item", status: .ok, message: "starts at login")
+    case .notRegistered: DoctorCheck(id: "login-item", status: .warn, message: "does not start at login", fix: "login-item")
+    case .requiresApproval: DoctorCheck(id: "login-item", status: .warn, message: "allow Herdbot in System Settings → General → Login Items")
+    case .unavailable: nil
+    }
+}
+
+public func fixLabel(_ fix: String) -> String {
+    switch fix {
+    case "home": "Create herdbot home"
+    case "cli-link": "Link herdbot"
+    case "service": "Install service"
+    case "restart-daemon": "Restart daemon"
+    case "login-item": "Start at login"
+    default: "Fix"
+    }
+}

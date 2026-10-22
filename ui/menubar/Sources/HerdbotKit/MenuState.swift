@@ -7,6 +7,18 @@ public enum IconState: Equatable, Sendable {
     case blocked(Int)
     case daemonDown
     case unavailable
+    case attention
+}
+
+extension IconState {
+    /// Setup attention replaces quiet icons while blocked and missing-herdbot states remain visible.
+    public func with(attention: Bool) -> IconState {
+        guard attention else { return self }
+        switch self {
+        case .blocked, .unavailable: return self
+        default: return .attention
+        }
+    }
 }
 
 /// Blocked events already announced. The first call only records, so launching the app
