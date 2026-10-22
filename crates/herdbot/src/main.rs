@@ -1,6 +1,8 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
 mod daemon;
+#[allow(dead_code)]
+mod adapters;
 mod doctor;
 mod fm;
 mod grok;
