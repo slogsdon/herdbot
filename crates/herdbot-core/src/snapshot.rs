@@ -76,6 +76,8 @@ pub struct Snapshot {
     pub cooldowns: Vec<CooldownView>,
     /// Agents whose latest event is `blocked`.
     pub blocked: Vec<Event>,
+    /// Prompts waiting for the user.
+    pub cards: Vec<crate::cards::Card>,
     pub warnings: Vec<String>,
 }
 
@@ -85,7 +87,11 @@ pub fn parse_events(text: &str) -> (Vec<Event>, usize) {
     let events = text
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str::<Event>(line).map_err(|_| bad += 1).ok())
+        .filter_map(|line| {
+            serde_json::from_str::<Event>(line)
+                .map_err(|_| bad += 1)
+                .ok()
+        })
         .collect();
     (events, bad)
 }
@@ -98,7 +104,11 @@ pub fn latest_blocked(events: &[Event]) -> Option<&Event> {
 fn event_logs(warnings: &mut Vec<String>) -> BTreeMap<String, Vec<Event>> {
     // ponytail: re-reads whole logs each poll; read only the tail if they grow past a few MB.
     let mut logs = BTreeMap::new();
-    for entry in fs::read_dir(events::events_dir()).into_iter().flatten().flatten() {
+    for entry in fs::read_dir(events::events_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
             continue;
@@ -127,7 +137,11 @@ fn cooldowns() -> Vec<CooldownView> {
         .filter_map(|entry| {
             let harness = entry.path().file_stem()?.to_str()?.to_owned();
             let cooldown = cooldown::active(&harness)?;
-            Some(CooldownView { harness, until: cooldown.until, reason: cooldown.reason })
+            Some(CooldownView {
+                harness,
+                until: cooldown.until,
+                reason: cooldown.reason,
+            })
         })
         .collect();
     out.sort_by(|a, b| a.harness.cmp(&b.harness));
@@ -146,7 +160,10 @@ pub fn snapshot() -> Snapshot {
                     title: bot.title,
                     items: items.len(),
                     last_at: items.last().map(|i| i.at),
-                    preview: items.last().map(|i| history::preview(&i.text)).unwrap_or_default(),
+                    preview: items
+                        .last()
+                        .map(|i| history::preview(&i.text))
+                        .unwrap_or_default(),
                     working: home::read_inflight(&slug).is_some(),
                     queued: history::queued_items(&slug).len(),
                     slug,
@@ -169,7 +186,10 @@ pub fn snapshot() -> Snapshot {
                     mode: room.mode,
                     items: items.len(),
                     last_at: items.last().map(|i| i.at),
-                    preview: items.last().map(|i| history::preview(&i.text)).unwrap_or_default(),
+                    preview: items
+                        .last()
+                        .map(|i| history::preview(&i.text))
+                        .unwrap_or_default(),
                     slug,
                 })
             }
@@ -199,12 +219,17 @@ pub fn snapshot() -> Snapshot {
     Snapshot {
         v: VERSION,
         at: home::now(),
-        daemon: if UnixStream::connect(home::daemon_lock()).is_ok() { "up" } else { "down" },
+        daemon: if UnixStream::connect(home::daemon_lock()).is_ok() {
+            "up"
+        } else {
+            "down"
+        },
         bots,
         rooms,
         runs,
         cooldowns: cooldowns(),
         blocked,
+        cards: crate::cards::read_cards(),
         warnings,
     }
 }
@@ -224,16 +249,21 @@ impl Watcher {
         let primed = self.last.is_some();
         let mut out = Vec::new();
         let snap = snapshot();
-        let changed = self
-            .last
-            .as_ref()
-            .is_none_or(|last| Snapshot { at: last.at, ..snap.clone() } != *last);
+        let changed = self.last.as_ref().is_none_or(|last| {
+            Snapshot {
+                at: last.at,
+                ..snap.clone()
+            } != *last
+        });
         if changed {
             out.push(json!({ "v": VERSION, "type": "snapshot", "snapshot": snap }));
             self.last = Some(snap);
         }
         for (agent, events) in event_logs(&mut Vec::new()) {
-            let seen = self.seen.entry(agent).or_insert(if primed { 0 } else { events.len() });
+            let seen = self
+                .seen
+                .entry(agent)
+                .or_insert(if primed { 0 } else { events.len() });
             for event in &events[(*seen).min(events.len())..] {
                 out.push(json!({ "v": VERSION, "type": "event", "event": event }));
             }
