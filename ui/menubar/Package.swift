@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .target(name: "HerdbotKit"),
+        .executableTarget(name: "HerdbotMenu", dependencies: ["HerdbotKit"]),
         .testTarget(name: "HerdbotKitTests", dependencies: ["HerdbotKit"]),
     ]
 )
