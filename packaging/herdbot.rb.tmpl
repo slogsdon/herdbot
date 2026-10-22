@@ -7,7 +7,7 @@ cask "herdbot" do
   desc "Bots on herdr: registry, routing, subagent panes and messaging"
   homepage "https://github.com/slogsdon/herdbot"
 
-  depends_on macos: ">= :sequoia"
+  depends_on macos: :sequoia
 
   app "Herdbot.app"
   binary "#{appdir}/Herdbot.app/Contents/Helpers/herdbot"
