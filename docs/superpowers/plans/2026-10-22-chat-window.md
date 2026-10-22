@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-10-22-chat-app-design.md` (The window). Depen
 - Shane approved committing each task below: explicit paths only (never `git add -A` or `git add .`), the conventional message given, **no AI or tool attribution**, no push, no merge.
 - Never run `cargo install`, never restart the daemon, never launch the menu bar app (a running instance belongs to Shane; do not kill it).
 - Swift: 4-space indent, no `@State` (a macro whose plugin is missing under Command Line Tools; use observable classes or `Binding(get:set:)`), zero Swift compiler warnings (linker `search path ... not found` warnings are an environment quirk and fine).
-- Test with `timeout 180 ./scripts/test.sh` from `ui/menubar`, never bare `swift test`. Once, a run hung until killed and passed on rerun six times in a row; if a run hangs, `pkill -f swiftpm-testing-helper`, rerun, and say so in your report.
+- Test with `timeout 300 ./scripts/test.sh` from `ui/menubar`, never bare `swift test`. The first test build after a change can take two to three minutes; that is a slow compile, not a hang.
 - Colours are system semantic colours (`.primary`, `.secondary`, `.quaternary`, `Color.accentColor`); avatars and speaker names use `Avatar.hue(for:)`.
 - JSON additions are additive; a herdbot without them must still decode (missing counts read as 0 / empty).
 - Baseline before this plan: Swift 27 tests pass.
@@ -136,7 +136,7 @@ All code below was compiled, its tests run, and the window launched, screenshott
 
 - [ ] **Step 2: Run to see it fail**
 
-Run (from `ui/menubar`): `timeout 180 ./scripts/test.sh`
+Run (from `ui/menubar`): `timeout 300 ./scripts/test.sh`
 Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do not exist).
 
 - [ ] **Step 3: Implement**
@@ -378,7 +378,7 @@ Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do no
 
 - [ ] **Step 4: Run to see it pass**
 
-Run: `timeout 180 ./scripts/test.sh`
+Run: `timeout 300 ./scripts/test.sh`
 Expected: PASS, 31 tests (27 plus 4 new). `swift build` has no Swift warnings.
 
 - [ ] **Step 5: Commit**
@@ -607,7 +607,7 @@ func turns(_ count: Int, from start: Int = 0) -> [HistoryItem] {
 
 - [ ] **Step 2: Run to see it fail**
 
-Run: `timeout 180 ./scripts/test.sh`
+Run: `timeout 300 ./scripts/test.sh`
 Expected: build FAIL (`ChatState`, `Sidebar`, `Timeline`, `Markdown`, `Avatar` do not exist).
 
 - [ ] **Step 3: Implement**
@@ -892,7 +892,7 @@ public final class ChatState {
 
 - [ ] **Step 4: Run to see it pass**
 
-Run: `timeout 180 ./scripts/test.sh`
+Run: `timeout 300 ./scripts/test.sh`
 Expected: PASS, 45 tests (31 plus 14 new).
 
 - [ ] **Step 5: Commit**
@@ -1322,7 +1322,7 @@ struct ChatWindow: View {
 
 - [ ] **Step 3: Verify**
 
-Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 180 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
+Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 300 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
 Expected: `Build complete!` with no Swift errors or warnings, 45 tests pass, `built build/HerdbotMenu.app`. Do not launch it.
 
 - [ ] **Step 4: Docs**
