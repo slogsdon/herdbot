@@ -39,7 +39,7 @@ The helper is signed first with the hardened runtime, then the app, then the who
 
 The daemon plist, the MCP configs and the panes all record the path of the running `herdbot`. The recorded path must be the one the user installed, not a resolved one, or an update that replaces the bundle breaks every recorded reference.
 
-Verified 2026-10-22: `service.rs:41` canonicalizes the exe; `route.rs:232` and `run.rs:141` use `current_exe()` as is. The first task is to make all three record the invoked path, `/Applications/Herdbot.app/Contents/Helpers/herdbot` or the `/opt/homebrew/bin/herdbot` link, and to check what `current_exe()` returns when started through the link (unverified: it may return the link or its target). Moving the app is then caught by `doctor`.
+Verified 2026-10-22: `service.rs:41` canonicalizes the exe; `route.rs:232` and `run.rs:141` use `current_exe()` as is, and on macOS `current_exe()` returns the invoked absolute path without resolving a symlink (tested with a scratch binary run through a link, and through `PATH`). So only `service.rs` needs the fix: record `current_exe()` unresolved, so a start through `/opt/homebrew/bin/herdbot` records the link. Moving the app is then caught by `doctor`.
 
 ## CLI additions (Rust)
 
@@ -47,7 +47,7 @@ Verified 2026-10-22: `service.rs:41` canonicalizes the exe; `route.rs:232` and `
 - The daemon writes `.state/daemon.json` (`{"version","pid","exe"}`) on start and removes it on clean exit.
 - `herdbot doctor [--json]`. Each check is `{id, status: ok|warn|fail, message, fix?}`. Checks:
   - `herdr`: socket reachable and protocol compatible (tested with 0.9.1, protocol 22).
-  - `harnesses`: at least one of claude, codex, cursor-agent, pi on `PATH`; a missing one is `warn`, none is `fail`.
+  - `harnesses`: at least one of claude, codex, cursor-agent, pi on `PATH`; none is `fail`. A harness the user doesn't use is not reported, or the icon would stay amber for anyone with a subset.
   - `home`: `HERDBOT_HOME` exists and `herdbot.toml` is present (fix: `home`).
   - `service`: plist installed and pointing at this binary (fix: `service`).
   - `daemon`: running, and `daemon.json` version equals `--version` (fix: `restart-daemon`).
@@ -104,7 +104,6 @@ An update replaces the bundle and leaves the old daemon process running old code
 
 ## Risks and open items
 
-- **Unverified:** what `current_exe()` returns when the binary is started through a symlink; the plan's first task checks it.
 - **Unverified:** that a stapled, notarized bundle keeps passing Gatekeeper after Homebrew's quarantine handling; checked in the fresh-user test.
 - **Assumption:** `SMAppService.mainApp` works for an agent app (`LSUIElement`) on macOS 15; if not, the login item falls back to a LaunchAgent plist written by `setup`.
 - The cask `binary` link points into the app bundle, so deleting the app by hand leaves a dangling link; `doctor` reports it.
