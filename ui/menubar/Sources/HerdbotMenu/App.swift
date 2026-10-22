@@ -9,6 +9,7 @@ struct HerdbotMenuApp: App {
     private let state: MenuState
     private let cli: ProcessCLI?
     private let notifier: Notifier
+    private let notificationStatus: NotificationStatus
     private let quickEntry: QuickEntryController
     private let chat: ChatState
     private let unread: UnreadTracker
@@ -18,7 +19,8 @@ struct HerdbotMenuApp: App {
     init() {
         let state = MenuState()
         let cli = ProcessCLI.locate().map { ProcessCLI(binary: $0) }
-        let notifier = Notifier(cli: cli)
+        let notificationStatus = NotificationStatus()
+        let notifier = Notifier(cli: cli, status: notificationStatus)
         state.onBlocked = { notifier.post($0) }
         if let cli {
             Task { await state.follow(cli) }
@@ -31,6 +33,7 @@ struct HerdbotMenuApp: App {
         self.state = state
         self.cli = cli
         self.notifier = notifier
+        self.notificationStatus = notificationStatus
         self.quickEntry = quickEntry
         let chat = ChatState(menu: state, cli: cli)
         self.chat = chat
@@ -53,7 +56,7 @@ struct HerdbotMenuApp: App {
         }
         .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
-            MenuContent(state: state, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
+            MenuContent(state: state, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
         } label: {
             MenuIcon(icon: state.icon).modifier(OpenerCapture(opener: opener))
         }

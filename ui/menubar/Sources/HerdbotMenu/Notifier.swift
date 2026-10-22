@@ -1,5 +1,13 @@
+import Foundation
 import HerdbotKit
+import Observation
 import UserNotifications
+
+/// Why notifications can't appear, shown in the menu; nil when they are allowed (or not applicable).
+@MainActor @Observable
+final class NotificationStatus {
+    var problem: String?
+}
 
 /// Posts a notification per newly blocked agent; clicking one opens that bot's chat, or focuses the
 /// agent's pane when it isn't a bot herdbot knows.
@@ -7,28 +15,63 @@ import UserNotifications
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let cli: ProcessCLI?
+    private let status: NotificationStatus
     private let enabled = Bundle.main.bundleIdentifier != nil
+    private var authorized = false
     /// Opens the chat for an agent and says whether it could; set once the chat exists.
     var openChat: (String) -> Bool = { _ in false }
 
-    init(cli: ProcessCLI?) {
+    init(cli: ProcessCLI?, status: NotificationStatus) {
         self.cli = cli
+        self.status = status
         super.init()
         guard enabled else { return }
+        UNUserNotificationCenter.current().delegate = self
+        Task { await refreshStatus() }
+    }
+
+    /// Reads the system's notification setting (asking once if it was never decided) and records any problem.
+    func refreshStatus() async {
+        guard enabled else { return }
         let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        var current = await center.notificationSettings().authorizationStatus
+        if current == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            current = await center.notificationSettings().authorizationStatus
+        }
+        switch current {
+        case .authorized, .provisional, .ephemeral:
+            authorized = true
+            status.problem = nil
+        case .denied:
+            authorized = false
+            status.problem = "Notifications are off for herdbot menu. Enable them in System Settings."
+        default:
+            authorized = false
+        }
     }
 
     func post(_ event: Event) {
         guard enabled else { return }
+        Task {
+            await refreshStatus()
+            guard authorized else { return }
+            await add(event)
+        }
+    }
+
+    private func add(_ event: Event) async {
         let content = UNMutableNotificationContent()
         content.title = "\(event.agent) is waiting"
         content.body = event.reason ?? "needs your input"
         content.sound = .default
         content.userInfo = ["agent": event.agent]
         let request = UNNotificationRequest(identifier: "blocked-\(event.agent)-\(event.at)", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+        } catch {
+            fputs("herdbot menu: notification failed: \(error)\n", stderr)
+        }
     }
 
     nonisolated func userNotificationCenter(

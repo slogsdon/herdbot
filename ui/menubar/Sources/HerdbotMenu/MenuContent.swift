@@ -4,12 +4,20 @@ import SwiftUI
 
 struct MenuContent: View {
     let state: MenuState
+    let notifications: NotificationStatus
     let cli: ProcessCLI?
     let hotkeyRegistered: Bool
     let openQuickEntry: () -> Void
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        if let problem = notifications.problem {
+            Text(problem)
+            Button("Open Notification Settings") {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+            }
+            Divider()
+        }
         if let problem = state.problem {
             Text(problem)
         } else if let snapshot = state.snapshot {
