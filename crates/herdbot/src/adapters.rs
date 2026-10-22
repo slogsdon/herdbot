@@ -58,6 +58,25 @@ pub fn keys(adapter: &str, option: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+pub fn plan_answer(
+    stored: &Card,
+    option: &str,
+    card_id: &str,
+    live: Option<&Card>,
+) -> Result<&'static [&'static str], String> {
+    if stored.id != card_id {
+        return Err(format!("no pending card {card_id} for {}", stored.agent));
+    }
+    match live {
+        Some(live) if live.id == stored.id => {}
+        _ => return Err("the prompt changed or is gone; nothing was sent".into()),
+    }
+    if !stored.options.iter().any(|item| item.id == option) {
+        return Err(format!("unknown option {option}"));
+    }
+    keys(&stored.adapter, option).ok_or_else(|| format!("unknown option {option}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,5 +138,45 @@ mod tests {
         assert_eq!(keys("claude-trust", "exit"), Some(&["Enter"][..]));
         assert_eq!(keys("claude-trust", "anything else"), None);
         assert_eq!(keys("unknown-adapter", "trust"), None);
+    }
+
+    #[test]
+    fn answer_is_refused_unless_the_same_prompt_is_still_showing() {
+        let stored = recognize(TRUST, "helper", "helper").unwrap();
+        let id = stored.id.clone();
+        assert_eq!(
+            plan_answer(&stored, "trust", &id, Some(&stored)),
+            Ok(&["Down", "Enter"][..])
+        );
+        assert_eq!(
+            plan_answer(&stored, "exit", &id, Some(&stored)),
+            Ok(&["Enter"][..])
+        );
+        assert!(
+            plan_answer(&stored, "trust", "0000000000000000", Some(&stored))
+                .unwrap_err()
+                .contains("no pending card")
+        );
+        let moved = recognize(
+            &TRUST.replace("trustfresh-92905", "trustfresh-1"),
+            "helper",
+            "helper",
+        )
+        .unwrap();
+        assert!(
+            plan_answer(&stored, "trust", &id, Some(&moved))
+                .unwrap_err()
+                .contains("prompt changed")
+        );
+        assert!(
+            plan_answer(&stored, "trust", &id, None)
+                .unwrap_err()
+                .contains("prompt changed")
+        );
+        assert!(
+            plan_answer(&stored, "always", &id, Some(&stored))
+                .unwrap_err()
+                .contains("unknown option")
+        );
     }
 }

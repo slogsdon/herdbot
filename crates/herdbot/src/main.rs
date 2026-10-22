@@ -1,8 +1,7 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
-mod daemon;
-#[allow(dead_code)]
 mod adapters;
+mod daemon;
 mod doctor;
 mod fm;
 mod grok;
@@ -13,14 +12,14 @@ mod rooms;
 mod route;
 mod run;
 mod service;
-mod shellenv;
 mod setup;
+mod shellenv;
 mod tools;
 
 use std::io::Write;
 
-use herdr_client::Client;
 use herdbot_core::{cooldown, history, home, snapshot};
+use herdr_client::Client;
 
 use home::Result;
 
@@ -39,6 +38,8 @@ const USAGE: &str = "usage:
   herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation, newest page first
   herdbot focus <agent>                  focus an agent's pane in herdr
   herdbot up <bot> | down <bot>
+  herdbot card list [--json]            prompts waiting for you
+  herdbot card answer <card-id> <option-id>   answer one, after checking it is still on screen
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
   herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
   herdbot room send <room> <text…> | room list | room up <room>
@@ -92,7 +93,10 @@ async fn cli() -> Result<()> {
             } else {
                 print!("{}", doctor::render(&checks));
             }
-            if checks.iter().any(|check| check.status == doctor::Status::Fail) {
+            if checks
+                .iter()
+                .any(|check| check.status == doctor::Status::Fail)
+            {
                 std::process::exit(1);
             }
             Ok(())
@@ -126,7 +130,10 @@ async fn cli() -> Result<()> {
                 return Err(USAGE.into());
             }
             let dir = setup::create_bot(&name, cwd, class, "")?;
-            println!("created {} (edit BOT.md for its instructions)", dir.display());
+            println!(
+                "created {} (edit BOT.md for its instructions)",
+                dir.display()
+            );
             Ok(())
         }
         "list" => {
@@ -187,7 +194,10 @@ async fn cli() -> Result<()> {
             let before = number(flag(&mut args, "--before"))?;
             let limit = number(flag(&mut args, "--limit"))?.unwrap_or(history::DEFAULT_LIMIT);
             let target = args.iter().find(|a| *a != "--json").ok_or(USAGE)?;
-            println!("{}", serde_json::to_string(&history::history(target, before, limit)?)?);
+            println!(
+                "{}",
+                serde_json::to_string(&history::history(target, before, limit)?)?
+            );
             Ok(())
         }
         "focus" => {
@@ -203,6 +213,42 @@ async fn cli() -> Result<()> {
             Ok(())
         }
         "down" => run::down(&herdr, args.first().ok_or(USAGE)?).await,
+        "card" => match args.first().map(String::as_str) {
+            Some("list") => {
+                let cards = herdbot_core::cards::read_cards();
+                if args.iter().any(|arg| arg == "--json") {
+                    println!("{}", serde_json::to_string(&cards)?);
+                } else {
+                    for card in cards {
+                        let options = card
+                            .options
+                            .iter()
+                            .map(|option| option.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        println!("{}  {}  {}  [{}]", card.id, card.bot, card.title, options);
+                    }
+                }
+                Ok(())
+            }
+            Some("answer") => {
+                let id = args.get(1).ok_or(USAGE)?;
+                let option = args.get(2).ok_or(USAGE)?;
+                let card = herdbot_core::cards::read_cards()
+                    .into_iter()
+                    .find(|card| card.id == *id)
+                    .ok_or_else(|| format!("no pending card {id}"))?;
+                let tail = run::tail(&herdr, &card.agent, 60).await;
+                let live = adapters::recognize(&tail, &card.bot, &card.agent);
+                let keys = adapters::plan_answer(&card, option, id, live.as_ref())?;
+                herdr.agent_send_keys(&card.agent, keys).await?;
+                herdbot_core::cards::log_answer(&card, option, "cli")?;
+                herdbot_core::cards::remove_card(&card.agent);
+                println!("answered {option}");
+                Ok(())
+            }
+            _ => Err(USAGE.into()),
+        },
         "send" => {
             let bot = args.first().ok_or(USAGE)?.clone();
             // Only the daemon launches bots: it brings a stopped bot up when it finds its queue.
@@ -272,11 +318,21 @@ async fn cli() -> Result<()> {
                     if rooms::room_dir(&slug).join("room.toml").exists() {
                         return Err(format!("room {slug} already exists").into());
                     }
-                    let room = rooms::Room { name, members, mode, moderator, ..Default::default() };
+                    let room = rooms::Room {
+                        name,
+                        members,
+                        mode,
+                        moderator,
+                        ..Default::default()
+                    };
                     rooms::validate(&room, &home::list_bots())?;
                     rooms::save_room(&slug, &room)?;
                     std::fs::write(rooms::room_dir(&slug).join("transcript.md"), "")?;
-                    println!("created room {slug} ({:?}, {})", room.mode, room.members.join(", "));
+                    println!(
+                        "created room {slug} ({:?}, {})",
+                        room.mode,
+                        room.members.join(", ")
+                    );
                 }
                 "send" => {
                     let slug = args.first().ok_or(USAGE)?.clone();
@@ -287,7 +343,11 @@ async fn cli() -> Result<()> {
                 "list" => {
                     for slug in rooms::list_rooms() {
                         let room = rooms::load_room(&slug)?;
-                        let state = if rooms::load_state(&slug).paused { "paused" } else { "active" };
+                        let state = if rooms::load_state(&slug).paused {
+                            "paused"
+                        } else {
+                            "active"
+                        };
                         println!(
                             "{slug:20} {:24} {:12} {:7} {}",
                             room.name,
@@ -306,7 +366,10 @@ async fn cli() -> Result<()> {
                         .join(format!("{slug}.workspace"));
                     if let Ok(id) = std::fs::read_to_string(&marker)
                         && herdr
-                            .call("workspace.get", serde_json::json!({ "workspace_id": id.trim() }))
+                            .call(
+                                "workspace.get",
+                                serde_json::json!({ "workspace_id": id.trim() }),
+                            )
                             .await
                             .is_ok()
                     {
@@ -315,10 +378,18 @@ async fn cli() -> Result<()> {
                     }
                     let dir = rooms::room_dir(&slug);
                     let created = herdr
-                        .workspace_create(&format!("💬 {}", room.name), &dir.to_string_lossy(), serde_json::json!({}))
+                        .workspace_create(
+                            &format!("💬 {}", room.name),
+                            &dir.to_string_lossy(),
+                            serde_json::json!({}),
+                        )
                         .await?;
-                    let id = created["workspace"]["workspace_id"].as_str().ok_or("workspace.create: no id")?;
-                    let pane = created["root_pane"]["pane_id"].as_str().ok_or("workspace.create: no pane")?;
+                    let id = created["workspace"]["workspace_id"]
+                        .as_str()
+                        .ok_or("workspace.create: no id")?;
+                    let pane = created["root_pane"]["pane_id"]
+                        .as_str()
+                        .ok_or("workspace.create: no pane")?;
                     herdr.pane_run(pane, "tail -n 50 -f transcript.md").await?;
                     std::fs::create_dir_all(marker.parent().unwrap())?;
                     std::fs::write(&marker, id)?;
