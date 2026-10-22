@@ -43,6 +43,9 @@ Other commands:
 
 ```
 herdbot list | runs                    bots and subagent runs
+herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
+herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
+herdbot focus <agent>                  focus an agent's pane in herdr
 herdbot up <bot> | down <bot>          start or stop a bot's workspace
 herdbot room new | send | list | up    group conversations between bots and you
 herdbot task <bot> <class> <prompt…>   start a subagent from the shell
@@ -282,7 +285,7 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 
 Open questions:
 
-- Should the desktop UI be gpui-kit (Rust, shares crates with herdbot) or SwiftUI (every native Apple framework, as in Viticci's app)?
+- The UI uses SwiftUI for the menu bar and quick-entry plus gpui for the later app; see the [UI layer design](docs/superpowers/specs/2026-10-21-ui-layer-design.md).
 
 - Should any bot run unattended? Automatic review is available through `approvals = "auto"`; full bypass (`--yolo`, `--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`) is still never used.
 - Should bots get their own herdr session (`--session herdbot`)? They currently land in your default session.

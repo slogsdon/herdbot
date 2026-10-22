@@ -44,7 +44,7 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 
 **Phase 0: core crate and CLI contract (no UI).**
 - Extract the read layer; add `status --json`, `watch --json`, `focus`.
-- Spike first: `herdr-client` has no pane-focus call (only split, run, read, close; every call passes `focus: false`). Check whether herdr's socket (protocol 22) has a focus method. If it does, add it to `herdr-client`. If it doesn't, `focus` is dropped from phase 1 and the notification shows the reason only.
+- Focus spike resolved: `herdr-client` calls `agent.focus` on herdr's socket (verified 2026-10-21, protocol 22).
 - Tests: fixture directories (blocked event, cooling harness, dead daemon, corrupt jsonl, malformed state), a golden test of the `status --json` shape, and the existing `fixtures/hooks/*.json` for the blocked path. Live check of `focus` against real herdr.
 
 **Phase 1: Swift menu bar agent.**
@@ -73,7 +73,7 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 
 ## Risks and assumptions
 
-- **Focus** may not exist in herdr's socket (phase 0 spike).
+- **Focus** is `agent.focus` on herdr's socket (verified 2026-10-21, protocol 22).
 - **Assumption:** the Swift target lives in `ui/menubar/` in this repo and builds separately from cargo. A login item needs a signed app bundle, so signing is an open item. If it moves to its own repo, the CLI contract still holds.
 - **Assumption:** about 1 s polling for `watch` is enough; the event volume is tiny.
 - The README's open question (gpui-kit vs SwiftUI) is answered by this design: SwiftUI for the menu bar and quick-entry, gpui for the phase 3 app. Update the README when phase 0 lands.
