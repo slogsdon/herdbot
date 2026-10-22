@@ -34,6 +34,15 @@ import Testing
         }
     }
 
+    @Test func answerCardPassesTheIdAndOption() async throws {
+        let script = try fakeHerdbot(#"[ "$*" = "card answer 9f3a trust" ] && echo 'answered trust'"#)
+        try await ProcessCLI(binary: script).answerCard(id: "9f3a", option: "trust")
+        let bad = try fakeHerdbot("echo 'the prompt changed or is gone; nothing was sent' >&2; exit 1")
+        await #expect(throws: CLIError.failed("the prompt changed or is gone; nothing was sent")) {
+            try await ProcessCLI(binary: bad).answerCard(id: "x", option: "trust")
+        }
+    }
+
     @Test func sendPassesTheTextAsOneArgument() async throws {
         let bot = try fakeHerdbot(##"[ "$#" = 3 ] && [ "$1" = send ] && [ "$2" = alpha ] && [ "$3" = "$(printf 'two words "quoted"\nsecond line')" ]"##)
         try await ProcessCLI(binary: bot).send(to: .bot("alpha"), text: "two words \"quoted\"\nsecond line")

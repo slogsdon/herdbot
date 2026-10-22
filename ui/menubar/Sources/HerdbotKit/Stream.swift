@@ -26,6 +26,10 @@ public protocol HerdbotCLI: Sendable {
     func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage
 }
 
+public protocol CardCLI: Sendable {
+    func answerCard(id: String, option: String) async throws
+}
+
 public enum StreamParser {
     /// nil for a line that isn't ours (malformed, or not a stream line). Throws `unsupported`
     /// for a protocol version this build doesn't know.

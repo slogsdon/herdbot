@@ -95,6 +95,20 @@ public struct Snapshot: Codable, Hashable, Sendable {
     public let cooldowns: [CooldownView]
     public let blocked: [Event]
     public let warnings: [String]
+    public let cards: [Card]
+
+    public init(v: Int, at: Int, daemon: String, bots: [BotView], rooms: [RoomView], runs: [RunView], cooldowns: [CooldownView], blocked: [Event], warnings: [String], cards: [Card] = []) {
+        self.v = v
+        self.at = at
+        self.daemon = daemon
+        self.bots = bots
+        self.rooms = rooms
+        self.runs = runs
+        self.cooldowns = cooldowns
+        self.blocked = blocked
+        self.warnings = warnings
+        self.cards = cards
+    }
 }
 
 /// One line of `herdbot watch --json`: `type` is "snapshot" or "event".
@@ -118,7 +132,8 @@ extension Snapshot {
             runs: try c.decode([RunView].self, forKey: .runs),
             cooldowns: try c.decode([CooldownView].self, forKey: .cooldowns),
             blocked: try c.decode([Event].self, forKey: .blocked),
-            warnings: try c.decode([String].self, forKey: .warnings))
+            warnings: try c.decode([String].self, forKey: .warnings),
+            cards: try c.decodeIfPresent([Card].self, forKey: .cards) ?? [])
     }
 }
 

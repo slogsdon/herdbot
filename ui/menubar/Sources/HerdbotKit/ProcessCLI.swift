@@ -216,3 +216,9 @@ extension ProcessCLI: SetupCLI {
         return String(decoding: try await output(arguments), as: UTF8.self)
     }
 }
+
+extension ProcessCLI: CardCLI {
+    public func answerCard(id: String, option: String) async throws {
+        _ = try await output(["card", "answer", id, option])
+    }
+}

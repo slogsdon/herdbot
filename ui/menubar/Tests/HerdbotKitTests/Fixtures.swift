@@ -16,11 +16,20 @@ let eventLine = """
 {"v":1,"type":"event","event":{"at":20,"agent":"alpha-main","kind":"turn_end","text":"done","harness":"claude"}}
 """
 
-func snapshot(daemon: String = "up", runs: Int = 0, blocked: [Event] = [], bots: [BotView] = [], rooms: [RoomView] = []) -> Snapshot {
+func snapshot(daemon: String = "up", runs: Int = 0, blocked: [Event] = [], bots: [BotView] = [], rooms: [RoomView] = [], cards: [Card] = []) -> Snapshot {
     Snapshot(
         v: 1, at: 1, daemon: daemon, bots: bots, rooms: rooms,
         runs: (0..<runs).map { RunView(id: "r\($0)", bot: "a", agent: "a-r\($0)", route: "x", description: "d") },
-        cooldowns: [], blocked: blocked, warnings: [])
+        cooldowns: [], blocked: blocked, warnings: [], cards: cards)
+}
+
+final class FakeCardCLI: CardCLI, @unchecked Sendable {
+    nonisolated(unsafe) var answers: [(String, String)] = []
+    nonisolated(unsafe) var failure: String?
+    func answerCard(id: String, option: String) async throws {
+        if let failure { throw CLIError.failed(failure) }
+        answers.append((id, option))
+    }
 }
 
 func blockedEvent(_ agent: String, at: Int = 1) -> Event {
