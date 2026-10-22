@@ -294,6 +294,11 @@ impl Client {
         .await
     }
 
+    /// Focus an agent's pane in herdr. Takes the agent name, as `agent.prompt` does.
+    pub async fn agent_focus(&self, agent: &str) -> Result<Value> {
+        self.call("agent.focus", json!({ "target": agent })).await
+    }
+
     pub async fn agent_get(&self, target: &str) -> Result<Value> {
         self.call("agent.get", json!({ "target": target })).await
     }

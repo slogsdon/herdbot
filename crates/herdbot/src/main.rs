@@ -12,8 +12,10 @@ mod run;
 mod service;
 mod tools;
 
+use std::io::Write;
+
 use herdr_client::Client;
-use herdbot_core::{cooldown, home};
+use herdbot_core::{cooldown, home, snapshot};
 
 use home::Result;
 
@@ -23,6 +25,9 @@ const USAGE: &str = "usage:
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
   herdbot new <name> [--cwd DIR] [--class CLASS]
   herdbot list | runs
+  herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
+  herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
+  herdbot focus <agent>                  focus an agent's pane in herdr
   herdbot up <bot> | down <bot>
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
   herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
@@ -134,6 +139,33 @@ async fn cli() -> Result<()> {
                     r.id, r.status, r.bot, r.route, r.description
                 );
             }
+            Ok(())
+        }
+        "status" => {
+            if !args.iter().any(|a| a == "--json") {
+                return Err(USAGE.into());
+            }
+            println!("{}", serde_json::to_string(&snapshot::snapshot())?);
+            Ok(())
+        }
+        "watch" => {
+            if !args.iter().any(|a| a == "--json") {
+                return Err(USAGE.into());
+            }
+            let mut watcher = snapshot::Watcher::default();
+            let mut out = std::io::stdout();
+            loop {
+                for line in watcher.poll() {
+                    // A closed pipe means the reader is gone.
+                    if writeln!(out, "{line}").is_err() || out.flush().is_err() {
+                        return Ok(());
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        }
+        "focus" => {
+            herdr.agent_focus(args.first().ok_or(USAGE)?).await?;
             Ok(())
         }
         "up" => {
