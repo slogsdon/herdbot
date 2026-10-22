@@ -12,9 +12,11 @@ public struct ProcessCLI: HerdbotCLI {
     /// GUI apps get a bare PATH, so look in the usual install spots. `HERDBOT_BIN` wins.
     public static func locate(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        home: String = NSHomeDirectory()
+        home: String = NSHomeDirectory(),
+        bundlePath: String? = Bundle.main.bundlePath
     ) -> URL? {
-        let candidates = [environment["HERDBOT_BIN"], home + "/.cargo/bin/herdbot", "/opt/homebrew/bin/herdbot", "/usr/local/bin/herdbot"]
+        let helper = bundlePath.map { $0 + "/Contents/Helpers/herdbot" }
+        let candidates = [environment["HERDBOT_BIN"], helper, home + "/.cargo/bin/herdbot", "/opt/homebrew/bin/herdbot", "/usr/local/bin/herdbot"]
         return candidates
             .compactMap { $0 }
             .map { URL(fileURLWithPath: $0) }
@@ -81,7 +83,7 @@ public struct ProcessCLI: HerdbotCLI {
     /// Run `herdbot <arguments>` to completion and return its stdout; a non-zero exit throws its
     /// stderr. Stdout is read to its end while the process runs, so a large page can't stall it; stderr
     /// (herdbot's errors are one line) is read after it.
-    private func output(_ arguments: [String]) async throws -> Data {
+    private func output(_ arguments: [String], acceptingExit accepted: Set<Int32> = [0]) async throws -> Data {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let process = Process()
             let outputs = Pipe()
@@ -101,7 +103,7 @@ public struct ProcessCLI: HerdbotCLI {
                 let data = outputs.fileHandleForReading.readDataToEndOfFile()
                 let errorText = errors.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                if process.terminationStatus == 0 {
+                if accepted.contains(process.terminationStatus) && (process.terminationStatus == 0 || !data.isEmpty) {
                     continuation.resume(returning: data)
                 } else {
                     let text = String(decoding: errorText, as: UTF8.self)
@@ -109,5 +111,20 @@ public struct ProcessCLI: HerdbotCLI {
                 }
             }
         }
+    }
+}
+
+extension ProcessCLI: SetupCLI {
+    public func doctor() async throws -> DoctorReport {
+        let data = try await output(["doctor", "--json"], acceptingExit: [0, 1])
+        let report = try JSONDecoder().decode(DoctorReport.self, from: data)
+        guard report.v == supportedDoctorVersion else { throw CLIError.unsupported(report.v) }
+        return report
+    }
+
+    public func setup(fix: String?) async throws -> String {
+        var arguments = ["setup", "--yes"]
+        if let fix { arguments += ["--only", fix] }
+        return String(decoding: try await output(arguments), as: UTF8.self)
     }
 }

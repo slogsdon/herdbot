@@ -74,6 +74,43 @@ import Testing
         #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent") == nil)
     }
 
+    @Test func doctorAcceptsExitOneWhenItPrintsAReport() async throws {
+        let json = doctorJSON.replacingOccurrences(of: "\\n", with: "")
+        let script = try fakeHerdbot("[ \"$1 $2\" = \"doctor --json\" ] || exit 2\nprintf '%s\\n' '\(json)'\nexit 1")
+        let report = try await ProcessCLI(binary: script).doctor()
+        #expect(report.checks.count == 3)
+    }
+
+    @Test func doctorFromAHerdbotWithoutItReportsTheError() async throws {
+        let script = try fakeHerdbot("echo 'herdbot: usage: …' >&2; exit 1")
+        await #expect(throws: CLIError.failed("herdbot: usage: …")) { try await ProcessCLI(binary: script).doctor() }
+    }
+
+    @Test func doctorRejectsAnUnknownVersion() async throws {
+        let script = try fakeHerdbot(#"echo '{"v":9,"version":"x","checks":[]}'"#)
+        await #expect(throws: CLIError.unsupported(9)) { try await ProcessCLI(binary: script).doctor() }
+    }
+
+    @Test func setupPassesTheFixAndYes() async throws {
+        let only = try fakeHerdbot(#"[ "$*" = "setup --yes --only service" ] && echo 'service: installed'"#)
+        #expect(try await ProcessCLI(binary: only).setup(fix: "service").contains("installed"))
+        let all = try fakeHerdbot(#"[ "$*" = "setup --yes" ]"#)
+        _ = try await ProcessCLI(binary: all).setup(fix: nil)
+    }
+
+    @Test func locatePrefersTheEnvOverrideThenTheBundledHelper() throws {
+        let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("hk-\(UUID().uuidString)/Herdbot.app")
+        let helpers = bundle.appendingPathComponent("Contents/Helpers")
+        try FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true)
+        let helper = helpers.appendingPathComponent("herdbot")
+        try "#!/bin/sh\\n".write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let override = try fakeHerdbot("")
+        #expect(ProcessCLI.locate(environment: ["HERDBOT_BIN": override.path], home: "/nonexistent", bundlePath: bundle.path) == override)
+        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: bundle.path)?.path == helper.path)
+        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: "/nonexistent") == nil)
+    }
+
     /// Only when HERDBOT_BIN points at a real, new-enough herdbot: the live contract check.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["HERDBOT_BIN"] != nil))
     func realBinaryStreamsASnapshotFirst() async throws {
