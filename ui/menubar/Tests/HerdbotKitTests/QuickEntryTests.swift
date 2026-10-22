@@ -82,6 +82,29 @@ import Testing
         #expect(await state.send(using: FakeCLI()))
     }
 
+    @Test func labelsTheCurrentRecipient() {
+        let (state, _, _) = make()
+        #expect(state.recipientLabel == "Alpha")
+        state.choose(.room("crew"))
+        #expect(state.recipientLabel == "Crew (room)")
+    }
+
+    @Test func dismissingAFailureKeepsTheText() async {
+        let (state, _, _) = make()
+        let cli = FakeCLI()
+        cli.failure = "boom"
+        state.text = "keep me"
+        _ = await state.send(using: cli)
+        state.dismissFailure()
+        #expect(state.status == .idle)
+        #expect(state.text == "keep me")
+        // Dismissing is only for failures: it must not clear a queued confirmation.
+        cli.failure = nil
+        _ = await state.send(using: cli)
+        state.dismissFailure()
+        #expect(state.status == .queued)
+    }
+
     @Test func resetStartsAFreshMessage() async {
         let (state, _, _) = make()
         state.text = "x"

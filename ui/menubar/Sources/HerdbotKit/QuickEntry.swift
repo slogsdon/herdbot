@@ -68,6 +68,11 @@ public final class QuickEntryState {
             ?? options.first?.recipient
     }
 
+    /// What the person sees for the current recipient, e.g. "Alpha" or "Crew (room)".
+    public var recipientLabel: String? {
+        options.first { $0.recipient == recipient }?.label
+    }
+
     public var daemonDown: Bool { menu.snapshot?.daemon == "down" }
 
     public var canSend: Bool {
@@ -84,6 +89,11 @@ public final class QuickEntryState {
         text = ""
         status = .idle
         chosen = nil
+    }
+
+    /// Clear a failure so the person can edit and try again; the text was kept.
+    public func dismissFailure() {
+        if case .failed = status { status = .idle }
     }
 
     /// True when the message was queued. Dictated text is never sent on its own: this runs only
