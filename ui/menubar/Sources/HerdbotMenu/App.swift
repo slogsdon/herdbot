@@ -22,7 +22,7 @@ struct HerdbotMenuApp: App {
         } else {
             state.fail(CLIError.notFound.localizedDescription)
         }
-        let quickEntry = QuickEntryController(state: QuickEntryState(menu: state), cli: cli)
+        let quickEntry = QuickEntryController(state: QuickEntryState(menu: state), cli: cli, hotkeyLabel: "⌥Space")
         // ⌥Space. Not a modifier alone, so it can't clash with MacWhisper's Right ⌘ dictation key.
         hotkeyRegistered = GlobalHotkey().register(keyCode: kVK_Space, modifiers: optionKey) { quickEntry.toggle() }
         self.state = state
