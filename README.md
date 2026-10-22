@@ -210,6 +210,8 @@ herdr rejects agent arguments it can't quote safely (newlines trigger `invalid_a
 
 pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, enables built-in MCP and code mode and registers its server through its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers. Built-in MCP also reads `~/.pi/agent/mcp.json`. Code mode exposes enabled servers there to bot scripts, including the global `radius` and `rea` servers; a global server set to `"exposure": "direct"` is declared directly.
 
+A Claude launch blocked on its folder trust dialog becomes a card in `status` and `watch --json`. Use `herdbot card list` to inspect pending cards and `herdbot card answer <card-id> <option-id>` to answer one; this is the only command that answers, and it re-checks the live screen first. Cards live in `.state/cards/`, with answers recorded in `.state/cards.log`. herdbot never answers on its own; other prompts behave as before.
+
 ### Turn hooks
 
 Each harness's own hook reports two things to herdbot: a finished turn with its reply, and a block waiting on you. Live on 2026-10-20, claude, codex and pi subagent runs each reached `done` with `result_source: hook`.

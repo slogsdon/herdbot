@@ -11,7 +11,7 @@ Approved 2026-10-22; built across three plans (data seam, window, composer). Fol
 ## Non-goals
 
 - Token streaming. herdbot sees only finished turns, so replies appear when a turn ends.
-- Approve or deny. Approvals stay in the harness; the chat only shows a blocked banner and a Jump to pane button.
+- Approving without an explicit click. An approval is answered only by a user's click on a card bound to the exact prompt (see the approval cards design).
 - Editing or deleting messages, attachments, search inside history, room management (creating, pausing), multiple windows.
 - Other operating systems. The data seam (below) is OS-neutral, so another shell can be written later; this phase is macOS only.
 
