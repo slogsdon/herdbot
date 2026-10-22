@@ -2,9 +2,9 @@
 
 A SwiftUI menu bar app for herdbot. It follows `herdbot watch --json`, shows bots, running
 subagents, cooling harnesses and blocked agents, and posts a notification when an agent becomes
-blocked; clicking it runs `herdbot focus <agent>`. ⌥Space opens a quick-entry panel that queues a message to a bot or room. Design: `docs/superpowers/specs/2026-10-21-ui-layer-design.md`.
+blocked; clicking it runs `herdbot focus <agent>`. ⌥Space opens a quick-entry panel that queues a message to a bot or room. A chat window (menu: Open herdbot) lists your bots and rooms and shows each conversation. Design: `docs/superpowers/specs/2026-10-21-ui-layer-design.md`.
 
-Needs macOS 14+, Swift 6 (Command Line Tools is enough), and a herdbot that has `watch --json`,
+Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has `watch --json`,
 `focus` and (for rooms in the picker) `rooms` in `status --json` (install with `cargo install --path crates/herdbot`, then restart the daemon).
 
 ```bash
@@ -77,3 +77,26 @@ panel stays open if a dictation HUD takes focus for a moment.
    Reduce Motion, one at a time, reopening the panel each time. Expect an opaque panel, a stronger border,
    and no fade, respectively. Switch to light mode: the panel stays readable. Switch them back.
 9. Quit from the gear menu; `rm -r $HB`.
+
+## Chat window
+
+The menu's "Open herdbot" opens a window: a sidebar of bots and rooms (newest activity first, with a
+filter field) and the selected conversation. It reads history through `herdbot history`, so it needs a
+herdbot that has it (otherwise the chat says "update herdbot"). Your messages are on the right, the bot's
+on the left; rooms name each speaker. A message you sent that the bot has not answered shows lighter,
+"queued" until the daemon delivers it and then "working". Scroll up to load older messages; "jump to latest"
+appears when you are not at the bottom. The header's "Jump to pane" opens the bot's herdr pane, and a banner
+appears when the bot is blocked on you. This window is read-only; sending is the quick-entry panel for now.
+The Dock icon shows only while the window is open.
+
+### Manual check (needs a person; install the new herdbot and restart the daemon first)
+
+1. `export HB=$(mktemp -d); for b in alpha beta; do HERDBOT_HOME=$HB herdbot new $b; done; HERDBOT_HOME=$HB herdbot room new crew --members alpha,beta`
+   Give alpha a history: append a few JSON lines like `{"at":<unix seconds>,"prompt":"hi","reply":"Hello **there**\n\n```rust\nfn x() {}\n```"}` to `$HB/alpha/turns.jsonl` (use times from today and from two days ago), and a line to `$HB/rooms/crew/transcript.jsonl` such as `{"at":<now>,"speaker":"you","text":"hi crew"}`.
+2. `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`. No window appears at launch. Menu → "Open herdbot": the window opens and a Dock icon appears.
+3. The sidebar lists Bots and Rooms with avatars, previews and times; type in the filter field and rows narrow. Click alpha: bubbles, bold text, the code block in monospace, "Yesterday"/"Today" separators, scrolled to the bottom.
+4. `HERDBOT_HOME=$HB herdbot send alpha "queued one"`: within a second a lighter "queued" bubble appears (the daemon is not delivering for this home). Click crew: speaker names in colour.
+5. Add more than 50 items to alpha's `turns.jsonl` and scroll up: older messages load and your place holds. Scroll up, then add a line: "jump to latest" appears, and the view does not jump while you are scrolled up.
+6. Close the window: the Dock icon goes away and the menu bar item stays. Reopen from the menu.
+7. System Settings → Accessibility → Display: Reduce Transparency and Increase Contrast change the sidebar and window; Reduce Motion removes the jump button's animation. Light mode stays readable.
+8. Quit from the menu; `rm -r $HB`.

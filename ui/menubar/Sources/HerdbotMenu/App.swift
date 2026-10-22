@@ -10,6 +10,7 @@ struct HerdbotMenuApp: App {
     private let cli: ProcessCLI?
     private let notifier: Notifier
     private let quickEntry: QuickEntryController
+    private let chat: ChatState
     private let hotkeyRegistered: Bool
 
     init() {
@@ -29,9 +30,15 @@ struct HerdbotMenuApp: App {
         self.cli = cli
         self.notifier = notifier
         self.quickEntry = quickEntry
+        self.chat = ChatState(menu: state, cli: cli)
     }
 
     var body: some Scene {
+        // Opened from the menu, not at launch.
+        Window("herdbot", id: "chat") {
+            ChatWindow(menu: state, chat: chat, cli: cli)
+        }
+        .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
             MenuContent(state: state, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
         } label: {

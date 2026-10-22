@@ -7,6 +7,7 @@ struct MenuContent: View {
     let cli: ProcessCLI?
     let hotkeyRegistered: Bool
     let openQuickEntry: () -> Void
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let problem = state.problem {
@@ -48,6 +49,10 @@ struct MenuContent: View {
             Text("waiting for herdbot…")
         }
         Divider()
+        Button("Open herdbot") {
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "chat")
+        }
         Button(hotkeyRegistered ? "Quick entry (⌥Space)" : "Quick entry (⌥Space is taken by another app)") { openQuickEntry() }
         Button("Quit") { NSApplication.shared.terminate(nil) }
     }
