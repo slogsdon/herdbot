@@ -71,7 +71,7 @@ import Testing
     @Test func locatePrefersHerdbotBin() throws {
         let script = try fakeHerdbot("true")
         #expect(ProcessCLI.locate(environment: ["HERDBOT_BIN": script.path], home: "/nonexistent") == script)
-        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent") == nil)
+        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", systemPaths: []) == nil)
     }
 
     @Test func doctorAcceptsExitOneWhenItPrintsAReport() async throws {
@@ -107,8 +107,8 @@ import Testing
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         let override = try fakeHerdbot("")
         #expect(ProcessCLI.locate(environment: ["HERDBOT_BIN": override.path], home: "/nonexistent", bundlePath: bundle.path) == override)
-        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: bundle.path)?.path == helper.path)
-        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: "/nonexistent") == nil)
+        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: bundle.path, systemPaths: [])?.path == helper.path)
+        #expect(ProcessCLI.locate(environment: [:], home: "/nonexistent", bundlePath: "/nonexistent", systemPaths: []) == nil)
     }
 
     /// Only when HERDBOT_BIN points at a real, new-enough herdbot: the live contract check.

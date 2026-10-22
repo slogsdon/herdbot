@@ -87,10 +87,11 @@ public struct ProcessCLI: HerdbotCLI {
     public static func locate(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         home: String = NSHomeDirectory(),
-        bundlePath: String? = Bundle.main.bundlePath
+        bundlePath: String? = Bundle.main.bundlePath,
+        systemPaths: [String] = ["/opt/homebrew/bin/herdbot", "/usr/local/bin/herdbot"]
     ) -> URL? {
         let helper = bundlePath.map { $0 + "/Contents/Helpers/herdbot" }
-        let candidates = [environment["HERDBOT_BIN"], helper, home + "/.cargo/bin/herdbot", "/opt/homebrew/bin/herdbot", "/usr/local/bin/herdbot"]
+        let candidates = [environment["HERDBOT_BIN"], helper, home + "/.cargo/bin/herdbot"] + systemPaths
         return candidates
             .compactMap { $0 }
             .map { URL(fileURLWithPath: $0) }
