@@ -16,18 +16,28 @@ struct AvatarView: View {
 
 private struct Row: View {
     let row: SidebarRow
+    let unread: Int
 
     var body: some View {
         HStack(spacing: 10) {
             AvatarView(slug: row.slug, title: row.title)
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.title).font(.body.weight(.medium)).lineLimit(1)
+                Text(row.title).font(.body.weight(unread > 0 ? .bold : .medium)).lineLimit(1)
                 Text(row.preview.isEmpty ? " " : row.preview).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 3) {
                 if let at = row.lastAt { Text(time(at)).font(.caption2).foregroundStyle(.secondary) }
-                if row.working { ProgressView().controlSize(.mini) }
+                if unread > 0 {
+                    Text(unread > 99 ? "99+" : "\(unread)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor, in: Capsule())
+                } else if row.working {
+                    ProgressView().controlSize(.mini)
+                }
             }
         }
         .opacity(row.dimmed ? 0.55 : 1)
@@ -46,15 +56,16 @@ private struct Row: View {
 struct SidebarView: View {
     let menu: MenuState
     let chat: ChatState
+    let unread: UnreadTracker
 
     var body: some View {
         let rows = menu.snapshot.map { Sidebar.rows(from: $0, filter: chat.filter) } ?? (bots: [], rooms: [])
         List(selection: Binding(get: { chat.selection }, set: { choice in Task { await chat.select(choice) } })) {
             if !rows.bots.isEmpty {
-                Section("Bots") { ForEach(rows.bots) { Row(row: $0).tag(Optional($0.id)) } }
+                Section("Bots") { ForEach(rows.bots) { Row(row: $0, unread: unread.unread($0.id)).tag(Optional($0.id)) } }
             }
             if !rows.rooms.isEmpty {
-                Section("Rooms") { ForEach(rows.rooms) { Row(row: $0).tag(Optional($0.id)) } }
+                Section("Rooms") { ForEach(rows.rooms) { Row(row: $0, unread: unread.unread($0.id)).tag(Optional($0.id)) } }
             }
         }
         .searchable(text: Binding(get: { chat.filter }, set: { chat.filter = $0 }), placement: .sidebar, prompt: "Filter")

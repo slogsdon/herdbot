@@ -15,6 +15,7 @@ struct ChatView: View {
                 Divider()
                 banner(selection)
                 messages(selection)
+                Composer(chat: chat, title: info(for: selection).title, hasHerdbot: cli != nil)
             }
         } else {
             Text("Choose a bot or room").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -118,21 +119,72 @@ struct ChatView: View {
     }
 }
 
+/// Where you type. Return sends; the system's own newline key adds a line. Nothing is sent without
+/// a keypress, so dictated text can be read first.
+struct Composer: View {
+    let chat: ChatState
+    let title: String
+    let hasHerdbot: Bool
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            note
+            TextField("Message \(title)", text: Binding(get: { chat.draft }, set: { chat.draft = $0 }), axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15))
+                .lineLimit(1...6)
+                .focused($focused)
+                .disabled(chat.sendStatus == .sending)
+                .onSubmit { Task { await chat.send() } }
+                .onChange(of: chat.draft) { chat.dismissSendFailure() }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        // Take focus when a conversation opens; the short wait lets the window become key first.
+        .task(id: chat.selection) {
+            try? await Task.sleep(for: .milliseconds(80))
+            focused = true
+        }
+    }
+
+    @ViewBuilder private var note: some View {
+        if !hasHerdbot {
+            Text("herdbot not found").font(.caption).foregroundStyle(.red)
+        } else if case .failed(let message) = chat.sendStatus {
+            Text(message).font(.caption).foregroundStyle(.red).lineLimit(2)
+        } else if chat.daemonDown {
+            Text("daemon not running; messages wait until it is").font(.caption).foregroundStyle(.orange)
+        }
+    }
+}
+
 /// The window: sidebar and chat. The Dock icon shows only while it is open.
 struct ChatWindow: View {
     let menu: MenuState
     let chat: ChatState
+    let unread: UnreadTracker
     let cli: ProcessCLI?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(menu: menu, chat: chat)
+            SidebarView(menu: menu, chat: chat, unread: unread)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             ChatView(menu: menu, chat: chat, cli: cli)
         }
         .frame(minWidth: 720, minHeight: 480)
-        .task(id: menu.snapshot) { await chat.observe() }
+        .task(id: menu.snapshot) {
+            await chat.observe()
+            unread.sync()
+            markSelectionSeen()
+        }
+        .onChange(of: chat.selection) { markSelectionSeen() }
+        .onChange(of: scenePhase) { markSelectionSeen() }
         .onAppear {
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
@@ -140,5 +192,10 @@ struct ChatWindow: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { note in
             if (note.object as? NSWindow)?.title == "herdbot" { NSApp.setActivationPolicy(.accessory) }
         }
+    }
+
+    /// What is on screen counts as read: only while this window is the active one.
+    private func markSelectionSeen() {
+        if scenePhase == .active, let selection = chat.selection { unread.markSeen(selection) }
     }
 }

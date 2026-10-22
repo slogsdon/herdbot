@@ -1,12 +1,15 @@
 import HerdbotKit
 import UserNotifications
 
-/// Posts a notification per newly blocked agent; clicking one focuses that agent's pane.
+/// Posts a notification per newly blocked agent; clicking one opens that bot's chat, or focuses the
+/// agent's pane when it isn't a bot herdbot knows.
 /// Needs an app bundle: a bare `swift run` binary has no bundle id, so it stays silent.
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let cli: ProcessCLI?
     private let enabled = Bundle.main.bundleIdentifier != nil
+    /// Opens the chat for an agent and says whether it could; set once the chat exists.
+    var openChat: (String) -> Bool = { _ in false }
 
     init(cli: ProcessCLI?) {
         self.cli = cli
@@ -40,10 +43,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse
     ) async {
         guard let agent = response.notification.request.content.userInfo["agent"] as? String else { return }
-        await focus(agent)
+        await MainActor.run { openOrFocus(agent) }
     }
 
-    private func focus(_ agent: String) async {
-        try? await cli?.focus(agent: agent)
+    private func openOrFocus(_ agent: String) {
+        if openChat(agent) { return }
+        Task { try? await cli?.focus(agent: agent) }
     }
 }

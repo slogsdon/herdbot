@@ -11,6 +11,8 @@ struct HerdbotMenuApp: App {
     private let notifier: Notifier
     private let quickEntry: QuickEntryController
     private let chat: ChatState
+    private let unread: UnreadTracker
+    private let opener = WindowOpener()
     private let hotkeyRegistered: Bool
 
     init() {
@@ -30,19 +32,30 @@ struct HerdbotMenuApp: App {
         self.cli = cli
         self.notifier = notifier
         self.quickEntry = quickEntry
-        self.chat = ChatState(menu: state, cli: cli)
+        let chat = ChatState(menu: state, cli: cli)
+        self.chat = chat
+        unread = UnreadTracker(menu: state)
+        let opener = self.opener
+        // A blocked notification opens that bot's chat; an agent we can't place still focuses its pane.
+        notifier.openChat = { agent in
+            guard let bot = chat.bot(forAgent: agent) else { return false }
+            Task { await chat.select(bot) }
+            NSApp.activate(ignoringOtherApps: true)
+            opener.open()
+            return true
+        }
     }
 
     var body: some Scene {
         // Opened from the menu, not at launch.
         Window("herdbot", id: "chat") {
-            ChatWindow(menu: state, chat: chat, cli: cli)
+            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli)
         }
         .defaultLaunchBehavior(.suppressed)
         MenuBarExtra {
             MenuContent(state: state, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
         } label: {
-            MenuIcon(icon: state.icon)
+            MenuIcon(icon: state.icon).modifier(OpenerCapture(opener: opener))
         }
     }
 }
