@@ -3,7 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key><string>dev.herdbot.menu</string>
-    <key>CFBundleName</key><string>HerdbotMenu</string>
+    <key>CFBundleName</key><string>Herdbot</string>
+    <key>CFBundleDisplayName</key><string>Herdbot</string>
     <key>CFBundleExecutable</key><string>HerdbotMenu</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>

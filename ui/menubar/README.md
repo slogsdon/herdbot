@@ -9,8 +9,8 @@ Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has 
 
 ```bash
 ./scripts/test.sh          # unit tests (use this, not bare `swift test`)
-./scripts/build-app.sh     # builds build/HerdbotMenu.app, ad-hoc signed
-open build/HerdbotMenu.app
+./scripts/build-app.sh     # builds build/Herdbot.app, ad-hoc signed
+open build/Herdbot.app
 ```
 
 The app finds herdbot at `$HERDBOT_BIN`, then `Herdbot.app/Contents/Helpers/herdbot` inside the
@@ -37,7 +37,7 @@ Use a throwaway home and the plan-1 build of herdbot:
 export HB=$(mktemp -d)
 export LINKS=$(mktemp -d)
 mkdir -p "$HB/.state/events"
-HERDBOT_HOME="$HB" HERDBOT_LINK_DIR="$LINKS" HERDBOT_BIN=/path/to/plan-1/herdbot build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu
+   HERDBOT_HOME="$HB" HERDBOT_LINK_DIR="$LINKS" HERDBOT_BIN=/path/to/plan-1/herdbot build/Herdbot.app/Contents/MacOS/HerdbotMenu
 ```
 
 Expect the Setup window to open with `service` and `daemon` failing and `cli-link` warning. Choose **Link herdbot**;
@@ -84,7 +84,7 @@ panel stays open if a dictation HUD takes focus for a moment.
    `status --json` (`cargo install --path crates/herdbot`, restart the daemon).
 2. Throwaway state with two bots and a room:
    `export HB=$(mktemp -d); for b in scratch other; do HERDBOT_HOME=$HB herdbot new $b; done; HERDBOT_HOME=$HB herdbot room new crew --members scratch,other`
-3. `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`. Press ⌥Space. Expect a
+3. `HERDBOT_HOME=$HB build/Herdbot.app/Contents/MacOS/HerdbotMenu &`. Press ⌥Space. Expect a
    translucent rounded panel near the top of the screen with a hairline border, the cursor in a large
    field, a gear at the lower left, a "daemon not running" note, and `To ⌃ scratch` (borderless) at the
    lower right. If the menu says "⌥Space is taken by another app", free the key first.
