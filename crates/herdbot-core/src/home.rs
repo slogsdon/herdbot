@@ -405,6 +405,37 @@ pub fn approvals(bot: &Bot) -> Approvals {
     }
 }
 
+/// Whether codex agents should run outside the workspace-write sandbox.
+/// `[codex] sandbox = "none"` opts into `danger-full-access`; anything else keeps the
+/// default sandboxed behaviour.
+pub fn parse_codex_unsandboxed(herdbot_toml: &str) -> bool {
+    #[derive(Deserialize, Default)]
+    struct Section {
+        sandbox: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct Config {
+        #[serde(default)]
+        codex: Section,
+    }
+    match toml::from_str::<Config>(herdbot_toml) {
+        Ok(c) => match c.codex.sandbox.as_deref() {
+            Some("none") => true,
+            Some("default") => false,
+            Some(other) => {
+                eprintln!("codex: unknown sandbox mode {other:?}; using default");
+                false
+            }
+            None => false,
+        },
+        Err(_) => false,
+    }
+}
+
+pub fn codex_unsandboxed() -> bool {
+    parse_codex_unsandboxed(&fs::read_to_string(root().join("herdbot.toml")).unwrap_or_default())
+}
+
 pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
     serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
 }
@@ -461,6 +492,14 @@ mod tests {
         assert_eq!(bot.approvals.as_deref(), Some("auto"));
         let plain: Bot = toml::from_str("name = \"x\"\n").unwrap();
         assert_eq!(plain.approvals, None);
+    }
+
+    #[test]
+    fn codex_sandbox_default_unless_none() {
+        assert!(!parse_codex_unsandboxed(""));
+        assert!(parse_codex_unsandboxed("[codex]\nsandbox = \"none\"\n"));
+        assert!(!parse_codex_unsandboxed("[codex]\nsandbox = \"default\"\n"));
+        assert!(!parse_codex_unsandboxed("[codex]\nsandbox = \"yolo\"\n")); // unknown → default
     }
 
     #[test]

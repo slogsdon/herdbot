@@ -169,6 +169,8 @@ Verified live on 2026-10-20 unless the table says otherwise.
 
 Approvals: `[approvals] mode = "auto"` in `herdbot.toml`, or `approvals = "auto"` in a `bot.toml`, launches that bot's main agent and subagents with claude's `--permission-mode auto` and codex's `--approve-for-me`. pi doesn't ask for approvals. cursor has no automatic-review mode, so it still asks. `"ask"` is the default and adds no flags.
 
+`[codex] sandbox = "none"` in `herdbot.toml` opts codex agents out of the workspace-write sandbox and runs them with `danger-full-access`. It is off by default; when enabled, agents can write anywhere your user can, including `~/.cache`, `~/.cargo` and git worktrees, so Swift/Rust builds and commits from worktrees work. It replaces `--approve-for-me` for codex, applies globally to all codex-routed agents, and does not affect claude, pi or cursor.
+
 herdr rejects agent arguments it can't quote safely (newlines trigger `invalid_agent_argument`), so prompts and MCP config are passed as files.
 
 pi needs a guardrail. Without `--no-extensions`, a user extension replaced the model at startup with a different opencode-go model, and later failed over to another provider entirely. So herdbot always passes `--no-extensions --provider opencode-go --model <id>`, enables built-in MCP and code mode and registers its server through its own extension, and rejects any pi model that `pi --list-models` doesn't list for `opencode-go`. It doesn't yet audit pi's session log for calls to other providers. Built-in MCP also reads `~/.pi/agent/mcp.json`. Code mode exposes enabled servers there to bot scripts, including the global `radius` and `rea` servers; a global server set to `"exposure": "direct"` is declared directly.

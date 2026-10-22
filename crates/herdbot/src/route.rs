@@ -226,6 +226,7 @@ pub fn launch(
     tool_args: &[String],
     cwd: &str,
     approvals: home::Approvals,
+    codex_unsandboxed: bool,
     class: &str,
 ) -> Result<Launch> {
     let exe = std::env::current_exe()?.to_string_lossy().into_owned();
@@ -301,7 +302,13 @@ pub fn launch(
             if let Some(e) = effort {
                 args.extend([s("-c"), format!("model_reasoning_effort={e}")]);
             }
-            args.extend(approval_args("codex", approvals));
+            if codex_unsandboxed {
+                // danger-full-access is mutually exclusive with --approve-for-me, which
+                // implies the workspace-write sandbox.
+                args.extend([s("-s"), s("danger-full-access")]);
+            } else {
+                args.extend(approval_args("codex", approvals));
+            }
             Launch {
                 kind: "codex",
                 args,
@@ -666,5 +673,136 @@ mod tests {
                 .len()
                 > 1
         );
+    }
+
+    /// Run `f` with `HERDBOT_HOME` pointing at a fresh temp directory.
+    /// Serialised because env vars are process-global.
+    fn with_temp_home<F: FnOnce() -> R, R>(f: F) -> R {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap();
+        let tmp = std::env::temp_dir().join(format!("herdbot-route-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let old = std::env::var_os("HERDBOT_HOME");
+        unsafe {
+            std::env::set_var("HERDBOT_HOME", &tmp);
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        if let Some(old) = old {
+            unsafe {
+                std::env::set_var("HERDBOT_HOME", old);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var("HERDBOT_HOME");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+        match result {
+            Ok(r) => r,
+            Err(e) => std::panic::resume_unwind(e),
+        }
+    }
+
+    #[test]
+    fn codex_sandboxed_auto_adds_approve_for_me() {
+        with_temp_home(|| {
+            let table: Value = DEFAULT_ROUTING.parse::<toml::Table>().unwrap().into();
+            let route = Route {
+                harness: "codex".into(),
+                model: "gpt-6.1-sol".into(),
+                effort: Some("medium".into()),
+            };
+            let launch = launch(
+                &table,
+                &route,
+                "test-agent",
+                "instructions",
+                &["mcp".into(), "--bot".into(), "b".into()],
+                "/tmp",
+                home::Approvals::Auto,
+                false,
+                "code",
+            )
+            .unwrap();
+            assert!(launch.args.contains(&"--approve-for-me".to_string()));
+            assert!(!launch.args.contains(&"-s".to_string()));
+            assert!(!launch.args.contains(&"danger-full-access".to_string()));
+        });
+    }
+
+    #[test]
+    fn codex_unsandboxed_uses_danger_full_access_not_approve_for_me() {
+        with_temp_home(|| {
+            let table: Value = DEFAULT_ROUTING.parse::<toml::Table>().unwrap().into();
+            let route = Route {
+                harness: "codex".into(),
+                model: "gpt-6.1-sol".into(),
+                effort: Some("medium".into()),
+            };
+            for approvals in [home::Approvals::Auto, home::Approvals::Ask] {
+                let launch = launch(
+                    &table,
+                    &route,
+                    "test-agent",
+                    "instructions",
+                    &["mcp".into(), "--bot".into(), "b".into()],
+                    "/tmp",
+                    approvals,
+                    true,
+                    "code",
+                )
+                .unwrap();
+                assert!(launch.args.contains(&"-s".to_string()));
+                assert!(launch.args.contains(&"danger-full-access".to_string()));
+                assert!(!launch.args.contains(&"--approve-for-me".to_string()));
+                let pos_s = launch.args.iter().position(|a| a == "-s").unwrap();
+                assert_eq!(
+                    launch.args.get(pos_s + 1),
+                    Some(&"danger-full-access".to_string())
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn other_harnesses_ignore_codex_unsandboxed() {
+        with_temp_home(|| {
+            let table: Value = DEFAULT_ROUTING.parse::<toml::Table>().unwrap().into();
+            let route = Route {
+                harness: "claude".into(),
+                model: "claude-opus-5-5".into(),
+                effort: Some("medium".into()),
+            };
+            let sandboxed = launch(
+                &table,
+                &route,
+                "test-agent",
+                "instructions",
+                &["mcp".into(), "--bot".into(), "b".into()],
+                "/tmp",
+                home::Approvals::Auto,
+                false,
+                "code",
+            )
+            .unwrap();
+            let unsandboxed = launch(
+                &table,
+                &route,
+                "test-agent",
+                "instructions",
+                &["mcp".into(), "--bot".into(), "b".into()],
+                "/tmp",
+                home::Approvals::Auto,
+                true,
+                "code",
+            )
+            .unwrap();
+            assert_eq!(sandboxed.args, unsandboxed.args);
+            assert!(sandboxed.args.contains(&"--permission-mode".to_string()));
+            assert!(sandboxed.args.contains(&"auto".to_string()));
+            assert!(!sandboxed.args.contains(&"-s".to_string()));
+        });
     }
 }

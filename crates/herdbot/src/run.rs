@@ -205,6 +205,7 @@ async fn start(
         &tool_args,
         &home::cwd(slug, bot),
         home::approvals(bot),
+        home::codex_unsandboxed(),
         class,
     )?;
     herdr
