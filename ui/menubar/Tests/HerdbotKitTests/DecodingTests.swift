@@ -9,10 +9,19 @@ import Testing
         let snap = try #require(parsed.snapshot)
         #expect(snap.daemon == "up")
         #expect(snap.bots.map(\.slug) == ["alpha"])
+        #expect(snap.rooms.map(\.slug) == ["crew"])
+        #expect(snap.rooms.first?.mode == "round_robin")
         #expect(snap.runs.first?.agent == "alpha-r1")
         #expect(snap.cooldowns.first?.until == 4102444800)
         #expect(snap.blocked.first?.reason == "approval: Bash")
         #expect(snap.blocked.first?.text == nil)
+    }
+
+    @Test func aSnapshotFromAnOlderHerdbotHasNoRooms() throws {
+        let old = """
+        {"v":1,"type":"snapshot","snapshot":{"v":1,"at":1,"daemon":"up","bots":[],"runs":[],"cooldowns":[],"blocked":[],"warnings":[]}}
+        """
+        #expect(try #require(try StreamParser.parse(old)?.snapshot).rooms.isEmpty)
     }
 
     @Test func eventLineDecodes() throws {

@@ -34,6 +34,17 @@ import Testing
         }
     }
 
+    @Test func sendPassesTheTextAsOneArgument() async throws {
+        let bot = try fakeHerdbot(##"[ "$#" = 3 ] && [ "$1" = send ] && [ "$2" = alpha ] && [ "$3" = "$(printf 'two words "quoted"\nsecond line')" ]"##)
+        try await ProcessCLI(binary: bot).send(to: .bot("alpha"), text: "two words \"quoted\"\nsecond line")
+        let room = try fakeHerdbot(#"[ "$#" = 4 ] && [ "$1 $2 $3 $4" = "room send crew hi there" ]"#)
+        try await ProcessCLI(binary: room).send(to: .room("crew"), text: "hi there")
+        let bad = try fakeHerdbot("echo 'no bot alpha' >&2; exit 1")
+        await #expect(throws: CLIError.failed("no bot alpha")) {
+            try await ProcessCLI(binary: bad).send(to: .bot("alpha"), text: "x")
+        }
+    }
+
     @Test func locatePrefersHerdbotBin() throws {
         let script = try fakeHerdbot("true")
         #expect(ProcessCLI.locate(environment: ["HERDBOT_BIN": script.path], home: "/nonexistent") == script)

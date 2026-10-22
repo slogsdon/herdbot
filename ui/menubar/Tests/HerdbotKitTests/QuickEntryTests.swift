@@ -1,0 +1,93 @@
+import Foundation
+import Testing
+@testable import HerdbotKit
+
+@MainActor
+@Suite struct QuickEntry {
+    func make(daemon: String = "up", rooms: Bool = true) -> (QuickEntryState, MenuState, UserDefaults) {
+        let menu = MenuState()
+        menu.apply(line(snapshot(
+            daemon: daemon,
+            bots: [BotView(slug: "alpha", title: "Alpha", up: true), BotView(slug: "beta", title: "", up: false)],
+            rooms: rooms ? [RoomView(slug: "crew", name: "Crew", mode: "channel", paused: false)] : [])))
+        let defaults = UserDefaults(suiteName: "qe-\(UUID().uuidString)")!
+        return (QuickEntryState(menu: menu, defaults: defaults), menu, defaults)
+    }
+
+    @Test func optionsListBotsThenRooms() {
+        let (state, _, _) = make()
+        #expect(state.options.map(\.label) == ["Alpha", "beta", "Crew (room)"])
+        #expect(state.recipient == .bot("alpha"))
+    }
+
+    @Test func remembersTheLastRecipientAcrossResets() {
+        let (state, menu, defaults) = make()
+        state.choose(.room("crew"))
+        state.reset()
+        #expect(state.recipient == .room("crew"))
+        // A new state over the same defaults, as after an app restart.
+        #expect(QuickEntryState(menu: menu, defaults: defaults).recipient == .room("crew"))
+    }
+
+    @Test func aRemovedRecipientFallsBackToTheFirstOption() {
+        let (state, menu, _) = make()
+        state.choose(.room("crew"))
+        menu.apply(line(snapshot(bots: [BotView(slug: "alpha", title: "Alpha", up: true)])))
+        #expect(state.recipient == .bot("alpha"))
+    }
+
+    @Test func noSnapshotMeansNothingToSend() {
+        let state = QuickEntryState(menu: MenuState(), defaults: UserDefaults(suiteName: "qe-\(UUID().uuidString)")!)
+        state.text = "hi"
+        #expect(state.options.isEmpty)
+        #expect(!state.canSend)
+    }
+
+    @Test func blankTextCannotBeSent() {
+        let (state, _, _) = make()
+        state.text = "  \n "
+        #expect(!state.canSend)
+        state.text = "hi"
+        #expect(state.canSend)
+    }
+
+    @Test func sendTrimsQueuesAndClears() async {
+        let (state, _, _) = make()
+        let cli = FakeCLI()
+        state.choose(.room("crew"))
+        state.text = "  line one\nline two \n"
+        #expect(await state.send(using: cli))
+        #expect(cli.sent.count == 1)
+        #expect(cli.sent[0].0 == .room("crew"))
+        #expect(cli.sent[0].1 == "line one\nline two")
+        #expect(state.status == .queued)
+        #expect(state.text.isEmpty)
+    }
+
+    @Test func aFailedSendKeepsTheTextAndSaysWhy() async {
+        let (state, _, _) = make()
+        let cli = FakeCLI()
+        cli.failure = "no bot alpha"
+        state.text = "hello"
+        #expect(!(await state.send(using: cli)))
+        #expect(state.status == .failed("no bot alpha"))
+        #expect(state.text == "hello")
+        #expect(state.canSend)
+    }
+
+    @Test func daemonDownIsSurfacedButDoesNotBlockSending() async {
+        let (state, _, _) = make(daemon: "down")
+        #expect(state.daemonDown)
+        state.text = "hi"
+        #expect(await state.send(using: FakeCLI()))
+    }
+
+    @Test func resetStartsAFreshMessage() async {
+        let (state, _, _) = make()
+        state.text = "x"
+        _ = await state.send(using: FakeCLI())
+        state.reset()
+        #expect(state.status == .idle)
+        #expect(state.text.isEmpty)
+    }
+}

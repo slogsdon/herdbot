@@ -20,6 +20,8 @@ public protocol HerdbotCLI: Sendable {
     func watch() -> AsyncThrowingStream<StreamLine, Error>
     /// `herdbot focus <agent>`.
     func focus(agent: String) async throws
+    /// `herdbot send <bot> <text>` or `herdbot room send <room> <text>`: queues the text.
+    func send(to recipient: Recipient, text: String) async throws
 }
 
 public enum StreamParser {

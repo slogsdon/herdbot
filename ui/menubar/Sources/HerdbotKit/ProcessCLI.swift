@@ -54,11 +54,24 @@ public struct ProcessCLI: HerdbotCLI {
     }
 
     public func focus(agent: String) async throws {
+        try await run(["focus", agent])
+    }
+
+    /// The text is one argv entry, so spaces, quotes and newlines reach herdbot untouched.
+    public func send(to recipient: Recipient, text: String) async throws {
+        switch recipient {
+        case .bot(let slug): try await run(["send", slug, text])
+        case .room(let slug): try await run(["room", "send", slug, text])
+        }
+    }
+
+    /// Run `herdbot <arguments>` to completion; a non-zero exit throws its stderr.
+    private func run(_ arguments: [String]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let process = Process()
             let errors = Pipe()
             process.executableURL = binary
-            process.arguments = ["focus", agent]
+            process.arguments = arguments
             process.environment = environment
             process.standardOutput = FileHandle.nullDevice
             process.standardError = errors
