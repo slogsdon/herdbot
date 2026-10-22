@@ -17,13 +17,20 @@ struct SetupView: View {
                     ForEach(setup.checks) { check in row(check) }
                 }
             }
+            if let result = setup.lastResult {
+                Text(result).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             if let error = setup.fixError {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
-                Button("Set up everything") { Task { await setup.fixAll() } }
+                Button { Task { await setup.fixAll() } } label: {
+                    if setup.fixingAll { ProgressView().controlSize(.small) }
+                    else { Text("Set up everything") }
+                }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!setup.needsAttention || setup.problem != nil)
+                    .disabled(!setup.hasFixable || setup.fixingAll || setup.problem != nil)
+                    .help(setup.hasFixable ? "Run every automatic fix" : "Nothing here can be fixed automatically")
                 Spacer()
                 Button("Done") { dismiss() }
             }
@@ -50,6 +57,9 @@ struct SetupView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(check.id).font(.headline)
                 Text(check.message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let hint = hint(for: check) {
+                    Text(hint).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 8)
             if let fix = check.fix, check.status != .ok {
