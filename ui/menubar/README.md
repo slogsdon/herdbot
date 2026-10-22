@@ -13,6 +13,15 @@ Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has 
 open build/Herdbot.app
 ```
 
+`build-app.sh` reads optional environment inputs: `ARCHS` (space-separated; defaults to the host
+architecture), `HERDBOT_HELPER` (binary embedded at `Contents/Helpers/herdbot`), `SIGN_IDENTITY`
+(`-` for ad-hoc signing), `APP_VERSION` (defaults to the workspace Cargo version), and `OUT_DIR`
+(`build` by default). For example, build a universal bundle with the CLI inside:
+
+```bash
+ARCHS="arm64 x86_64" HERDBOT_HELPER=/path/to/herdbot OUT_DIR=dist ./scripts/build-app.sh
+```
+
 The app finds herdbot at `$HERDBOT_BIN`, then `Herdbot.app/Contents/Helpers/herdbot` inside the
 bundle, then `~/.cargo/bin/herdbot`, `/opt/homebrew/bin/herdbot` or `/usr/local/bin/herdbot`.
 
@@ -50,7 +59,7 @@ home: it would replace the running daemon.
 1. `cargo install --path crates/herdbot` and restart the daemon, so `herdbot watch --json` exists.
 2. Use a throwaway state dir so nothing real is touched:
    `export HB=$(mktemp -d); mkdir -p $HB/.state/events`
-3. Start the app with it: `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`
+3. Start the app with it: `HERDBOT_HOME=$HB build/Herdbot.app/Contents/MacOS/HerdbotMenu &`
    Allow notifications when macOS asks. Expect a menu bar icon; its menu shows "daemon not running"
    (nothing listens on the throwaway home's lock socket).
 4. Block a real agent so the click has somewhere to go:
@@ -118,7 +127,7 @@ appears when the bot is blocked on you. Type in the composer at the bottom and p
 
 1. `export HB=$(mktemp -d); for b in alpha beta; do HERDBOT_HOME=$HB herdbot new $b; done; HERDBOT_HOME=$HB herdbot room new crew --members alpha,beta`
    Give alpha a history: append a few JSON lines like `{"at":<unix seconds>,"prompt":"hi","reply":"Hello **there**\n\n```rust\nfn x() {}\n```"}` to `$HB/alpha/turns.jsonl` (use times from today and from two days ago), and a line to `$HB/rooms/crew/transcript.jsonl` such as `{"at":<now>,"speaker":"you","text":"hi crew"}`.
-2. `HERDBOT_HOME=$HB build/HerdbotMenu.app/Contents/MacOS/HerdbotMenu &`. No window appears at launch. Menu → "Open herdbot": the window opens and a Dock icon appears.
+2. `HERDBOT_HOME=$HB build/Herdbot.app/Contents/MacOS/HerdbotMenu &`. No window appears at launch. Menu → "Open herdbot": the window opens and a Dock icon appears.
 3. The sidebar lists Bots and Rooms with avatars, previews and times; type in the filter field and rows narrow. Click alpha: bubbles, bold text, the code block in monospace, "Yesterday"/"Today" separators, scrolled to the bottom.
 4. After `HERDBOT_HOME=$HB herdbot send alpha "queued one"`, a lighter "queued" bubble appears in alpha's open chat within about a second (the daemon is not delivering for this home, so it stays queued). Click crew: speaker names in colour.
 5. Add more than 50 items to alpha's `turns.jsonl` and scroll up: older messages load and your place holds. Scroll up, then add a line: "jump to latest" appears, and the view does not jump while you are scrolled up.

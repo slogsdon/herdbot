@@ -27,7 +27,21 @@ Not built yet: importing Grok Bot's schedules and skills (they aren't stored on 
 - Rust with edition 2024 support
 - at least one harness CLI on your `PATH`, signed in: `claude`, `codex`, `cursor-agent` or `pi` (pi is restricted to the `opencode-go` provider)
 
+## Install
+
+Once the tap is available, install with Homebrew:
+
+```bash
+brew install --cask slogsdon/tap/herdbot
+```
+
+Open Herdbot from Applications and use its setup window, or run `herdbot setup` in a terminal.
+The zip from [GitHub Releases](https://github.com/slogsdon/herdbot/releases) works the same way:
+drag `Herdbot.app` to Applications, open it, and press **Set up everything**.
+
 ## Quick start
+
+### From source
 
 ```bash
 cargo install --path crates/herdbot
@@ -38,6 +52,19 @@ herdbot send helper "What can you do?"
 ```
 
 `herdbot setup` checks herdr and the harness CLIs, creates `~/Bots` and a commented `herdbot.toml`, links the CLI, installs the launchd service and offers a starter bot. The daemon delivers messages, so `send` needs it. The bot's workspace opens in herdr the first time a message arrives.
+
+## Releasing
+
+For a signed release, install the `x86_64-apple-darwin` Rust target, have a Developer ID Application
+certificate in the login keychain, and create a `notarytool` keychain profile. The tap checkout is
+optional; the script prints the rendered cask if `TAP_DIR` is unset. Then run:
+
+```bash
+SIGN_IDENTITY="Developer ID Application: … (TEAMID)" NOTARY_PROFILE=herdbot-notary scripts/release.sh
+```
+
+`scripts/release.sh --dry-run --no-notarize` builds and signs without uploading or notarizing;
+`scripts/test-release.sh` is the universal dry-run smoke test and needs both Rust targets.
 
 Other commands:
 
