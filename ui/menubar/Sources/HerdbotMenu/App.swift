@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import HerdbotKit
 import SwiftUI
 
@@ -8,6 +9,8 @@ struct HerdbotMenuApp: App {
     private let state: MenuState
     private let cli: ProcessCLI?
     private let notifier: Notifier
+    private let quickEntry: QuickEntryController
+    private let hotkeyRegistered: Bool
 
     init() {
         let state = MenuState()
@@ -19,14 +22,18 @@ struct HerdbotMenuApp: App {
         } else {
             state.fail(CLIError.notFound.localizedDescription)
         }
+        let quickEntry = QuickEntryController(state: QuickEntryState(menu: state), cli: cli)
+        // ⌥Space. Not a modifier alone, so it can't clash with MacWhisper's Right ⌘ dictation key.
+        hotkeyRegistered = GlobalHotkey().register(keyCode: kVK_Space, modifiers: optionKey) { quickEntry.toggle() }
         self.state = state
         self.cli = cli
         self.notifier = notifier
+        self.quickEntry = quickEntry
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(state: state, cli: cli)
+            MenuContent(state: state, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() })
         } label: {
             MenuIcon(icon: state.icon)
         }
