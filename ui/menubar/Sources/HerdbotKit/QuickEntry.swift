@@ -7,7 +7,7 @@ public enum Recipient: Hashable, Sendable {
     case room(String)
 
     /// Stable text form, for remembering the last choice.
-    var key: String {
+    public var key: String {
         switch self {
         case .bot(let slug): "bot:\(slug)"
         case .room(let slug): "room:\(slug)"

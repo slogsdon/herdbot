@@ -26,9 +26,62 @@ public final class ChatState {
         let queued: Int
     }
 
+    public enum SendStatus: Equatable, Sendable {
+        case idle
+        case sending
+        case failed(String)
+    }
+
+    public private(set) var sendStatus: SendStatus = .idle
+    private var drafts: [Recipient: String] = [:]
+
     public init(menu: MenuState, cli: (any HerdbotCLI)?) {
         self.menu = menu
         self.cli = cli
+    }
+
+    /// What you are typing to the open conversation; each conversation keeps its own.
+    public var draft: String {
+        get { selection.flatMap { drafts[$0] } ?? "" }
+        set { if let selection { drafts[selection] = newValue } }
+    }
+
+    public var canSend: Bool {
+        selection != nil && cli != nil && sendStatus != .sending
+            && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var daemonDown: Bool { menu.snapshot?.daemon == "down" }
+
+    /// Queue the draft for the open conversation, then re-fetch so it shows at once as queued.
+    /// Never called by dictation: only the person's Return. A failure keeps the draft.
+    @discardableResult
+    public func send() async -> Bool {
+        guard canSend, let cli, let target = selection else { return false }
+        let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        sendStatus = .sending
+        do {
+            try await cli.send(to: target, text: message)
+            drafts[target] = ""
+            sendStatus = .idle
+            await refresh()
+            return true
+        } catch {
+            sendStatus = .failed(error.localizedDescription)
+            return false
+        }
+    }
+
+    public func dismissSendFailure() {
+        if case .failed = sendStatus { sendStatus = .idle }
+    }
+
+    /// The bot a blocked event's agent belongs to: a bot's main agent is its slug, a subagent's
+    /// agent maps to the run's bot. nil for an agent herdbot doesn't know.
+    public func bot(forAgent agent: String) -> Recipient? {
+        guard let snapshot = menu.snapshot else { return nil }
+        if snapshot.bots.contains(where: { $0.slug == agent }) { return .bot(agent) }
+        return snapshot.runs.first { $0.agent == agent }.map { .bot($0.bot) }
     }
 
     /// Persisted items oldest first, then pending ones.
