@@ -1,6 +1,7 @@
 //! herdbot: Grok-Bot-style bots on herdr.
 
 mod adapters;
+mod config;
 mod daemon;
 mod doctor;
 mod fm;
@@ -33,6 +34,10 @@ const USAGE: &str = "usage:
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
   herdbot new <name> [--cwd DIR] [--class CLASS]
   herdbot list | runs
+  herdbot config list [--bot BOT] [--json]    supported settings, values and apply timing
+  herdbot config get <key> [--bot BOT] [--json]   one setting
+  herdbot config set <key> <value> [--bot BOT] [--json]   validate and write one setting
+  herdbot config unset <key> [--bot BOT] [--json]         remove one setting (its default applies)
   herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
   herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
   herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation, newest page first
@@ -136,6 +141,7 @@ async fn cli() -> Result<()> {
             );
             Ok(())
         }
+        "config" => config::run(args),
         "list" => {
             for slug in home::list_bots() {
                 let bot = home::load_bot(&slug)?;

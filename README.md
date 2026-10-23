@@ -74,6 +74,10 @@ herdbot doctor [--json]                 first-run and health checks (exit 1 if a
 herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
 herdbot uninstall [--purge]             remove the service and the herdbot link; --purge also deletes the home
 herdbot list | runs                    bots and subagent runs
+herdbot config list [--bot BOT] [--json]   supported settings, values and when they apply
+herdbot config get <key> [--bot BOT] [--json]   one setting
+herdbot config set <key> <value> [--bot BOT] [--json]   validate and write one setting
+herdbot config unset <key> [--bot BOT] [--json]         remove one setting (its default applies)
 herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
 herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
 herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation's items, newest page first (for UIs)
@@ -144,6 +148,64 @@ A bot's `cwd` defaults to its own folder. You can point it at a repo instead, fo
 **Run from an installed binary.** Every MCP config and pane records the path of the running `herdbot`. If the daemon ran from `target/debug`, a bot that rebuilds herdbot would swap the binary out from under its own subagents. That's why `service install` refuses to run from `target/`. After a `cargo install`, restart the daemon onto the new binary with `launchctl kickstart -k gui/$(id -u)/dev.herdbot.daemon`.
 
 **The service.** `herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it. The plist records the binary path as invoked, without resolving symlinks. The daemon starts at login and restarts 10 s after any exit, which includes the times herdr isn't running yet. launchd and the menu bar app start with a bare `PATH`, so the plist records the process `PATH` plus the interactive login shell's `PATH` (zsh or bash, cached for 10 minutes in `.state/shell-path.json`) and the usual install directories, along with `HERDBOT_HOME` and `HERDR_SOCKET`. The effective `PATH` is the same whether setup runs in a terminal or from the app. Setup waits up to 15 seconds for the daemon to answer. `herdbot doctor` flags a daemon older than the binary on disk; restart it with `herdbot setup --only restart-daemon`.
+
+### Settings
+
+`herdbot config` reads and writes the supported settings in TOML so a UI can present and change them without parsing files itself. `routing.toml` is not managed here and is still edited directly.
+
+```bash
+herdbot config list                     # global settings
+herdbot config list --bot helper        # one bot's settings
+herdbot config get approvals.mode       # one global setting
+herdbot config get memory --bot helper  # one bot setting
+herdbot config list --json              # the versioned contract below
+herdbot config set approvals.mode auto              # write one global setting
+herdbot config set memory true --bot helper         # write one bot setting
+herdbot config set paths '/workspace/vault=~/Documents/vault'   # add or replace one path rewrite
+herdbot config unset approvals.mode                 # remove it; the default applies again
+herdbot config unset class --bot helper --json      # the updated setting as JSON
+```
+
+Global settings live in `$HERDBOT_HOME/herdbot.toml`; bot settings live in `$HERDBOT_HOME/<slug>/bot.toml`. `--bot` selects the bot scope and only accepts an existing, normalised slug (lowercase letters, digits and `-`, at most 20 characters), so an id cannot escape the home. A missing `herdbot.toml` is not an error: `list` reports the metadata defaults without creating it, and `set` creates the file (and any missing section) on the first write. A missing bot, an unknown key, malformed TOML, or a wrong type or value exits 1 with the file and the expected value named.
+
+`set` takes the value as plain text: `ask`/`auto` for approvals, `default`/`none` for the codex sandbox, `true`/`false` for `memory`, a decimal integer for the numeric settings, one word for `class`, `cua.host` and `cua.command`, and `FROM=TO` for one `paths` entry. Quote anything with spaces. Every value is validated before the file is opened, so a rejected value leaves the file byte-for-byte unchanged. Accepted writes preserve comments, key order, inline comments and unrelated sections: the source is edited with a format-preserving TOML editor and replaced atomically through a sibling temp file and a rename, keeping the original permissions, so a crash or a failed write cannot leave truncated TOML. A comment directly above a key that `unset` removes goes with that key; an emptied `[section]` header stays.
+
+`set` and `unset` return the updated setting: human-readable by default (`set approvals.mode in …`, the value, its default and when it applies) or, with `--json`, the same `get` envelope with the new `value` (after `unset`, the default or, for a bot's `approvals`, the inherited global mode). Reads leave the file byte-for-byte unchanged, including comments, key order and sections the registry does not know. Unknown sections and keys found in the file are left alone rather than reported: only the keys this command exposes are validated, so a wrong type or value for an exposed key is an error while unrelated tables are not.
+
+With `--json`, `list` prints one line:
+
+```json
+{"version":1,"scope":"global","settings":[{"key":"approvals.mode","type":"enum","description":"…","default":"ask","value":"ask","choices":["ask","auto"],"apply":"next-bot-start"}]}
+```
+
+`get` prints the same envelope with one `setting` object instead of `settings`:
+
+```json
+{"version":1,"scope":"bot","setting":{"key":"memory","type":"boolean","description":"…","default":false,"value":false,"apply":"next-bot-start"}}
+```
+
+`version` is `1` and new fields are additive. `type` is `enum`, `string`, `integer`, `boolean` or `map`; `choices` is absent for types without a fixed set; `default` is the built-in fallback and `value` is what the file resolves to now. `apply` is `immediate`, `next-bot-start` or `daemon-restart`. No current setting needs a daemon restart, but the vocabulary is reserved for one that will.
+
+Supported settings and their defaults:
+
+| Scope | Key | Type | Default | Applies |
+|---|---|---|---|---|
+| global | `approvals.mode` | enum: `ask`, `auto` | `ask` | next bot start |
+| global | `codex.sandbox` | enum: `default`, `none` | `default` | next bot start |
+| global | `memory.max_compactors` | integer ≥ 0 | `2` | immediately (the daemon reads it each pass) |
+| global | `paths` | table of string → string | `{}` | next bot start |
+| global | `cua.host` | string or unset | unset | next bot start |
+| global | `cua.command` | string or unset | unset | next bot start |
+| bot | `title` | string | `""` | immediately |
+| bot | `cwd` | string | the bot's folder | next bot start |
+| bot | `class` | string | `default` | next bot start |
+| bot | `approvals` | enum: `ask`, `auto` | `ask`, else the global `approvals.mode` | next bot start |
+| bot | `memory` | boolean | `false` | next bot start |
+| bot | `memory_view_bytes` | integer ≥ 0 | `64000` | next bot start |
+
+“Next bot start” includes new subagent launches; agents already running keep their route, approvals and instructions until restarted. `memory.max_compactors` takes effect on the daemon's next memory pass because the daemon re-reads it each tick. A write reports this timing as `apply`; the daemon does not restart itself, and `unset` never removes a key that was already absent.
+
+Structural and import-owned fields are not settings here: a bot's `name`, `source`, `grok_id` and `schedules`, room `room.toml` files, and the routing table itself. `routing.toml` keys are rejected with a message saying to edit that file directly.
 
 ### Delivery goes through a queue
 
