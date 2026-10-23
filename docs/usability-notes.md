@@ -35,3 +35,14 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Constraint:** the activation is deliberate. The comment in `show()` says dictation tools type into the active app, so the app must be active for dictated text to land in the panel's field. Making the panel non-activating (`.nonactivatingPanel`) would stop the chat window moving but risks breaking dictation, so it must be tested with MacWhisper before it is chosen.
 - **Candidate approaches (none tried):** (1) keep activating, then send the chat window behind (`orderBack`) when it was not the key window before the hotkey, restoring nothing else; (2) a non-activating panel, if dictation still works; (3) activate without raising other windows, if AppKit offers a way. Needs a manual check by Shane: dictation into the panel with the chat window open and closed.
 - **Status:** open.
+
+## U4. Quick entry should close when focus moves to anything else
+
+- **Where:** `QuickEntryController` / `QuickEntryPanel` in `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`.
+- **Today:** the panel stays open when you click or type in another app. Shane noticed it still showing while typing directly into herdr + claude.
+- **Wanted:** the panel closes by itself as soon as you interact with anything in macOS that is not the quick-entry panel (another app, another window of this app, the desktop).
+- **Cause (verified in the code):** `panel.hidesOnDeactivate = false`, and nothing observes the panel losing key status or the app resigning active (no `didResignKey`/`didResignActive` handler). Only Escape, a send or the hotkey closes it.
+- **Constraint:** `hidesOnDeactivate = false` is deliberate. The README's dictation note says "the panel stays open if a dictation HUD takes focus for a moment" (MacWhisper, hold Right ⌘). A plain close-on-blur would close the panel under a dictation HUD and lose the dictated text's destination.
+- **Candidate approaches (none tried):** close when the panel resigns key AND the app is no longer active, after a short grace period (a few hundred ms) that a returning focus cancels, so a dictation HUD that takes focus briefly does not close it; or close only when the newly active application is not the dictation tool (needs knowing its bundle id, which is brittle); or close on a global mouse-down outside the panel (needs no focus change, but misses keyboard-only switches such as ⌘Tab). Combining the first with the mouse-down is probably the sturdiest; it needs a manual check with MacWhisper, a ⌘Tab away, a click on another app, and a Mission Control swipe.
+- **Interaction:** this and U3 both come from how the panel activates the app; they should be designed together.
+- **Status:** open.
