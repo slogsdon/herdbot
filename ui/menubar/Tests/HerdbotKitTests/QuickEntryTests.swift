@@ -113,4 +113,43 @@ import Testing
         #expect(state.status == .idle)
         #expect(state.text.isEmpty)
     }
+
+    @Test func focusLossOnlyDismissesAfterTheGracePeriod() {
+        var policy = QuickEntryFocusPolicy()
+        let lost = ContinuousClock.now
+        policy.focusLost(at: lost)
+        #expect(policy.dismissalDeadline == lost.advanced(by: QuickEntryFocusPolicy.grace))
+        #expect(!policy.isDue(at: lost.advanced(by: .milliseconds(299))))
+        #expect(policy.isDue(at: lost.advanced(by: QuickEntryFocusPolicy.grace)))
+    }
+
+    @Test func returningFocusCancelsTheDismissal() {
+        var policy = QuickEntryFocusPolicy()
+        let lost = ContinuousClock.now
+        policy.focusLost(at: lost)
+        policy.focusRegained()
+        #expect(policy.dismissalDeadline == nil)
+        #expect(!policy.isDue(at: lost.advanced(by: .seconds(5))))
+    }
+
+    @Test func repeatedFocusLossDoesNotExtendTheGracePeriod() {
+        var policy = QuickEntryFocusPolicy()
+        let lost = ContinuousClock.now
+        policy.focusLost(at: lost)
+        // The app deactivating and the panel resigning key can both report the same departure.
+        policy.focusLost(at: lost.advanced(by: .milliseconds(200)))
+        #expect(policy.dismissalDeadline == lost.advanced(by: QuickEntryFocusPolicy.grace))
+        #expect(policy.isDue(at: lost.advanced(by: QuickEntryFocusPolicy.grace)))
+    }
+
+    @Test func aNewLossAfterRegainingStartsAFreshGracePeriod() {
+        var policy = QuickEntryFocusPolicy()
+        let lost = ContinuousClock.now
+        policy.focusLost(at: lost)
+        policy.focusRegained()
+        let lostAgain = lost.advanced(by: .seconds(1))
+        policy.focusLost(at: lostAgain)
+        #expect(policy.dismissalDeadline == lostAgain.advanced(by: QuickEntryFocusPolicy.grace))
+        #expect(!policy.isDue(at: lostAgain.advanced(by: .milliseconds(299))))
+    }
 }

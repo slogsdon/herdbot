@@ -122,3 +122,41 @@ public final class QuickEntryState {
         }
     }
 }
+
+/// The quick-entry panel's focus-loss policy: focus leaving the panel only dismisses it once it has
+/// stayed away for `grace`. Anything that brings focus back before then cancels the dismissal, so a
+/// menu opened over the panel or a dictation HUD taking a moment doesn't close it.
+///
+/// Deliberately free of AppKit and of timers: the caller supplies the instant and does the
+/// scheduling, so the timing here is deterministic and testable.
+public struct QuickEntryFocusPolicy: Sendable {
+    /// Long enough to outlast a menu or a dictation HUD taking focus, short enough to read as
+    /// "you left the panel".
+    public static let grace: Duration = .milliseconds(300)
+
+    private var lostFocusAt: ContinuousClock.Instant?
+
+    public init() {}
+
+    /// Focus left. Repeat reports while it stays away don't push the deadline back; only regaining
+    /// focus and then losing it again starts a new grace period.
+    public mutating func focusLost(at now: ContinuousClock.Instant) {
+        if lostFocusAt == nil { lostFocusAt = now }
+    }
+
+    /// Focus came back, so nothing is due.
+    public mutating func focusRegained() {
+        lostFocusAt = nil
+    }
+
+    /// When the dismissal is due, or nil while focus is where it belongs.
+    public var dismissalDeadline: ContinuousClock.Instant? {
+        lostFocusAt?.advanced(by: Self.grace)
+    }
+
+    /// True once focus has been away for the whole grace period.
+    public func isDue(at now: ContinuousClock.Instant) -> Bool {
+        guard let lostFocusAt else { return false }
+        return now - lostFocusAt >= Self.grace
+    }
+}

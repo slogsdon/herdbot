@@ -18,6 +18,12 @@ final class QuickEntryController {
     private let panel: QuickEntryPanel
     /// Set while a fade-out runs, so a quick re-show isn't ordered out by the old fade.
     private var hiding = false
+    /// When focus left the panel, and how long it may stay away before the panel closes.
+    private var policy = QuickEntryFocusPolicy()
+    /// Live only while the panel is on screen; `hide()` calls `stopWatchingFocus`.
+    private var focusObservers: [NSObjectProtocol] = []
+    /// The pending grace period. Cancelled when focus comes back.
+    private var dismissal: Task<Void, Never>?
 
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
@@ -36,7 +42,8 @@ final class QuickEntryController {
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.isReleasedWhenClosed = false
-        // Stay open if a dictation HUD takes focus for a moment: only Escape or a send closes it.
+        // Don't close the moment a dictation HUD takes focus; leaving the panel is handled by the
+        // grace period in `panelLostFocus`, which a returning focus cancels.
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.onCancel = { [weak self] in self?.hide() }
@@ -48,6 +55,8 @@ final class QuickEntryController {
 
     func show() {
         hiding = false
+        // A re-show (including one during a pending dismissal) starts from a clean focus slate.
+        stopWatchingFocus()
         state.reset()
         // A fresh view each time, so the text field takes focus on every open.
         let host = NSHostingView(rootView: QuickEntryView(
@@ -57,10 +66,15 @@ final class QuickEntryController {
         panel.contentView = material(around: host)
         let height = host.fittingSize.height
         panel.setFrame(NSRect(origin: origin(forHeight: height), size: NSSize(width: QuickEntryView.width, height: height)), display: true)
-        // The app must be active for the panel to become key: dictation tools type into the active app.
-        NSApp.activate(ignoringOtherApps: true)
         panel.alphaValue = reduceMotion ? 1 : 0
+        // The app must be active for the panel to become key: dictation tools type into the active
+        // app. Activation brings the app's main and key windows forward, so order the panel in and
+        // make it key first, then take key back in case activation picked another window.
+        panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        watchFocus()
         if !reduceMotion {
             NSAnimationContext.runAnimationGroup { $0.duration = 0.12; panel.animator().alphaValue = 1 }
         }
@@ -68,6 +82,7 @@ final class QuickEntryController {
 
     func hide() {
         guard panel.isVisible, !hiding else { return }
+        stopWatchingFocus()
         if reduceMotion {
             panel.orderOut(nil)
             return
@@ -83,6 +98,59 @@ final class QuickEntryController {
             hiding = false
             panel.orderOut(nil)
         }
+    }
+
+    /// Focus leaving the panel or the app starts a grace period; a returning focus cancels it. Two
+    /// notifications can report the same departure (app deactivation also resigns key), and the
+    /// policy keeps the first deadline rather than pushing it back.
+    private func watchFocus() {
+        guard focusObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        focusObservers = [
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.panelLostFocus() }
+            },
+            center.addObserver(forName: NSApplication.didResignActiveNotification, object: NSApp, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.panelLostFocus() }
+            },
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.panelRegainedFocus() }
+            },
+        ]
+    }
+
+    /// Called on every hide, so nothing fires for a panel that is no longer on screen.
+    private func stopWatchingFocus() {
+        for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
+        focusObservers = []
+        dismissal?.cancel()
+        dismissal = nil
+        policy.focusRegained()
+    }
+
+    private func panelLostFocus() {
+        guard panel.isVisible, !hiding else { return }
+        policy.focusLost(at: .now)
+        guard dismissal == nil, let deadline = policy.dismissalDeadline else { return }
+        dismissal = Task { [weak self] in
+            try? await Task.sleep(until: deadline, clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self?.dismissIfFocusStayedAway()
+        }
+    }
+
+    private func panelRegainedFocus() {
+        guard panel.isVisible else { return }
+        policy.focusRegained()
+        dismissal?.cancel()
+        dismissal = nil
+    }
+
+    private func dismissIfFocusStayedAway() {
+        dismissal = nil
+        guard panel.isVisible, policy.isDue(at: .now) else { return }
+        policy.focusRegained()
+        hide()
     }
 
     /// The system's own material, which follows Reduce Transparency and Increase Contrast by itself:
