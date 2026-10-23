@@ -11,6 +11,21 @@ struct MarkdownText: View {
                 switch block {
                 case .text(let text):
                     Text(inline(text))
+                case .heading(let level, let text):
+                    Text(inline(text))
+                        .font(Self.headingFont(level))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, level <= 2 ? 4 : 2)
+                        .accessibilityAddTraits(.isHeader)
+                case .listItem(let depth, let marker, let text):
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(Self.markerText(marker))
+                            .monospacedDigit()
+                            .frame(minWidth: 18, alignment: .trailing)
+                        Text(inline(text))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, CGFloat(min(depth, 6)) * 16)
                 case .code(_, let body):
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(body).font(.system(.callout, design: .monospaced)).padding(8)
@@ -20,6 +35,26 @@ struct MarkdownText: View {
             }
         }
         .textSelection(.enabled)
+    }
+
+    /// Heading size and weight by level, so `#` through `######` read as one descending hierarchy.
+    private static func headingFont(_ level: Int) -> Font {
+        switch level {
+        case 1: .system(size: 20, weight: .bold)
+        case 2: .system(size: 18, weight: .semibold)
+        case 3: .system(size: 16, weight: .semibold)
+        case 4: .system(size: 15, weight: .medium)
+        case 5: .system(size: 14, weight: .medium)
+        default: .system(size: 13, weight: .semibold)
+        }
+    }
+
+    /// Bullets and numbered markers share a right-aligned column, so item text lines up at each depth.
+    private static func markerText(_ marker: MarkdownListMarker) -> String {
+        switch marker {
+        case .bullet: "•"
+        case .ordered(let number): "\(number)."
+        }
     }
 
     private func inline(_ text: String) -> AttributedString {

@@ -210,3 +210,90 @@ func turns(_ count: Int, from start: Int = 0) -> [HistoryItem] {
         #expect(Markdown.blocks("just text\nmore") == [.text("just text\nmore")])
     }
 }
+
+@Suite struct MarkdownParsing {
+    @Test func headingsCoverLevelsOneToSix() {
+        let source = "# One\n## Two\n### Three\n#### Four\n##### Five\n###### Six"
+        #expect(Markdown.blocks(source) == [
+            .heading(level: 1, text: "One"),
+            .heading(level: 2, text: "Two"),
+            .heading(level: 3, text: "Three"),
+            .heading(level: 4, text: "Four"),
+            .heading(level: 5, text: "Five"),
+            .heading(level: 6, text: "Six"),
+        ])
+    }
+
+    @Test func headingsKeepInlineMarkdownAndDropTrailingSpace() {
+        #expect(Markdown.blocks("## **bold** and `code`   ") == [.heading(level: 2, text: "**bold** and `code`")])
+        #expect(Markdown.blocks("   # indented heading") == [.heading(level: 1, text: "indented heading")])
+        #expect(Markdown.blocks("    # indented source") == [.text("    # indented source")])
+    }
+
+    @Test func unorderedAndOrderedListsKeepTheirMarkers() {
+        let source = "- alpha\n- beta\n\n1. first\n2. second\n10. tenth\n3) third"
+        #expect(Markdown.blocks(source) == [
+            .listItem(depth: 0, marker: .bullet, text: "alpha"),
+            .listItem(depth: 0, marker: .bullet, text: "beta"),
+            .listItem(depth: 0, marker: .ordered(1), text: "first"),
+            .listItem(depth: 0, marker: .ordered(2), text: "second"),
+            .listItem(depth: 0, marker: .ordered(10), text: "tenth"),
+            .listItem(depth: 0, marker: .ordered(3), text: "third"),
+        ])
+    }
+
+    @Test func nestingFollowsIndentationNotTheIndentWidth() {
+        let source = "- top\n  - child\n    - grandchild\n  - child two\n- top two\n1. one\n   1. nested"
+        #expect(Markdown.blocks(source) == [
+            .listItem(depth: 0, marker: .bullet, text: "top"),
+            .listItem(depth: 1, marker: .bullet, text: "child"),
+            .listItem(depth: 2, marker: .bullet, text: "grandchild"),
+            .listItem(depth: 1, marker: .bullet, text: "child two"),
+            .listItem(depth: 0, marker: .bullet, text: "top two"),
+            .listItem(depth: 0, marker: .ordered(1), text: "one"),
+            .listItem(depth: 1, marker: .ordered(1), text: "nested"),
+        ])
+    }
+
+    @Test func listItemsKeepInlineMarkdownAndUnsupportedSource() {
+        #expect(Markdown.blocks("- **bold** and `code`") == [.listItem(depth: 0, marker: .bullet, text: "**bold** and `code`")])
+        #expect(Markdown.blocks("    let x = 1") == [.text("    let x = 1")])
+    }
+
+    @Test func blankLinesBoundBlocksAndResetNesting() {
+        let source = "para one\n\npara two\n\n\n- a\n  - b\n\n- c"
+        #expect(Markdown.blocks(source) == [
+            .text("para one"),
+            .text("para two"),
+            .listItem(depth: 0, marker: .bullet, text: "a"),
+            .listItem(depth: 1, marker: .bullet, text: "b"),
+            .listItem(depth: 0, marker: .bullet, text: "c"),
+        ])
+    }
+
+    @Test func headingsAndListsDoNotSwallowSurroundingText() {
+        let source = "Intro\n# Title\n- one\nOutro"
+        #expect(Markdown.blocks(source) == [
+            .text("Intro"),
+            .heading(level: 1, text: "Title"),
+            .listItem(depth: 0, marker: .bullet, text: "one"),
+            .text("Outro"),
+        ])
+    }
+
+    @Test func fencedCodeIsNeverParsedAsBlocks() {
+        let source = "# Heading\n```md\n# not a heading\n- not a list\n  - neither\n```\n- after"
+        #expect(Markdown.blocks(source) == [
+            .heading(level: 1, text: "Heading"),
+            .code(language: "md", body: "# not a heading\n- not a list\n  - neither"),
+            .listItem(depth: 0, marker: .bullet, text: "after"),
+        ])
+    }
+
+    @Test func malformedMarkersStayVisibleText() {
+        let source = "#hashtag\n####### seven\n-nospace\n1.nospace\n> quote\n| a | b |\n==="
+        #expect(Markdown.blocks(source) == [
+            .text("#hashtag\n####### seven\n-nospace\n1.nospace\n> quote\n| a | b |\n==="),
+        ])
+    }
+}
