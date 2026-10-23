@@ -100,3 +100,37 @@ final class FakeCLI: HerdbotCLI, @unchecked Sendable {
         return HistoryPage(target: target.historyTarget, total: all.count, items: slice + (before == nil ? pending[target] ?? [] : []))
     }
 }
+
+/// `herdbot config list --json` for the global scope. Values cover every shape the contract
+/// sends: string, integer, table and an unset (`null`) setting.
+let globalSettingsJSON = """
+{"version":1,"scope":"global","settings":[\
+{"key":"approvals.mode","type":"enum","description":"Whether agents ask before each tool action (ask) or use automatic review (auto).","default":"ask","value":"auto","choices":["ask","auto"],"apply":"next-bot-start"},\
+{"key":"memory.max_compactors","type":"integer","description":"Maximum memory compactor runs across all bots at once. 0 stops new runs.","default":2,"value":4,"apply":"immediate"},\
+{"key":"paths","type":"map","description":"Path rewrites applied to bot instructions when a bot launches.","default":{},"value":{"/workspace/vault":"~/Documents/vault"},"apply":"next-bot-start"},\
+{"key":"cua.host","type":"string","description":"SSH host that runs cua-driver for computer_use agents. Unset means this Mac.","default":null,"value":null,"apply":"next-bot-start"}]}
+"""
+
+/// `herdbot config list --json` for one bot: a string that applies immediately, an enum that
+/// inherits the global mode and a boolean.
+let botSettingsJSON = """
+{"version":1,"scope":"bot","settings":[\
+{"key":"title","type":"string","description":"Display title shown in bot listings. The slug remains its identifier.","default":"","value":"Helper","apply":"immediate"},\
+{"key":"approvals","type":"enum","description":"Approval mode for the main agent and subagents. Unset inherits the global approvals.mode.","default":"ask","value":"auto","choices":["ask","auto"],"apply":"next-bot-start"},\
+{"key":"memory","type":"boolean","description":"Keep an OptChat memory log and add a view of it to the bot instructions.","default":false,"value":true,"apply":"next-bot-start"}]}
+"""
+
+/// `herdbot config get|set|unset memory --bot helper --json`: one setting in the same envelope.
+let botMemorySettingJSON = """
+{"version":1,"scope":"bot","setting":{"key":"memory","type":"boolean","description":"Keep an OptChat memory log and add a view of it to the bot instructions.","default":false,"value":true,"apply":"next-bot-start"}}
+"""
+
+/// The settings from a `config list --json` payload.
+func settings(from json: String) throws -> [SettingDescriptor] {
+    try JSONDecoder().decode(SettingsList.self, from: Data(json.utf8)).settings
+}
+
+/// The setting from a `config get|set|unset --json` payload.
+func setting(from json: String) throws -> SettingDescriptor {
+    try JSONDecoder().decode(SettingsEntry.self, from: Data(json.utf8)).setting
+}

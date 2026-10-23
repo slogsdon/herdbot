@@ -69,4 +69,85 @@ import Testing
         #expect(page.items[1].speaker == "alpha")
         #expect(page.warnings == ["w"])
     }
+
+    @Test func globalSettingsDecodeMetadataValuesAndApplyTiming() throws {
+        let settings = try settings(from: globalSettingsJSON)
+        #expect(settings.map(\.key) == ["approvals.mode", "memory.max_compactors", "paths", "cua.host"])
+
+        let approvals = try #require(settings.first)
+        #expect(approvals.key == "approvals.mode")
+        #expect(approvals.type == .enumeration)
+        #expect(approvals.choices == ["ask", "auto"])
+        #expect(approvals.defaultValue == .text("ask"))
+        #expect(approvals.value == .text("auto"))
+        #expect(approvals.apply == .nextBotStart)
+        #expect(approvals.description.contains("automatic review"))
+
+        let compactors = settings[1]
+        #expect(compactors.type == .integer)
+        #expect(compactors.defaultValue == .integer(2))
+        #expect(compactors.value == .integer(4))
+        #expect(compactors.choices.isEmpty)
+        #expect(compactors.apply == .immediate)
+    }
+
+    @Test func settingsDecodeTablesAndUnsetValues() throws {
+        let settings = try settings(from: globalSettingsJSON)
+        let paths = settings[2]
+        #expect(paths.type == .map)
+        #expect(paths.defaultValue == .table([:]))
+        #expect(paths.value == .table(["/workspace/vault": "~/Documents/vault"]))
+        #expect(paths.value.text == "/workspace/vault=~/Documents/vault")
+
+        let host = settings[3]
+        #expect(host.type == .string)
+        #expect(host.defaultValue == .unset)
+        #expect(host.value == .unset)
+        #expect(host.value.text == "")
+    }
+
+    @Test func botSettingsDecodePerBotMetadata() throws {
+        let settings = try settings(from: botSettingsJSON)
+        #expect(settings.map(\.key) == ["title", "approvals", "memory"])
+
+        let title = settings[0]
+        #expect(title.type == .string)
+        #expect(title.defaultValue == .text(""))
+        #expect(title.value == .text("Helper"))
+        #expect(title.apply == .immediate)
+
+        let approvals = settings[1]
+        #expect(approvals.choices == ["ask", "auto"])
+        #expect(approvals.value == .text("auto"))
+
+        let memory = settings[2]
+        #expect(memory.type == .boolean)
+        #expect(memory.defaultValue == .flag(false))
+        #expect(memory.value == .flag(true))
+        #expect(memory.value.text == "true")
+    }
+
+    @Test func oneSettingDecodesFromAGetEnvelope() throws {
+        let memory = try setting(from: botMemorySettingJSON)
+        #expect(memory.key == "memory")
+        #expect(memory.type == .boolean)
+        #expect(memory.value == .flag(true))
+        #expect(memory.defaultValue == .flag(false))
+        #expect(memory.apply == .nextBotStart)
+    }
+
+    @Test func applyTimingSaysWhenAValueTakesEffect() throws {
+        #expect(SettingApply.immediate.label == "Takes effect immediately")
+        #expect(SettingApply.nextBotStart.label == "Takes effect when the bot next starts")
+        #expect(SettingApply.daemonRestart.label == "Takes effect after the daemon restarts")
+    }
+
+    @Test func aSettingsPayloadFromAnotherContractVersionThrows() {
+        #expect(throws: CLIError.unsupported(2)) {
+            _ = try settings(from: #"{"version":2,"scope":"global","settings":[]}"#)
+        }
+        #expect(throws: CLIError.unsupported(2)) {
+            _ = try setting(from: #"{"version":2,"scope":"global","setting":null}"#)
+        }
+    }
 }

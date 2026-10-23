@@ -178,21 +178,26 @@ struct Composer: View {
     }
 }
 
-/// The window: sidebar and chat. The Dock icon shows only while it is open.
+/// The window: sidebar and chat, or the Settings screen when the sidebar or status menu asks for it.
 struct ChatWindow: View {
     let menu: MenuState
     let chat: ChatState
     let unread: UnreadTracker
     let cli: ProcessCLI?
     let answers: CardAnswers
+    let settings: SettingsState
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(menu: menu, chat: chat, unread: unread)
+            SidebarView(menu: menu, chat: chat, unread: unread, settings: settings)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
-            ChatView(menu: menu, chat: chat, cli: cli, answers: answers)
+            if settings.isPresented {
+                SettingsView(state: settings, menu: menu)
+            } else {
+                ChatView(menu: menu, chat: chat, cli: cli, answers: answers)
+            }
         }
         .frame(minWidth: 720, minHeight: 480)
         .task(id: menu.snapshot) {

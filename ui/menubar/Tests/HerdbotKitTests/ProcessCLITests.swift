@@ -132,4 +132,64 @@ import Testing
         #expect(first?.type == "snapshot")
         #expect(first?.snapshot?.v == supportedVersion)
     }
+
+    @Test func listSettingsAsksForTheGlobalScopeAndDecodesMetadata() async throws {
+        let script = try fakeHerdbot("[ \"$*\" = 'config list --json' ] || { echo \"config list args: $*\" >&2; exit 2; }\necho '\(globalSettingsJSON)'")
+        let settings = try await ProcessCLI(binary: script).listSettings(bot: nil)
+        #expect(settings.map(\.key) == ["approvals.mode", "memory.max_compactors", "paths", "cua.host"])
+        #expect(settings.first?.value == .text("auto"))
+        #expect(settings.first?.apply == .nextBotStart)
+    }
+
+    @Test func listSettingsAsksForOneBot() async throws {
+        let script = try fakeHerdbot("[ \"$*\" = 'config list --json --bot helper' ] || { echo \"config list args: $*\" >&2; exit 2; }\necho '\(botSettingsJSON)'")
+        let settings = try await ProcessCLI(binary: script).listSettings(bot: "helper")
+        #expect(settings.map(\.key) == ["title", "approvals", "memory"])
+        #expect(settings.last?.value == .flag(true))
+    }
+
+    @Test func getSetAndUnsetPassTheKeyValueAndScope() async throws {
+        let get = try fakeHerdbot("[ \"$*\" = 'config get memory --json --bot helper' ] || { echo \"config get args: $*\" >&2; exit 2; }\necho '\(botMemorySettingJSON)'")
+        #expect(try await ProcessCLI(binary: get).getSetting(key: "memory", bot: "helper").value == .flag(true))
+
+        let updated = botMemorySettingJSON.replacingOccurrences(of: #""value":true"#, with: #""value":false"#)
+        let set = try fakeHerdbot("[ \"$*\" = 'config set memory false --json --bot helper' ] || { echo \"config set args: $*\" >&2; exit 2; }\necho '\(updated)'")
+        #expect(try await ProcessCLI(binary: set).setSetting(key: "memory", value: "false", bot: "helper").value == .flag(false))
+
+        let unset = try fakeHerdbot("[ \"$*\" = 'config unset memory --json --bot helper' ] || { echo \"config unset args: $*\" >&2; exit 2; }\necho '\(updated)'")
+        let cleared = try await ProcessCLI(binary: unset).unsetSetting(key: "memory", bot: "helper")
+        #expect(cleared.value == .flag(false))
+        #expect(cleared.defaultValue == .flag(false))
+    }
+
+    @Test func setPassesAValueWithSpacesAsOneArgument() async throws {
+        let script = try fakeHerdbot("[ \"$#\" = 7 ] && [ \"$4\" = 'Two Words' ] || { echo \"config set args: $# [$4]\" >&2; exit 2; }\necho '\(botMemorySettingJSON)'")
+        _ = try await ProcessCLI(binary: script).setSetting(key: "title", value: "Two Words", bot: "helper")
+    }
+
+    @Test func aRejectedSettingKeepsTheCLIError() async throws {
+        let message = #"unknown global setting "nope"; supported: approvals.mode, codex.sandbox, memory.max_compactors, paths, cua.host, cua.command (see `herdbot config list`)"#
+        let bad = try fakeHerdbot("echo '\(message)' >&2; exit 1")
+        await #expect(throws: CLIError.failed(message)) {
+            _ = try await ProcessCLI(binary: bad).setSetting(key: "nope", value: "x", bot: nil)
+        }
+        let noBot = try fakeHerdbot("echo 'no bot \"ghost\"; run `herdbot bots`' >&2; exit 1")
+        await #expect(throws: CLIError.failed(#"no bot "ghost"; run `herdbot bots`"#)) {
+            _ = try await ProcessCLI(binary: noBot).listSettings(bot: "ghost")
+        }
+    }
+
+    @Test func settingsThisAppCannotReadSayToUpdate() async throws {
+        let future = try fakeHerdbot(##"echo '{"version":2,"scope":"global","settings":[]}'"##)
+        await #expect(throws: CLIError.unsupported(2)) {
+            _ = try await ProcessCLI(binary: future).listSettings(bot: nil)
+        }
+        let missing = try fakeHerdbot(##"echo '{"version":1,"scope":"global","settings":[{"key":"approvals.mode"}]}'"##)
+        do {
+            _ = try await ProcessCLI(binary: missing).listSettings(bot: nil)
+            Issue.record("expected an error")
+        } catch let error as CLIError {
+            #expect(error.localizedDescription.contains("update herdbot or this app"))
+        }
+    }
 }

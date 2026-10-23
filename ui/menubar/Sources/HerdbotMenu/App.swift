@@ -13,6 +13,7 @@ struct HerdbotMenuApp: App {
     private let notificationStatus: NotificationStatus
     private let quickEntry: QuickEntryController
     private let chat: ChatState
+    private let settings: SettingsState
     private let unread: UnreadTracker
     private let answers: CardAnswers
     private let opener = WindowOpener()
@@ -43,6 +44,8 @@ struct HerdbotMenuApp: App {
         self.quickEntry = quickEntry
         let chat = ChatState(menu: state, cli: cli)
         self.chat = chat
+        let settings = SettingsState(cli: cli)
+        self.settings = settings
         let answers = CardAnswers()
         self.answers = answers
         unread = UnreadTracker(menu: state)
@@ -60,7 +63,7 @@ struct HerdbotMenuApp: App {
     var body: some Scene {
         // Opened from the menu, not at launch.
         Window("herdbot", id: "chat") {
-            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers)
+            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers, settings: settings)
         }
         .commands {
             CommandGroup(replacing: .appTermination) {
@@ -79,6 +82,10 @@ struct HerdbotMenuApp: App {
         MenuBarExtra {
             MenuContent(state: state, setup: setup, notifications: notificationStatus, cli: cli, hotkeyRegistered: hotkeyRegistered, openQuickEntry: { quickEntry.show() }, openChatForBot: { slug in
                 Task { await chat.select(.bot(slug)) }
+                NSApp.activate(ignoringOtherApps: true)
+                opener.open()
+            }, openSettings: { slug in
+                Task { await settings.present(slug.map(SettingsState.Scope.bot) ?? .global) }
                 NSApp.activate(ignoringOtherApps: true)
                 opener.open()
             })

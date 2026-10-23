@@ -52,20 +52,36 @@ private struct Row: View {
     }
 }
 
-/// Bots, then rooms, newest activity first, with the system search field on top.
+/// Bots, then rooms, newest activity first, with the system search field on top, and Settings
+/// pinned below the list.
 struct SidebarView: View {
     let menu: MenuState
     let chat: ChatState
     let unread: UnreadTracker
+    let settings: SettingsState
 
     var body: some View {
         let rows = menu.snapshot.map { Sidebar.rows(from: $0, filter: chat.filter) } ?? (bots: [], rooms: [])
-        List(selection: Binding(get: { chat.selection }, set: { choice in Task { await chat.select(choice) } })) {
+        List(selection: Binding(get: { settings.isPresented ? nil : chat.selection }, set: { choice in
+            settings.dismiss()
+            Task { await chat.select(choice) }
+        })) {
             if !rows.bots.isEmpty {
                 Section("Bots") { ForEach(rows.bots) { Row(row: $0, unread: unread.unread($0.id)).tag(Optional($0.id)) } }
             }
             if !rows.rooms.isEmpty {
                 Section("Rooms") { ForEach(rows.rooms) { Row(row: $0, unread: unread.unread($0.id)).tag(Optional($0.id)) } }
+            }
+            Section {
+                Button { Task { await settings.present(.global) } } label: {
+                    Label("Settings", systemImage: "gearshape")
+                        .font(.body.weight(settings.isPresented ? .semibold : .regular))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(settings.isPresented ? Color.accentColor.opacity(0.18) : Color.clear)
+                .help("Global and per-bot settings")
             }
         }
         .searchable(text: Binding(get: { chat.filter }, set: { chat.filter = $0 }), placement: .sidebar, prompt: "Filter")

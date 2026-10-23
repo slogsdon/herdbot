@@ -10,6 +10,8 @@ struct MenuContent: View {
     let hotkeyRegistered: Bool
     let openQuickEntry: () -> Void
     let openChatForBot: (String) -> Void
+    /// Opens the chat window at Settings, optionally for one bot.
+    let openSettings: (String?) -> Void
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -36,9 +38,11 @@ struct MenuContent: View {
                     }
                 }
             }
-            Section("Bots") {
-                ForEach(snapshot.bots, id: \.slug) { bot in
-                    Text("\(bot.up ? "●" : "○") \(bot.title.isEmpty ? bot.slug : bot.title)")
+            if !state.topBots.isEmpty {
+                Section("Bots") {
+                    ForEach(state.topBots, id: \.slug) { bot in
+                        Button("\(bot.up ? "●" : "○") \(bot.title.isEmpty ? bot.slug : bot.title)") { openChatForBot(bot.slug) }
+                    }
                 }
             }
             if !snapshot.runs.isEmpty {
@@ -62,15 +66,21 @@ struct MenuContent: View {
             Text("waiting for herdbot…")
         }
         Divider()
-        Button(setup.needsAttention ? "Finish setup…" : "Setup…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "setup")
+        if setup.showsSetupInMenu {
+            Button(setup.needsAttention ? "Finish setup…" : "Setup…") {
+                NSApp.activate(ignoringOtherApps: true)
+                openWindow(id: "setup")
+            }
         }
         Button("Open herdbot") {
             NSApp.activate(ignoringOtherApps: true)
             openWindow(id: "chat")
         }
         Button(hotkeyRegistered ? "Quick entry (⌥Space)" : "Quick entry (⌥Space is taken by another app)") { openQuickEntry() }
+        Button("Settings…") {
+            NSApp.activate(ignoringOtherApps: true)
+            openSettings(nil)
+        }
         Button("Quit") { NSApplication.shared.terminate(nil) }
     }
 

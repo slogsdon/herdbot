@@ -222,3 +222,43 @@ extension ProcessCLI: CardCLI {
         _ = try await output(["card", "answer", id, option])
     }
 }
+
+extension ProcessCLI: SettingsCLI {
+    public func listSettings(bot: String?) async throws -> [SettingDescriptor] {
+        let data = try await output(settingsArguments(["config", "list", "--json"], bot: bot))
+        return try settings(SettingsList.self, from: data, command: "config list").settings
+    }
+
+    public func getSetting(key: String, bot: String?) async throws -> SettingDescriptor {
+        let data = try await output(settingsArguments(["config", "get", key, "--json"], bot: bot))
+        return try settings(SettingsEntry.self, from: data, command: "config get").setting
+    }
+
+    /// The value is one argv entry, so spaces reach herdbot untouched and it validates them.
+    public func setSetting(key: String, value: String, bot: String?) async throws -> SettingDescriptor {
+        let data = try await output(settingsArguments(["config", "set", key, value, "--json"], bot: bot))
+        return try settings(SettingsEntry.self, from: data, command: "config set").setting
+    }
+
+    public func unsetSetting(key: String, bot: String?) async throws -> SettingDescriptor {
+        let data = try await output(settingsArguments(["config", "unset", key, "--json"], bot: bot))
+        return try settings(SettingsEntry.self, from: data, command: "config unset").setting
+    }
+
+    /// `--bot` selects the bot scope, so a nil bot must not be passed at all.
+    private func settingsArguments(_ arguments: [String], bot: String?) -> [String] {
+        guard let bot else { return arguments }
+        return arguments + ["--bot", bot]
+    }
+
+    /// An unreadable payload means an older or newer herdbot, not a setting to write blindly.
+    private func settings<T: Decodable>(_ type: T.Type, from data: Data, command: String) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch let error as CLIError {
+            throw error
+        } catch {
+            throw CLIError.failed("herdbot \(command) printed settings this app cannot read; update herdbot or this app")
+        }
+    }
+}
