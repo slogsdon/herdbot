@@ -44,6 +44,13 @@ public enum Sidebar {
         return (ordered(matching(bots, filter)), ordered(matching(rooms, filter)))
     }
 
+    /// The status menu's Bots section: at most `limit` bots, most recently active first.
+    public static func topBots(from snapshot: Snapshot, limit: Int = 5) -> [BotView] {
+        ordered(snapshot.bots) { ($0.lastAt, $0.title.isEmpty ? $0.slug : $0.title, $0.slug) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     private static func matching(_ rows: [SidebarRow], _ filter: String) -> [SidebarRow] {
         let needle = filter.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else { return rows }
@@ -51,13 +58,22 @@ public enum Sidebar {
     }
 
     private static func ordered(_ rows: [SidebarRow]) -> [SidebarRow] {
-        rows.sorted {
-            switch ($0.lastAt, $1.lastAt) {
-            case let (a?, b?) where a != b: a > b
-            case (_?, nil): true
-            case (nil, _?): false
-            default: $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        ordered(rows) { ($0.lastAt, $0.title, $0.slug) }
+    }
+
+    /// Recent activity first, then display name, then slug, so ties and missing timestamps keep a stable order.
+    private static func ordered<T>(_ items: [T], key: (T) -> (lastAt: Int?, title: String, slug: String)) -> [T] {
+        items.sorted {
+            let before = key($0), after = key($1)
+            switch (before.lastAt, after.lastAt) {
+            case let (a?, b?) where a != b: return a > b
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: break
             }
+            let byName = before.title.localizedCaseInsensitiveCompare(after.title)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            return before.slug.localizedCaseInsensitiveCompare(after.slug) == .orderedAscending
         }
     }
 }

@@ -35,6 +35,8 @@ public final class SetupState {
 
     public var worst: DoctorStatus { checks.map(\.status).max() ?? .ok }
     public var needsAttention: Bool { worst != .ok }
+    /// Shows the menu action only after the first report if setup needs attention or doctor failed.
+    public var showsSetupInMenu: Bool { problem != nil || (report != nil && needsAttention) }
     /// Something the "Set up everything" button can actually do.
     public var hasFixable: Bool { checks.contains { $0.status != .ok && $0.fix != nil } }
 

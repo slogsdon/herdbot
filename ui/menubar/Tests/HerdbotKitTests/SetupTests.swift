@@ -136,6 +136,28 @@ let doctorJSON = """
         await state.refresh()
         #expect(state.problem == CLIError.notFound.localizedDescription)
         #expect(!state.needsAttention)
+        #expect(state.showsSetupInMenu)
+    }
+
+    @Test func setupIsHiddenBeforeTheFirstReport() {
+        let state = SetupState(cli: FakeSetupCLI([report(okCheck)]))
+        #expect(!state.showsSetupInMenu)
+    }
+
+    @Test func aHealthyReportHidesSetup() async {
+        let state = SetupState(cli: FakeSetupCLI([report(okCheck)]))
+        await state.refresh()
+        #expect(state.report != nil && !state.needsAttention)
+        #expect(!state.showsSetupInMenu)
+    }
+
+    @Test func aReportNeedingAttentionShowsSetup() async {
+        let warning = SetupState(cli: FakeSetupCLI([report(warnLink)]))
+        await warning.refresh()
+        #expect(warning.showsSetupInMenu)
+        let failing = SetupState(cli: FakeSetupCLI([report(failService)]))
+        await failing.refresh()
+        #expect(failing.showsSetupInMenu)
     }
 
     @Test func aFailingDoctorIsAProblem() async {
@@ -144,6 +166,7 @@ let doctorJSON = """
         let state = SetupState(cli: cli)
         await state.refresh()
         #expect(state.problem == "herdbot: usage")
+        #expect(state.showsSetupInMenu)
     }
 
     @Test func autoOpensOnceForAFailureAndNotForWarnings() async {

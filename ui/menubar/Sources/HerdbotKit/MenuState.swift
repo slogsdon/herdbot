@@ -61,6 +61,12 @@ public final class MenuState {
         return snapshot.runs.isEmpty ? .idle : .running
     }
 
+    /// The Bots section: the five most recently active bots, so the menu stays short.
+    /// Every bot remains reachable from the chat window.
+    public var topBots: [BotView] {
+        snapshot.map { Sidebar.topBots(from: $0) } ?? []
+    }
+
     /// Event lines are ignored: a blocked event also changes the next snapshot.
     public func apply(_ line: StreamLine) {
         guard line.type == "snapshot", let snapshot = line.snapshot else { return }
