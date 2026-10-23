@@ -25,3 +25,13 @@ Collected from Shane's own use, newest last. Each item says where it was hit and
 - **Status:** open. Suggested split: (a) the + button with a plain bot form and a room form, small and independent; (b) a research spike on template URLs; (c) the import itself, after the spike.
 
 Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, https://www.aibuilderclub.com/blog/grok-bot-templates, https://dragosroua.com/you-can-now-share-your-grok-bots-and-soon-you-could-sell-them/
+
+## U3. Quick entry (⌥Space) also raises the chat window when it is open
+
+- **Where:** `QuickEntryController.show()` in `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`.
+- **Today:** with the chat window already open, pressing ⌥Space shows the quick-entry panel and also brings the chat window to the front. With the chat window closed, only the panel appears.
+- **Wanted:** ⌥Space shows only the quick-entry panel; the chat window stays where it was.
+- **Cause (Likely; basis: the code, not reproduced here):** `show()` calls `NSApp.activate(ignoringOtherApps: true)` so the panel can become key. Activating the app raises all of its visible windows, so an open chat window comes forward with it. That also explains why a closed chat window does not appear.
+- **Constraint:** the activation is deliberate. The comment in `show()` says dictation tools type into the active app, so the app must be active for dictated text to land in the panel's field. Making the panel non-activating (`.nonactivatingPanel`) would stop the chat window moving but risks breaking dictation, so it must be tested with MacWhisper before it is chosen.
+- **Candidate approaches (none tried):** (1) keep activating, then send the chat window behind (`orderBack`) when it was not the key window before the hotkey, restoring nothing else; (2) a non-activating panel, if dictation still works; (3) activate without raising other windows, if AppKit offers a way. Needs a manual check by Shane: dictation into the panel with the chat window open and closed.
+- **Status:** open.
