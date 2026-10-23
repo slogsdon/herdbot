@@ -76,3 +76,18 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Open question:** should the default for new installs be a separate `herdbot` session (clean) while existing installs keep `default` (no surprise move)?
 - **Size:** large; this needs a brainstorm and a spec, then probably four plans: a settings registry plus `config get/set` in the CLI, the Settings UI, daemon disable/uninstall and setup re-run, and the herdr session support (after its spike).
 - **Status:** open, needs design.
+
+## U7. "Jump to pane" should also bring the terminal forward, opening herdr in a new tab if needed
+
+- **Where:** every "Jump to pane" button (chat banner, approval and generic cards) and the menu entries that focus an agent; all call `herdbot focus <agent>`, which is only `herdr.agent_focus(agent)` over the herdr socket (`crates/herdbot/src/main.rs`, the `"focus"` arm).
+- **Today:** herdr selects the pane inside its session, but the terminal window that shows herdr stays in the background (or does not exist), so nothing visibly happens.
+- **Wanted:** in addition to telling herdr to focus the pane, (1) bring the user's terminal window to the front, and (2) if no herdr client is showing the session, open one: a new tab in the active terminal window running herdr attached to the right session.
+- **Facts (verified 2026-10-22):** herdr runs as a server with clients; `herdr session attach <name>` attaches a client to a session and `herdr session list` shows name, status, directory and socket. On this machine the clients seen in `ps` are children of `mosh-server`, i.e. Shane attaches over mosh from another machine at least some of the time. So "the active terminal window" may be on another computer, and nothing local can raise it.
+- **What a design must settle:**
+  - *Which terminal?* herdbot does not know. Options: detect the app that hosts a local herdr client by walking its parent processes (fails for remote/mosh clients and for tmux-like indirection), use the frontmost terminal-like app, or a setting ("Terminal app") in the new Settings area (U6). A setting is the most predictable.
+  - *Raising the window* is the easy part for any app: activate it by bundle id (for example `NSWorkspace` open/activate). It does not need automation permission.
+  - *Opening a tab running a command* is per terminal and needs the terminal's own automation: AppleScript for Terminal.app and iTerm2, remote-control for kitty and WezTerm, and for others unknown (Ghostty and Alacritty were not checked). A first version could support one or two terminals and fall back to just activating the app plus a message.
+  - *Permissions:* sending Apple events makes macOS ask for Automation permission, and a hardened-runtime, notarized app needs the Apple Events entitlement and a usage string in `Info.plist`, which the app does not have today (Likely: this is how the hardened runtime works; not tested here). That is a release-signing change.
+  - *Is a client already showing the session?* If one is, do not open another tab; just raise the window. A check needs `herdr status client`/the session list (format not yet checked).
+- **Related:** U6 (the herdr session setting decides which session to attach, and could hold the terminal app setting).
+- **Status:** open; the activate-only half (raise the configured or detected terminal) is small and could ship first.
