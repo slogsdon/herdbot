@@ -87,7 +87,11 @@ Dictation (MacWhisper, hold Right ⌘): the hotkey is not a bare modifier, so it
 dictation key; the panel activates the app and takes key focus, so dictated text lands in its field; and the
 panel stays open if a dictation HUD takes focus for a moment.
 
-### Manual check (needs a person; MacWhisper for steps 7-8)
+If focus stays elsewhere — another app, another window, the desktop — the panel closes on its own after a
+brief grace period (300 ms). A quick glance at a menu or a dictation HUD does not close it; coming back
+cancels the dismissal.
+
+### Manual check (needs a person; MacWhisper for step 7)
 
 1. `./scripts/build-app.sh`, and quit any running HerdbotMenu first. Use a herdbot with rooms in
    `status --json` (`cargo install --path crates/herdbot`, restart the daemon).
@@ -108,10 +112,14 @@ panel stays open if a dictation HUD takes focus for a moment.
    edge stays put.
 7. MacWhisper: open the panel, hold Right ⌘ and speak. The text appears in the field and nothing sends;
    press Return to send. Repeat with another app in front before pressing ⌥Space.
-8. System Settings → Accessibility → Display: turn on Reduce Transparency, then Increase Contrast, then
+8. Focus: open the panel with the chat window already open and in front. Only the panel should come
+   forward; the chat window should stay where it was. Then click another app, ⌘Tab away, click into the
+   herdbot chat window, and swipe to Mission Control: each time the panel closes after a moment. Open it
+   again and click or type back into it straight away: it stays open.
+9. System Settings → Accessibility → Display: turn on Reduce Transparency, then Increase Contrast, then
    Reduce Motion, one at a time, reopening the panel each time. Expect an opaque panel, a stronger border,
    and no fade, respectively. Switch to light mode: the panel stays readable. Switch them back.
-9. Quit from the gear menu; `rm -r $HB`.
+10. Quit from the gear menu; `rm -r $HB`.
 
 ## Chat window
 
@@ -122,6 +130,42 @@ on the left; rooms name each speaker. A message you sent that the bot has not an
 "queued" until the daemon delivers it and then "working". Scroll up to load older messages; "jump to latest"
 appears when you are not at the bottom. The header's "Jump to pane" opens the bot's herdr pane, and a banner
 appears when the bot is blocked on you. Type in the composer at the bottom and press Return to send: it runs `herdbot send` or `herdbot room send`, and the message shows at once as "queued", then "working" once delivered. Each conversation keeps its own draft. Nothing is sent without Return, so dictated text can be read first. Conversations with new messages show an unread count in the sidebar; what you have open in the active window counts as read. Clicking a blocked notification opens that bot's chat (use "Jump to pane" there to answer in herdr). The Dock icon shows only while the window is open. Cmd-Q in the chat window closes it and the app keeps running; quit from the menu bar item.
+
+Chat replies render headings, ordered and unordered lists with nesting, and fenced code blocks; inline markdown remains supported in text, headings, and list items.
+
+## Settings
+
+**Settings** at the bottom of the sidebar (or **Settings…** in the status menu) opens a form beside the
+conversation list. Pick **Global** for `herdbot.toml` or a bot slug for that bot's `bot.toml`. Every read
+and write goes through `herdbot config list|set|unset --json` (`config get` stays unused for now);
+the app never parses or rewrites TOML.
+Controls follow the metadata: an enum becomes a picker over its choices, a boolean a switch, an integer
+or string a text field, and a map lists its entries. Each row shows the setting's description, its
+default, and when a saved value takes effect. A rejected value keeps what you typed and shows the CLI's
+message; a failed load leaves the form on screen. The `paths` map adds or replaces one `FROM=TO` entry
+per save (`config set paths FROM=TO`) and **Reset all entries** unsets the key; per-entry deletion is not
+in the CLI contract yet, so there is no delete button. herdr session settings wait for the named-session
+spike and its CLI contract.
+
+### Manual check (for Shane, not the agent)
+
+Needs a herdbot with `config list|get|set|unset --json` and a home you can throw away
+(`HERDBOT_HOME=$(mktemp -d)`, one bot such as `helper`):
+
+1. Open Settings from the sidebar: the form shows global settings, each with description, default and
+   apply timing. Open it again from the status menu: the same screen appears in the chat window.
+2. Change `approvals.mode`, click Save, and expect "Saved; takes effect when the bot next starts".
+   Reopen Settings and confirm the value stuck; check the comments and ordering in `herdbot.toml` are intact.
+3. Save `memory.max_compactors` = `-1` (below the CLI's minimum): the row keeps `-1` and shows the
+   CLI's error; correcting it to `0` saves.
+4. Switch to `helper`: the form shows per-bot keys. Save `title`, then switch to Global and back; the
+   saved title should be there and the global draft should be untouched.
+5. Type a draft, switch bots, switch back: the draft is still there. With the config directory read-only
+   (`chmod a-w "$HB"`; the CLI writes a sibling temp file), save again and expect the error with the
+   draft still in the field; then `chmod u+w "$HB"`.
+6. `paths`: expect the current entries listed. Add `/srv/app=/Users/me/app` and expect both entries, the
+   entry field empty, and the `[paths]` section in `herdbot.toml` updated in place. **Reset all entries**
+   empties the list and removes the key.
 
 ## Cards
 

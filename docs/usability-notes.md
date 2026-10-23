@@ -9,8 +9,8 @@ Collected from Shane's own use, newest last. Each item says where it was hit and
 - **Wanted:** the list is capped at the 5 most recently used bots, and each name is clickable; a click opens the chat window with that bot selected.
 - **Notes:** the blocked-agent and card entries already open the chat for a bot through `Notifier.openChat`/`WindowOpener`; the same path can serve this.
 - **Assumption (not confirmed with Shane):** "most recently used" means most recent activity in the conversation, which is the `last_at` the snapshot already carries per bot (messages sent or answered), not "most recently opened in the app". Bots with no conversation yet sort last by name.
-- **Open question:** is there a way to reach the bots beyond the top 5 from the menu (for example an "All bots…" item that just opens the chat window)? Without it, a sixth bot is only reachable by opening the window.
-- **Status:** open.
+- **Resolved (Shane, 2026-10-22):** show only the top five in the menu; all bots remain accessible through the chat window.
+- **Status:** implementation complete; menu click and roster checks remain (`docs/superpowers/plans/2026-10-22-menu-discovery.md`).
 
 ## U2. Create bots and rooms from the chat window ("+" button), and import from a template URL
 
@@ -22,7 +22,7 @@ Collected from Shane's own use, newest last. Each item says where it was hit and
 - **Template import, what is known (2026-10-22, from search results, mostly third-party; not verified against the official docs):** Grok Bot lets a user copy a bot's share link; the recipient opens a preview on x.ai and chooses "Add to Grok Bot"; a template carries the bot's instructions, relevant memories, skills and chosen plugins, and leaves out credentials, code and scripts. There is also a browsable marketplace. This matters beyond convenience: the README says Grok Bot's schedules and skills are not on disk, "so they'll have to come from an exported bot template", so a template import could be the way to get skills (and possibly schedules) that `import-grok` cannot reach.
 - **Unknown (needs a spike before any design):** whether a share link is fetchable without a logged-in session and in what format (HTML preview, JSON, or an app-only deep link); whether skills and memories are in the payload or only referenced; whether other providers have an equivalent. If a link needs a login, the fallback is the user pasting or dropping an exported template, not scraping.
 - **Open question:** should an imported template become a normal `source = "local"` bot (herdbot owns it afterwards), as opposed to `source = "grok"` bots whose `BOT.md` the Grok sync overwrites?
-- **Status:** open. Suggested split: (a) the + button with a plain bot form and a room form, small and independent; (b) a research spike on template URLs; (c) the import itself, after the spike.
+- **Status:** open. Suggested split: (a) the + button with a plain bot form and a room form, small and independent; (b) a research spike on template URLs; (c) the import itself, after the spike. Outside the current usability batch.
 
 Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, https://www.aibuilderclub.com/blog/grok-bot-templates, https://dragosroua.com/you-can-now-share-your-grok-bots-and-soon-you-could-sell-them/
 
@@ -34,7 +34,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Cause (Likely; basis: the code, not reproduced here):** `show()` calls `NSApp.activate(ignoringOtherApps: true)` so the panel can become key. Activating the app raises all of its visible windows, so an open chat window comes forward with it. That also explains why a closed chat window does not appear.
 - **Constraint:** the activation is deliberate. The comment in `show()` says dictation tools type into the active app, so the app must be active for dictated text to land in the panel's field. Making the panel non-activating (`.nonactivatingPanel`) would stop the chat window moving but risks breaking dictation, so it must be tested with MacWhisper before it is chosen.
 - **Candidate approaches (none tried):** (1) keep activating, then send the chat window behind (`orderBack`) when it was not the key window before the hotkey, restoring nothing else; (2) a non-activating panel, if dictation still works; (3) activate without raising other windows, if AppKit offers a way. Needs a manual check by Shane: dictation into the panel with the chat window open and closed.
-- **Status:** open.
+- **Status:** implementation complete; macOS focus and dictation checks remain (`docs/superpowers/plans/2026-10-22-quick-entry-focus.md`).
 
 ## U4. Quick entry should close when focus moves to anything else
 
@@ -45,7 +45,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Constraint:** `hidesOnDeactivate = false` is deliberate. The README's dictation note says "the panel stays open if a dictation HUD takes focus for a moment" (MacWhisper, hold Right ⌘). A plain close-on-blur would close the panel under a dictation HUD and lose the dictated text's destination.
 - **Candidate approaches (none tried):** close when the panel resigns key AND the app is no longer active, after a short grace period (a few hundred ms) that a returning focus cancels, so a dictation HUD that takes focus briefly does not close it; or close only when the newly active application is not the dictation tool (needs knowing its bundle id, which is brittle); or close on a global mouse-down outside the panel (needs no focus change, but misses keyboard-only switches such as ⌘Tab). Combining the first with the mouse-down is probably the sturdiest; it needs a manual check with MacWhisper, a ⌘Tab away, a click on another app, and a Mission Control swipe.
 - **Interaction:** this and U3 both come from how the panel activates the app; they should be designed together.
-- **Status:** open.
+- **Status:** implementation complete; macOS focus and dictation checks remain (`docs/superpowers/plans/2026-10-22-quick-entry-focus.md`).
 
 ## U5. Remove the "Setup…" menu item once setup has succeeded
 
@@ -53,9 +53,9 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Today:** the item is always in the menu; it reads "Setup…" when every check is ok and "Finish setup…" when something needs attention.
 - **Wanted:** after a successful setup the item is gone. It comes back by itself when something needs attention again (for example the daemon is older than the binary after an upgrade, or a harness disappears).
 - **Behaviour to decide:** show the item when `setup.needsAttention` is true, and also when `setup.problem != nil` (herdbot missing or `doctor` failing), because that is when the window explains what is wrong. Hide it when the report exists and every check is ok. Before the first report arrives it stays hidden, so a healthy launch never flashes it.
-- **Open question:** with the item gone there is no way to open the checklist on a healthy install to see the checks. Acceptable? If a way is wanted, the usual place is the quick-entry gear menu or an option-click on the menu bar item; I would not add one unless asked.
+- **Resolved (Shane, 2026-10-22):** the checklist remains available from Settings on a healthy install.
 - **Size:** tiny, one condition in one view, plus a view-model test for the visibility rule if it moves into `SetupState` (for example `showsMenuItem`). Good to batch with U1, which edits the same file.
-- **Status:** open.
+- **Status:** implementation complete; healthy/problem menu visibility checks remain (`docs/superpowers/plans/2026-10-22-menu-discovery.md`).
 
 ## U6. A Settings area for every herdbot setting, with setup re-run, daemon control and a herdr session
 
@@ -74,8 +74,8 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **herdr session (verified 2026-10-22):** herdr has named sessions (`herdr --session <name>`, `herdr session list|attach|stop|delete`). `herdr session list` prints name, status, directory and socket per session; only `default` exists here, at `~/.config/herdr/herdr.sock`. herdbot finds herdr through `HERDR_SOCKET` or that default path (`crates/herdr-client/src/lib.rs`), and `service install` copies `HERDR_SOCKET` into the plist, so a session setting would mainly set which socket herdbot talks to.
 - **Unknown (needs a spike):** how to create a named session without attaching an interactive client (`herdr --session X` appears to launch the UI), whether a session's server starts on demand, how to resolve a session name to its socket reliably (parse `herdr session list`, or a `--json` form if it has one), and what happens to existing bots' workspaces when the session changes (they live in the old session; `up` would have to tolerate that or move them). Also whether the user can see the herdbot session in their normal herdr UI.
 - **Answered (Shane, 2026-10-22):** per-bot settings are in scope; the routing table is not yet. The `default` herdr session is fine for now, so the session setting ships defaulting to `default` and nobody is moved. (The session spike below still has to happen before the setting can be offered.)
-- **Size:** large; this needs a brainstorm and a spec, then probably four plans: a settings registry plus `config get/set` in the CLI, the Settings UI, daemon disable/uninstall and setup re-run, and the herdr session support (after its spike).
-- **Status:** open, needs design.
+- **Size:** large; this needs a spec and four plans: settings registry plus `config get/set`, Settings UI, daemon controls/setup rerun, and herdr session setting after its spike.
+- **Status:** config CLI and Settings app implemented; manual UI inspection remains. Setup rerun/daemon controls and herdr session are still planned in `docs/superpowers/specs/2026-10-22-settings-design.md` and the linked plans; session implementation is gated on `2026-10-22-settings-session-spike.md`. Initial session value is `default`; no automatic workspace migration.
 
 ## U7. "Jump to pane" should also bring the terminal forward, opening herdr in a new tab if needed
 
@@ -94,4 +94,11 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **AppleScript support (verified 2026-10-22 from the installed apps):** all three declare a scripting dictionary: Terminal 2.15 (`Terminal.sdef`), iTerm2 3.7.6 (`iTerm2.sdef`) and Ghostty 1.3.1 (`Ghostty.sdef`). Ghostty's has windows, tabs and terminals with `name`, `working directory` and `id` properties, commands `new window`, `new tab`, `focus` ("bringing its window to the front"), `activate window` and `select tab`, and a surface configuration with a `command` property, so `new tab` with command `herdr session attach <name>` is expressible. The command syntax for each app was not exercised; only the dictionaries were read.
 - **Skipping a duplicate:** with the dictionaries above, "is a tab already showing this session" can be checked by looking at tab or terminal names (herdr's terminal title is unverified) or by remembering the window/tab id herdbot created last time and checking that it still exists. Remote (mosh) clients are invisible to this check.
 - **Related:** U6 (the herdr session setting decides which session to attach; the terminal app lives in Settings too).
-- **Status:** open; the activate-only half (raise the configured terminal) is small and could ship first.
+- **Status:** planned for spike (`docs/superpowers/plans/2026-10-22-terminal-focus-spike.md`); terminal implementation plan follows the spike findings.
+
+## U8. Render headings and lists in chat markdown
+
+- **Where:** `ui/menubar/Sources/HerdbotMenu/MessageViews.swift` and the block parser in `ui/menubar/Sources/HerdbotKit/Timeline.swift`.
+- **Today:** inline markdown and fenced code render; lists and headings are plain text.
+- **Wanted:** headings, ordered/unordered lists, and nesting render with structure while retaining selectable text, inline markdown, and code blocks.
+- **Status:** implementation complete; manual chat inspection remains (`docs/superpowers/plans/2026-10-22-chat-markdown.md`).

@@ -1,5 +1,17 @@
 # Implementation plans
 
+## Research-derived plans
+
+The supplied *Build Your Own Duet* PDF is an independent engineering synthesis, not a description of Duet's internals. The Herdbot translation is in [the research mapping](../../research/build-your-own-duet-herdbot-translation.md). These plans adapt delegation, provenance, retry, and replay ideas; external event watching, severity scoring, autonomous policy learning, and a new credential broker are out of scope.
+
+| Plan | State | Depends on |
+|---|---|---|
+| [Orchestration reliability](2026-10-22-orchestration-reliability.md) ([spec](../specs/2026-10-22-orchestration-reliability-design.md)) | Draft; unavailable explicit routes may fall back with visible route and reason | — |
+| [Delegated task lifecycle](2026-10-22-delegated-task-lifecycle.md) ([spec](../specs/2026-10-22-delegated-task-lifecycle-design.md)) | Draft; progress is chat-only | reliability plan |
+| [Chat provenance and collaboration](2026-10-22-chat-provenance.md) ([spec](../specs/2026-10-22-chat-provenance-design.md)) | Draft; agent messages are retained in memory; @ target is sole recipient | reliability and lifecycle plans |
+
+These plans capture the resolved product decisions and remain sequenced after the active usability/settings roadmap.
+
 Written 2026-10-20 for the roadmap items in the top-level README.
 
 | Plan | State | Touches |
@@ -27,7 +39,18 @@ Written 2026-10-20 for the roadmap items in the top-level README.
 | [Setup window feedback](2026-10-22-setup-feedback.md) | done (on main), 2026-10-22 | `ui/menubar` `SetupState`, `SetupView` |
 | [Approval cards, 1: CLI and daemon](2026-10-22-approval-cards-cli.md) ([spec](../specs/2026-10-22-approval-cards-design.md)) | done (on main), 2026-10-22 | new `herdbot-core` `cards.rs`, new `adapters.rs`, `run.rs`, `daemon.rs`, `main.rs`, `snapshot.rs` |
 | [Approval cards, 2: app](2026-10-22-approval-cards-app.md) | done (on main), 2026-10-22 | `ui/menubar` card types, `CardView`, notifications, menu |
+| Menu discovery and setup visibility ([spec](../specs/2026-10-22-menu-discovery-design.md)) | implementation complete; manual UI checks pending | U1 + U5, clickable top five bots and conditional Setup item |
+| Quick-entry focus lifecycle ([spec](../specs/2026-10-22-quick-entry-focus-design.md)) | implementation complete; macOS focus and dictation checks pending | U3 + U4, panel focus and dismissal |
+| Chat block markdown ([spec](../specs/2026-10-22-chat-markdown-design.md)) | implementation complete; manual chat inspection pending | headings and ordered/nested lists |
+| Settings CLI ([spec](../specs/2026-10-22-settings-design.md)) | implementation and Rust validation complete | typed registry, read/list, and format-preserving set/unset |
+| Settings app ([spec](../specs/2026-10-22-settings-design.md)) | Tasks 1–2 implemented; manual UI check pending | typed models/CLI seam, global and per-bot forms, sidebar and status-menu entry points; session control follows its spike |
+| Settings lifecycle ([spec](../specs/2026-10-22-settings-design.md)) | planned; depends on Settings app | setup rerun, daemon disable/enable, uninstall |
+| Herdr named-session spike ([spec](../specs/2026-10-22-settings-design.md)) | planned before session setting | session creation and socket-resolution research |
+| Herdr session setting ([spec](../specs/2026-10-22-settings-design.md)) | planned; blocked on spike | `2026-10-22-settings-session.md`; defaults to `default`, no automatic workspace migration |
+| Terminal focus spike ([spec](../specs/2026-10-22-terminal-focus-design.md)) | planned; implementation plan follows spike | Terminal.app, iTerm2, Ghostty attach behavior and permissions |
 | Grok Bot schedule/skill import | blocked: no data on disk | — |
+
+Approval-card adapters for Claude per-tool prompts and the Codex trust modal remain unplanned until Shane supplies real screen captures, as required by the approval-card design. U2 (create bots/rooms and import templates) remains open and outside this usability batch.
 
 Run them one after another, in the order **pi → fm → rooms → turn hooks → OptChat memory → cua**, each starting from the previous one's merge. cua goes last because its live checks wait on Shane installing cua-driver and granting it permissions. All six edit `README.md`, and turn hooks also edits `route::launch` and the daemon loop. pi and cua both edit `route::launch`. pi, fm and rooms touch `main.rs` and `tools.rs`. fm and rooms both add to the daemon loop. Running them in parallel only trades the waiting for merge conflicts.
 
