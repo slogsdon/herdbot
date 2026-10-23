@@ -18,18 +18,18 @@ This is early, and it's macOS only for now (the daemon runs under launchd). What
 - rooms (group bots) with channel, round-robin and moderated turn-taking, verified live on 2026-10-20
 - computer use through cua (local; verified 2026-10-20)
 
-Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk). The menu bar app, with a ⌥Space quick-entry panel and a chat window for your bots and rooms, exists in ui/menubar (built separately with Swift; see its README), and the full desktop app is not built. cursor-agent launches, but its tools haven't been seen working end to end.
+Not built yet: importing Grok Bot's schedules and skills (they aren't stored on disk). The menu bar app (status menu, ⌥Space quick entry, a chat window for bots and rooms, a first-run setup window and approval cards) ships in `Herdbot.app`; see [Install](#install). cursor-agent launches, but its tools haven't been seen working end to end. Release 0.1.2, 2026-10-22.
 
 ## Requirements
 
 - macOS
 - [herdr](https://herdr.dev) running. Tested with 0.9.1, socket protocol 22.
-- Rust with edition 2024 support
+- Rust with edition 2024 support, only to build from source
 - at least one harness CLI on your `PATH`, signed in: `claude`, `codex`, `cursor-agent` or `pi` (pi is restricted to the `opencode-go` provider)
 
 ## Install
 
-Once the tap is available, install with Homebrew:
+Install with Homebrew:
 
 ```bash
 brew install --cask slogsdon/tap/herdbot
@@ -317,15 +317,14 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 ## Roadmap
 
 - **Schedule and skill import** from Grok Bot templates.
-- **A desktop UI that feels native to the Mac.** Federico Viticci's early look at his "Apple Bots" app sets a good bar: a global quick-entry window for messaging any bot, a menu bar item, and split views with one agent per pane. For herdbot that means a hotkey that queues a message to a bot, and a menu bar item showing which bots are up, which subagents are running, which harnesses are cooling down, and anything `blocked` and waiting on you. Blocked approvals should become notifications you can act on. The UI only reads the same files and calls the same herdr socket, so it can be built in either [gpui-kit](https://github.com/longbridge/gpui-kit) or SwiftUI. gpui-kit 0.8.0 builds on Zed snapshots that break their API, so it would be pinned to a git rev. The SwiftUI menu bar app lives in ui/menubar; see ui/menubar/README.md for build, test and manual-check instructions.
+- **The desktop UI is built; what is left is polish and more cards.** A SwiftUI menu bar app (`ui/menubar`, installed with the cask) has a status menu, a ⌥Space quick-entry panel, a chat window, notifications, a first-run setup window and approval cards. Not built: other prompts as cards (claude's per-tool permission prompts, codex's trust modal; each needs an adapter written from a captured screen), markdown lists and headings in the chat, and usability improvements still to be collected. See the [UI layer design](docs/superpowers/specs/2026-10-21-ui-layer-design.md), the [chat app design](docs/superpowers/specs/2026-10-22-chat-app-design.md) and the [approval cards design](docs/superpowers/specs/2026-10-22-approval-cards-design.md).
 - **pi code mode: verified on pi 1.2.0 (2026-10-20).** Three unisolated `deepseek-v4-flash` runs called `list_bots` from scripts and exited 0 in 5.48, 6.25, and 9.80 seconds; `kimi-k2.7-code` also passed in 13.08 seconds. Disabling global `rea` was unnecessary. Code mode is enabled; model-generated script errors were recovered within the gate.
 - **A durable harness on Pi Durable.** Earendil's [Pi Durable](https://earendil.com/posts/pi-durable/) (experimental, TypeScript) checkpoints every model call and tool call, so a new process picks up unfinished work after a crash. It also makes submissions exactly-once, lets a conversation fork without copying its transcript, and lets several clients watch and steer one conversation. Those cover herdbot's weakest spots, which are scraping pane text for status and quota errors, and losing an answer when a busy agent gets prompted. A `durable` harness, a small Node host per bot that runs in a herdr pane, would hand herdbot real status and results for pi-driven bots instead of screen reads. The API may still change, so this stays an experiment next to the pane-based harnesses.
 - **More uses for Apple's on-device model.** `fm` now backs up quota and auth detection for subagents and holds deliveries behind modals. Picking a task class when a bot names none is not built; bots rarely omit it. Summarizing subagent output was left out on purpose: the parent gets the raw tail, which loses nothing, while on-device summaries of long output would.
 
 Open questions:
 
-- The UI uses SwiftUI for the menu bar and quick-entry plus gpui for the later app; see the [UI layer design](docs/superpowers/specs/2026-10-21-ui-layer-design.md).
-
+- The UI is SwiftUI throughout (decided 2026-10-22); another operating system would get its own shell over the same CLI.
 - Should any bot run unattended? Automatic review is available through `approvals = "auto"`; full bypass (`--yolo`, `--dangerously-skip-permissions`, `--dangerously-bypass-approvals-and-sandbox`) is still never used.
 - Should bots get their own herdr session (`--session herdbot`)? They currently land in your default session.
 

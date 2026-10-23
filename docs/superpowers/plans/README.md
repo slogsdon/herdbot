@@ -17,10 +17,20 @@ Written 2026-10-20 for the roadmap items in the top-level README.
 | [Desktop UI, phase 3.1: chat data seam](2026-10-22-chat-data-seam.md) ([spec](../specs/2026-10-22-chat-app-design.md)) | done (committed on feature/ui-chat), 2026-10-22 | `herdbot-core` (`history.rs`, `rooms.rs`, `home.rs`, `snapshot.rs`), `main.rs`, `daemon.rs`, README |
 | [Desktop UI, phase 3.2: chat window](2026-10-22-chat-window.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` sidebar, chat view, history models; macOS floor 15 |
 | [Desktop UI, phase 3.3: composer, unread, notifications](2026-10-22-chat-composer.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` composer, unread tracker, notifier |
+| [Approval mode](2026-10-20-approval-mode.md) | done (6642445), 2026-10-20 | `route.rs` (`approval_args`), `home.rs`, README |
+| [Effort default](2026-10-20-effort-default.md) | done (becfa43), 2026-10-20 | `route.rs` (`resolve`), `routing.toml` |
+| [Desktop UI, phase 2b: quick-entry redesign](2026-10-22-quick-entry-redesign.md) | done (on main), 2026-10-22 | `ui/menubar` quick-entry panel |
+| [Packaging, 1: CLI](2026-10-22-packaging-cli.md) ([spec](../specs/2026-10-22-packaging-design.md)) | done (on main), 2026-10-22 | `service.rs`, `daemon.rs`, new `doctor.rs` and `setup.rs`, `home.rs` (`DaemonInfo`), README |
+| [Packaging, 2: app](2026-10-22-packaging-app.md) | done (on main), 2026-10-22 | `ui/menubar` setup window, login item, bundled-helper lookup |
+| [Packaging, 3: release](2026-10-22-packaging-release.md) | done (on main), 2026-10-22; released 0.1.0 to 0.1.2 | `scripts/release.sh`, `packaging/herdbot.rb.tmpl`, `build-app.sh` |
+| [GUI PATH and daemon start](2026-10-22-gui-path.md) | done (on main), 2026-10-22 | new `shellenv.rs`, `doctor.rs`, `service.rs`, `setup.rs` |
+| [Setup window feedback](2026-10-22-setup-feedback.md) | done (on main), 2026-10-22 | `ui/menubar` `SetupState`, `SetupView` |
+| [Approval cards, 1: CLI and daemon](2026-10-22-approval-cards-cli.md) ([spec](../specs/2026-10-22-approval-cards-design.md)) | done (on main), 2026-10-22 | new `herdbot-core` `cards.rs`, new `adapters.rs`, `run.rs`, `daemon.rs`, `main.rs`, `snapshot.rs` |
+| [Approval cards, 2: app](2026-10-22-approval-cards-app.md) | done (on main), 2026-10-22 | `ui/menubar` card types, `CardView`, notifications, menu |
 | Grok Bot schedule/skill import | blocked: no data on disk | — |
 
 Run them one after another, in the order **pi → fm → rooms → turn hooks → OptChat memory → cua**, each starting from the previous one's merge. cua goes last because its live checks wait on Shane installing cua-driver and granting it permissions. All six edit `README.md`, and turn hooks also edits `route::launch` and the daemon loop. pi and cua both edit `route::launch`. pi, fm and rooms touch `main.rs` and `tools.rs`. fm and rooms both add to the daemon loop. Running them in parallel only trades the waiting for merge conflicts.
 
-Current baseline with all plans applied: 63 tests.
+Current baseline with all plans applied (0.1.2, 2026-10-22): 116 Rust tests (`cargo test --workspace`) and 92 Swift tests (`ui/menubar/scripts/test.sh`).
 
 Still unverified live: fm modal hold (not exercised; no modal appeared), CUA `ask` approval flow, remote CUA host.
