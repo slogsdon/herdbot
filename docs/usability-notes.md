@@ -46,3 +46,13 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 - **Candidate approaches (none tried):** close when the panel resigns key AND the app is no longer active, after a short grace period (a few hundred ms) that a returning focus cancels, so a dictation HUD that takes focus briefly does not close it; or close only when the newly active application is not the dictation tool (needs knowing its bundle id, which is brittle); or close on a global mouse-down outside the panel (needs no focus change, but misses keyboard-only switches such as ⌘Tab). Combining the first with the mouse-down is probably the sturdiest; it needs a manual check with MacWhisper, a ⌘Tab away, a click on another app, and a Mission Control swipe.
 - **Interaction:** this and U3 both come from how the panel activates the app; they should be designed together.
 - **Status:** open.
+
+## U5. Remove the "Setup…" menu item once setup has succeeded
+
+- **Where:** the last block of `ui/menubar/Sources/HerdbotMenu/MenuContent.swift`: `Button(setup.needsAttention ? "Finish setup…" : "Setup…")`.
+- **Today:** the item is always in the menu; it reads "Setup…" when every check is ok and "Finish setup…" when something needs attention.
+- **Wanted:** after a successful setup the item is gone. It comes back by itself when something needs attention again (for example the daemon is older than the binary after an upgrade, or a harness disappears).
+- **Behaviour to decide:** show the item when `setup.needsAttention` is true, and also when `setup.problem != nil` (herdbot missing or `doctor` failing), because that is when the window explains what is wrong. Hide it when the report exists and every check is ok. Before the first report arrives it stays hidden, so a healthy launch never flashes it.
+- **Open question:** with the item gone there is no way to open the checklist on a healthy install to see the checks. Acceptable? If a way is wanted, the usual place is the quick-entry gear menu or an option-click on the menu bar item; I would not add one unless asked.
+- **Size:** tiny, one condition in one view, plus a view-model test for the visibility rule if it moves into `SetupState` (for example `showsMenuItem`). Good to batch with U1, which edits the same file.
+- **Status:** open.
