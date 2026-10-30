@@ -6,7 +6,7 @@
 
 **Architecture:** `status --json` and `watch --json` gain a `rooms` list (rooms' data types move from the `herdbot` crate into `herdbot-core` so the snapshot can read them). The Swift package gets a recipient model and a `send` call on the `herdbot` CLI wrapper; the app gets a Carbon hotkey, a floating `NSPanel` and a SwiftUI view. Nothing is sent until the person presses Return or ⌘Return.
 
-**Tech Stack:** Rust (herdbot-core), Swift 6 / SwiftUI / AppKit / Carbon (`ui/menubar`), Swift Testing.
+**Tech Stack:** Rust (herdbot-core), Swift 6 / SwiftUI / AppKit / Carbon (`ui/macos`), Swift Testing.
 
 Spec: `docs/superpowers/specs/2026-10-21-ui-layer-design.md` (Phase 2).
 
@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-10-21-ui-layer-design.md` (Phase 2).
 - Shane approved committing each task below: explicit paths only (never `git add -A` or `git add .`), conventional message, **no AI or tool attribution**, no push, no merge.
 - Never run `cargo install`, never restart the daemon, never launch the menu bar app (the manual check is for a person).
 - Swift: 4-space indent, no `@State` (a macro whose plugin is missing under Command Line Tools; use plain `let` or `Binding(get:set:)`), no mutable globals without `nonisolated(unsafe)`.
-- Test Swift with `./scripts/test.sh` from `ui/menubar`, never bare `swift test`. Test Rust with `cargo test --workspace`; lint with `cargo clippy --workspace -- -D warnings`.
+- Test Swift with `./scripts/test.sh` from `ui/macos`, never bare `swift test`. Test Rust with `cargo test --workspace`; lint with `cargo clippy --workspace -- -D warnings`.
 - `"v": 1` stays: the `rooms` field is additive. The Swift decoder must keep reading a snapshot that has no `rooms`.
 - Baseline before this plan: Rust 57 / 14 / 1 / 2 tests pass; Swift 14 tests pass.
 - Keep your ledger in `.superpowers/sdd/ui-quickentry/progress.md` (untracked; do not commit it).
@@ -456,8 +456,8 @@ git commit -m "feat: list rooms in status and watch"
 ### Task 2: Swift recipient model and `send`
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotKit/QuickEntry.swift`, `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift`
-- Modify: `ui/menubar/Sources/HerdbotKit/Models.swift`, `ui/menubar/Sources/HerdbotKit/Stream.swift`, `ui/menubar/Sources/HerdbotKit/ProcessCLI.swift`, `ui/menubar/Tests/HerdbotKitTests/Fixtures.swift`, `ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift`, `ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift`
+- Create: `ui/macos/Sources/HerdbotKit/QuickEntry.swift`, `ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/Models.swift`, `ui/macos/Sources/HerdbotKit/Stream.swift`, `ui/macos/Sources/HerdbotKit/ProcessCLI.swift`, `ui/macos/Tests/HerdbotKitTests/Fixtures.swift`, `ui/macos/Tests/HerdbotKitTests/DecodingTests.swift`, `ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift`
 
 **Interfaces:**
 - Consumes: the `rooms` JSON from Task 1 (but the Swift side must also decode a snapshot without it).
@@ -465,7 +465,7 @@ git commit -m "feat: list rooms in status and watch"
 
 - [ ] **Step 1: Write the failing tests first**
 
-Create `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift`:
+Create `ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift`:
 
 ```swift
 import Foundation
@@ -563,7 +563,7 @@ import Testing
 }
 ```
 
-Replace `ui/menubar/Tests/HerdbotKitTests/Fixtures.swift` with (adds `rooms`/`bots` parameters to `snapshot(...)`, a rooms entry in `snapshotLine`, and a `FakeCLI`):
+Replace `ui/macos/Tests/HerdbotKitTests/Fixtures.swift` with (adds `rooms`/`bots` parameters to `snapshot(...)`, a rooms entry in `snapshotLine`, and a `FakeCLI`):
 
 ```swift
 import Foundation
@@ -623,7 +623,7 @@ final class FakeCLI: HerdbotCLI, @unchecked Sendable {
 }
 ```
 
-Replace `ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift`:
+Replace `ui/macos/Tests/HerdbotKitTests/DecodingTests.swift`:
 
 ```swift
 import Foundation
@@ -669,7 +669,7 @@ import Testing
 }
 ```
 
-Replace `ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift`:
+Replace `ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift`:
 
 ```swift
 import Foundation
@@ -742,12 +742,12 @@ import Testing
 
 - [ ] **Step 2: Run to see it fail**
 
-Run (from `ui/menubar`): `./scripts/test.sh`
+Run (from `ui/macos`): `./scripts/test.sh`
 Expected: build FAIL (`Recipient`, `QuickEntryState`, `RoomView`, `send` do not exist).
 
 - [ ] **Step 3: Implement**
 
-Replace `ui/menubar/Sources/HerdbotKit/Models.swift` (adds `RoomView`, `Snapshot.rooms`, and a decoder that reads a missing `rooms` as `[]`):
+Replace `ui/macos/Sources/HerdbotKit/Models.swift` (adds `RoomView`, `Snapshot.rooms`, and a decoder that reads a missing `rooms` as `[]`):
 
 ```swift
 import Foundation
@@ -833,11 +833,11 @@ extension Snapshot {
 }
 ```
 
-In `ui/menubar/Sources/HerdbotKit/Stream.swift` add one requirement to `HerdbotCLI`:
+In `ui/macos/Sources/HerdbotKit/Stream.swift` add one requirement to `HerdbotCLI`:
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/Stream.swift
-+++ b/ui/menubar/Sources/HerdbotKit/Stream.swift
+--- a/ui/macos/Sources/HerdbotKit/Stream.swift
++++ b/ui/macos/Sources/HerdbotKit/Stream.swift
 @@ -20,6 +20,8 @@
      func watch() -> AsyncThrowingStream<StreamLine, Error>
      /// `herdbot focus <agent>`.
@@ -849,7 +849,7 @@ In `ui/menubar/Sources/HerdbotKit/Stream.swift` add one requirement to `HerdbotC
  public enum StreamParser {
 ```
 
-Replace `ui/menubar/Sources/HerdbotKit/ProcessCLI.swift` (`focus` and the new `send` share one private `run`; the text is a single argv entry, so quotes and newlines survive):
+Replace `ui/macos/Sources/HerdbotKit/ProcessCLI.swift` (`focus` and the new `send` share one private `run`; the text is a single argv entry, so quotes and newlines survive):
 
 ```swift
 import Foundation
@@ -947,7 +947,7 @@ public struct ProcessCLI: HerdbotCLI {
 }
 ```
 
-Create `ui/menubar/Sources/HerdbotKit/QuickEntry.swift`:
+Create `ui/macos/Sources/HerdbotKit/QuickEntry.swift`:
 
 ```swift
 import Foundation
@@ -1066,7 +1066,7 @@ Expected: PASS, 25 tests (the 14 existing plus 11 new).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/QuickEntry.swift ui/menubar/Sources/HerdbotKit/Models.swift ui/menubar/Sources/HerdbotKit/Stream.swift ui/menubar/Sources/HerdbotKit/ProcessCLI.swift ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift ui/menubar/Tests/HerdbotKitTests/Fixtures.swift ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
+git add ui/macos/Sources/HerdbotKit/QuickEntry.swift ui/macos/Sources/HerdbotKit/Models.swift ui/macos/Sources/HerdbotKit/Stream.swift ui/macos/Sources/HerdbotKit/ProcessCLI.swift ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift ui/macos/Tests/HerdbotKitTests/Fixtures.swift ui/macos/Tests/HerdbotKitTests/DecodingTests.swift ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
 git commit -m "feat(menubar): recipient model and send for quick entry"
 ```
 
@@ -1077,8 +1077,8 @@ git commit -m "feat(menubar): recipient model and send for quick entry"
 No unit tests: this is AppKit and Carbon glue, and the hotkey, key focus and dictation can only be checked by a person (Task 4's checklist). The gate is a clean build.
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotMenu/Hotkey.swift`, `ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift`, `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/App.swift`, `ui/menubar/Sources/HerdbotMenu/MenuContent.swift`
+- Create: `ui/macos/Sources/HerdbotMenu/Hotkey.swift`, `ui/macos/Sources/HerdbotMenu/QuickEntryView.swift`, `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/App.swift`, `ui/macos/Sources/HerdbotMenu/MenuContent.swift`
 
 **Interfaces:**
 - Consumes: `QuickEntryState`, `Recipient`, `ProcessCLI` from Task 2.
@@ -1090,7 +1090,7 @@ Design notes that the code encodes (do not change them without asking):
 - `hidesOnDeactivate = false` and no close-on-resign: a dictation HUD that briefly takes focus must not dismiss the panel. Only Esc, Cancel or a send closes it.
 - A fresh `NSHostingView` on every show, so the field takes focus every time.
 
-- [ ] **Step 1: Create `ui/menubar/Sources/HerdbotMenu/Hotkey.swift`**
+- [ ] **Step 1: Create `ui/macos/Sources/HerdbotMenu/Hotkey.swift`**
 
 ```swift
 import Carbon.HIToolbox
@@ -1118,7 +1118,7 @@ final class GlobalHotkey {
 }
 ```
 
-- [ ] **Step 2: Create `ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift`**
+- [ ] **Step 2: Create `ui/macos/Sources/HerdbotMenu/QuickEntryView.swift`**
 
 ```swift
 import HerdbotKit
@@ -1183,7 +1183,7 @@ struct QuickEntryView: View {
 }
 ```
 
-- [ ] **Step 3: Create `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`**
+- [ ] **Step 3: Create `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`**
 
 ```swift
 import AppKit
@@ -1246,7 +1246,7 @@ final class QuickEntryController {
 
 - [ ] **Step 4: Replace `App.swift` and `MenuContent.swift`**
 
-`ui/menubar/Sources/HerdbotMenu/App.swift`:
+`ui/macos/Sources/HerdbotMenu/App.swift`:
 
 ```swift
 import AppKit
@@ -1292,7 +1292,7 @@ struct HerdbotMenuApp: App {
 }
 ```
 
-`ui/menubar/Sources/HerdbotMenu/MenuContent.swift`:
+`ui/macos/Sources/HerdbotMenu/MenuContent.swift`:
 
 ```swift
 import AppKit
@@ -1361,13 +1361,13 @@ struct MenuContent: View {
 
 - [ ] **Step 5: Verify**
 
-Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"` and `./scripts/test.sh` and `./scripts/build-app.sh`
+Run (from `ui/macos`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"` and `./scripts/test.sh` and `./scripts/build-app.sh`
 Expected: `Build complete!`, no Swift errors or warnings (linker `search path ... not found` warnings are an environment quirk and fine), 25 tests pass, `built build/HerdbotMenu.app`. Do not launch it.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/Hotkey.swift ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift ui/menubar/Sources/HerdbotMenu/App.swift ui/menubar/Sources/HerdbotMenu/MenuContent.swift
+git add ui/macos/Sources/HerdbotMenu/Hotkey.swift ui/macos/Sources/HerdbotMenu/QuickEntryView.swift ui/macos/Sources/HerdbotMenu/QuickEntryController.swift ui/macos/Sources/HerdbotMenu/App.swift ui/macos/Sources/HerdbotMenu/MenuContent.swift
 git commit -m "feat(menubar): quick-entry panel on a global hotkey"
 ```
 
@@ -1376,9 +1376,9 @@ git commit -m "feat(menubar): quick-entry panel on a global hotkey"
 ### Task 4: docs and the manual check
 
 **Files:**
-- Modify: `ui/menubar/README.md`, `README.md`, `docs/superpowers/plans/README.md`, `docs/superpowers/specs/2026-10-21-ui-layer-design.md`
+- Modify: `ui/macos/README.md`, `README.md`, `docs/superpowers/plans/README.md`, `docs/superpowers/specs/2026-10-21-ui-layer-design.md`
 
-- [ ] **Step 1: `ui/menubar/README.md`**
+- [ ] **Step 1: `ui/macos/README.md`**
 
 In the opening paragraph, after "...runs `herdbot focus <agent>`.", add: "⌥Space opens a quick-entry panel that queues a message to a bot or room."
 
@@ -1421,13 +1421,13 @@ panel stays open if a dictation HUD takes focus for a moment.
 
 - [ ] **Step 2: root `README.md`**
 
-In the "Not built yet:" sentence of the status section, change "The menu bar app exists in ui/menubar (built separately with Swift; see its README), and the full desktop app is not built." to "The menu bar app, with a ⌥Space quick-entry panel, exists in ui/menubar (built separately with Swift; see its README), and the full desktop app is not built."
+In the "Not built yet:" sentence of the status section, change "The menu bar app exists in ui/macos (built separately with Swift; see its README), and the full desktop app is not built." to "The menu bar app, with a ⌥Space quick-entry panel, exists in ui/macos (built separately with Swift; see its README), and the full desktop app is not built."
 
 - [ ] **Step 3: `docs/superpowers/plans/README.md`**
 
 Add this row after the phase 1 row:
 
-`| [Desktop UI, phase 2: quick entry](2026-10-22-quick-entry.md) | done (committed on feature/ui-quickentry), 2026-10-22 | `herdbot-core` (`rooms.rs` moves in), `herdbot` `rooms.rs`, `ui/menubar` quick-entry files, README |`
+`| [Desktop UI, phase 2: quick entry](2026-10-22-quick-entry.md) | done (committed on feature/ui-quickentry), 2026-10-22 | `herdbot-core` (`rooms.rs` moves in), `herdbot` `rooms.rs`, `ui/macos` quick-entry files, README |`
 
 - [ ] **Step 4: spec**
 
@@ -1444,10 +1444,10 @@ Replace the Phase 2 block in `docs/superpowers/specs/2026-10-21-ui-layer-design.
 
 - [ ] **Step 5: Verify and commit**
 
-Run: `git diff --stat` (only the four files above), `cargo build && cargo test --workspace && cargo clippy --workspace -- -D warnings`, and `cd ui/menubar && ./scripts/test.sh`.
+Run: `git diff --stat` (only the four files above), `cargo build && cargo test --workspace && cargo clippy --workspace -- -D warnings`, and `cd ui/macos && ./scripts/test.sh`.
 
 ```bash
-git add ui/menubar/README.md README.md docs/superpowers/plans/README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md
+git add ui/macos/README.md README.md docs/superpowers/plans/README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md
 git commit -m "docs: document the quick-entry panel and its manual check"
 ```
 

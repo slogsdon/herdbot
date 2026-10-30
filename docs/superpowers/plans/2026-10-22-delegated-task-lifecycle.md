@@ -69,11 +69,11 @@
 ### Task 3: Chat lifecycle entries and safe notifications
 
 **Files:**
-- Modify: `ui/menubar/Sources/HerdbotKit/Models.swift`
-- Modify: `ui/menubar/Sources/HerdbotKit/Timeline.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/MessageViews.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/Notifier.swift`
-- Test: `ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift`, `ChatTests.swift`, and notifier tests
+- Modify: `ui/macos/Sources/HerdbotKit/Models.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/Timeline.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/MessageViews.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/Notifier.swift`
+- Test: `ui/macos/Tests/HerdbotKitTests/DecodingTests.swift`, `ChatTests.swift`, and notifier tests
 
 **Interfaces:**
 - Consumes: Task 2 history item fields.
@@ -84,5 +84,5 @@
 - [x] Add Swift decode/view-model tests for missing optional fields, completed/blocked/failed/stopped/expired states, long details, and ID-stable timeline entries.
 - [x] Render `notice` and run lifecycle entries as compact centered system rows; add an accessible disclosure control for full detail.
 - [x] Change blocked/card notification bodies to generic text; verify neither card title nor event reason appears in notification content.
-- [x] Run `cd ui/menubar && ./scripts/test.sh` (147 tests, 16 suites) and `./scripts/build-app.sh`; both pass.
+- [x] Run `cd ui/macos && ./scripts/test.sh` (147 tests, 16 suites) and `./scripts/build-app.sh`; both pass.
 - [ ] Manual visual, notification, notification-routing, and VoiceOver checks are deferred by Shane (2026-10-29), not verified. The cases remain recorded in `.superpowers/sdd/2026-10-22-delegated-task-lifecycle/progress.md`.

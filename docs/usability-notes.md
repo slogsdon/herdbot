@@ -4,7 +4,7 @@ Collected from Shane's own use, newest last. Each item says where it was hit and
 
 ## U1. Menu bar bots list: top 5, clickable
 
-- **Where:** menu bar item, the "Bots" section (`ui/menubar/Sources/HerdbotMenu/MenuContent.swift`, the `Section("Bots")` block).
+- **Where:** menu bar item, the "Bots" section (`ui/macos/Sources/HerdbotMenu/MenuContent.swift`, the `Section("Bots")` block).
 - **Today:** every bot is listed as plain text (`● Name` / `○ Name`), not clickable.
 - **Wanted:** the list is capped at the 5 most recently used bots, and each name is clickable; a click opens the chat window with that bot selected.
 - **Notes:** the blocked-agent and card entries already open the chat for a bot through `Notifier.openChat`/`WindowOpener`; the same path can serve this.
@@ -14,7 +14,7 @@ Collected from Shane's own use, newest last. Each item says where it was hit and
 
 ## U2. Create bots and rooms from the chat window ("+" button), and import from a template URL
 
-- **Where:** the chat window's sidebar (`ui/menubar/Sources/HerdbotMenu/SidebarView.swift`).
+- **Where:** the chat window's sidebar (`ui/macos/Sources/HerdbotMenu/SidebarView.swift`).
 - **Today:** a bot is created with `herdbot new <name> [--cwd DIR] [--class CLASS]` and a room with `herdbot room new <name> --members a,b[,c] [--mode …] [--moderator BOT]`; the app has no way to create either, and `BOT.md` is edited by hand.
 - **Wanted:** an add (+) button in the chat window that creates a new bot or a new room. Stretch ("double win"): accept a Grok Bot template or marketplace URL, and possibly other providers' template URLs if they offer such things.
 - **Notes for the bot form:** name, working directory (default: the bot's folder under the herdbot home), task class (routing), and instructions. Creating one from the app should run the same CLI commands, so the CLI stays the only seam; a new `herdbot new` option for instructions and maybe a `--json` result may be needed. The first conversation with a brand-new bot in a directory claude has not trusted shows the approval card, which already works.
@@ -28,7 +28,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 
 ## U3. Quick entry (⌥Space) also raises the chat window when it is open
 
-- **Where:** `QuickEntryController.show()` in `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`.
+- **Where:** `QuickEntryController.show()` in `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`.
 - **Today:** with the chat window already open, pressing ⌥Space shows the quick-entry panel and also brings the chat window to the front. With the chat window closed, only the panel appears.
 - **Wanted:** ⌥Space shows only the quick-entry panel; the chat window stays where it was.
 - **Cause (Likely; basis: the code, not reproduced here):** `show()` calls `NSApp.activate(ignoringOtherApps: true)` so the panel can become key. Activating the app raises all of its visible windows, so an open chat window comes forward with it. That also explains why a closed chat window does not appear.
@@ -38,7 +38,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 
 ## U4. Quick entry should close when focus moves to anything else
 
-- **Where:** `QuickEntryController` / `QuickEntryPanel` in `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`.
+- **Where:** `QuickEntryController` / `QuickEntryPanel` in `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`.
 - **Today:** the panel stays open when you click or type in another app. Shane noticed it still showing while typing directly into herdr + claude.
 - **Wanted:** the panel closes by itself as soon as you interact with anything in macOS that is not the quick-entry panel (another app, another window of this app, the desktop).
 - **Cause (verified in the code):** `panel.hidesOnDeactivate = false`, and nothing observes the panel losing key status or the app resigning active (no `didResignKey`/`didResignActive` handler). Only Escape, a send or the hotkey closes it.
@@ -49,7 +49,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 
 ## U5. Remove the "Setup…" menu item once setup has succeeded
 
-- **Where:** the last block of `ui/menubar/Sources/HerdbotMenu/MenuContent.swift`: `Button(setup.needsAttention ? "Finish setup…" : "Setup…")`.
+- **Where:** the last block of `ui/macos/Sources/HerdbotMenu/MenuContent.swift`: `Button(setup.needsAttention ? "Finish setup…" : "Setup…")`.
 - **Today:** the item is always in the menu; it reads "Setup…" when every check is ok and "Finish setup…" when something needs attention.
 - **Wanted:** after a successful setup the item is gone. It comes back by itself when something needs attention again (for example the daemon is older than the binary after an upgrade, or a harness disappears).
 - **Behaviour to decide:** show the item when `setup.needsAttention` is true, and also when `setup.problem != nil` (herdbot missing or `doctor` failing), because that is when the window explains what is wrong. Hide it when the report exists and every check is ok. Before the first report arrives it stays hidden, so a healthy launch never flashes it.
@@ -98,7 +98,7 @@ Sources for the template notes: https://x.ai/bot/guides/templates-for-grok-bot, 
 
 ## U8. Render headings and lists in chat markdown
 
-- **Where:** `ui/menubar/Sources/HerdbotMenu/MessageViews.swift` and the block parser in `ui/menubar/Sources/HerdbotKit/Timeline.swift`.
+- **Where:** `ui/macos/Sources/HerdbotMenu/MessageViews.swift` and the block parser in `ui/macos/Sources/HerdbotKit/Timeline.swift`.
 - **Today:** inline markdown and fenced code render; lists and headings are plain text.
 - **Wanted:** headings, ordered/unordered lists, and nesting render with structure while retaining selectable text, inline markdown, and code blocks.
 - **Status:** implementation complete; manual chat inspection remains (`docs/superpowers/plans/2026-10-22-chat-markdown.md`).

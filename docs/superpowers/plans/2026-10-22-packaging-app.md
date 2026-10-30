@@ -6,7 +6,7 @@
 
 **Architecture:** Spec: `docs/superpowers/specs/2026-10-22-packaging-design.md` ("App additions"). Everything testable lives in `HerdbotKit` (decoding, `SetupState`, icon merge, login-item mapping, fix labels, binary lookup); the SwiftUI views stay thin. The app's only seam to herdbot stays the CLI: `doctor --json` and `setup --only <fix> --yes`, both added by plan 1 (`docs/superpowers/plans/2026-10-22-packaging-cli.md`).
 
-**Tech Stack:** Swift 6, SwiftUI, Swift Testing (`./scripts/test.sh`), `ServiceManagement` (`SMAppService`). No new dependencies. Package: `ui/menubar`.
+**Tech Stack:** Swift 6, SwiftUI, Swift Testing (`./scripts/test.sh`), `ServiceManagement` (`SMAppService`). No new dependencies. Package: `ui/macos`.
 
 ## Global Constraints
 
@@ -19,7 +19,7 @@
 - Commits: conventional messages, no AI attribution, explicit `git add` paths, no push.
 - No scripted keystrokes or clicks, and never kill a running HerdbotMenu by name; the manual check is for Shane.
 
-**Branch/worktree:** this plan needs plan 1's CLI. Create it from `feature/packaging-cli` (or from `main` once that is merged): `git -C ~/Code/herdbot worktree add .worktrees/packaging-app -b feature/packaging-app <base>`. Run commands from `ui/menubar` in that worktree; tests with `./scripts/test.sh`.
+**Branch/worktree:** this plan needs plan 1's CLI. Create it from `feature/packaging-cli` (or from `main` once that is merged): `git -C ~/Code/herdbot worktree add .worktrees/packaging-app -b feature/packaging-app <base>`. Run commands from `ui/macos` in that worktree; tests with `./scripts/test.sh`.
 
 ## File map
 
@@ -219,7 +219,7 @@ Run `./scripts/test.sh` → all PASS.
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Doctor.swift ui/menubar/Sources/HerdbotKit/ProcessCLI.swift ui/menubar/Tests/HerdbotKitTests/SetupTests.swift ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
+git add ui/macos/Sources/HerdbotKit/Doctor.swift ui/macos/Sources/HerdbotKit/ProcessCLI.swift ui/macos/Tests/HerdbotKitTests/SetupTests.swift ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
 git commit -m "feat(menubar): doctor and setup over the CLI, and the bundled helper lookup"
 ```
 
@@ -518,7 +518,7 @@ Run `./scripts/test.sh` → PASS. (`MenuIcon.swift`'s switch will not compile un
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Doctor.swift ui/menubar/Sources/HerdbotKit/SetupState.swift ui/menubar/Sources/HerdbotKit/MenuState.swift ui/menubar/Tests/HerdbotKitTests/Fixtures.swift ui/menubar/Tests/HerdbotKitTests/SetupTests.swift ui/menubar/Tests/HerdbotKitTests/StateTests.swift
+git add ui/macos/Sources/HerdbotKit/Doctor.swift ui/macos/Sources/HerdbotKit/SetupState.swift ui/macos/Sources/HerdbotKit/MenuState.swift ui/macos/Tests/HerdbotKitTests/Fixtures.swift ui/macos/Tests/HerdbotKitTests/SetupTests.swift ui/macos/Tests/HerdbotKitTests/StateTests.swift
 git commit -m "feat(menubar): setup state, login-item check and attention icon state"
 ```
 
@@ -662,7 +662,7 @@ and change the label to `MenuIcon(icon: state.icon.with(attention: setup.needsAt
 - [ ] **Step 8: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/SetupView.swift ui/menubar/Sources/HerdbotMenu/LoginItem.swift ui/menubar/Sources/HerdbotMenu/App.swift ui/menubar/Sources/HerdbotMenu/MenuContent.swift ui/menubar/Sources/HerdbotMenu/MenuIcon.swift ui/menubar/Sources/HerdbotMenu/WindowOpener.swift
+git add ui/macos/Sources/HerdbotMenu/SetupView.swift ui/macos/Sources/HerdbotMenu/LoginItem.swift ui/macos/Sources/HerdbotMenu/App.swift ui/macos/Sources/HerdbotMenu/MenuContent.swift ui/macos/Sources/HerdbotMenu/MenuIcon.swift ui/macos/Sources/HerdbotMenu/WindowOpener.swift
 git commit -m "feat(menubar): first-run setup window, attention icon and login item"
 ```
 
@@ -670,14 +670,14 @@ git commit -m "feat(menubar): first-run setup window, attention icon and login i
 
 ### Task 4: Docs and the manual check
 
-**Files:** Modify `ui/menubar/README.md`.
+**Files:** Modify `ui/macos/README.md`.
 
 - [ ] **Step 1:** Replace "the app does not register itself" with the login-item behaviour (Setup window → "Start at login"; `SMAppService.mainApp`; macOS may ask for approval in System Settings → General → Login Items). Add a **Setup** section: the checklist is `herdbot doctor --json`, buttons run `herdbot setup --only <fix> --yes`, "Set up everything" runs `herdbot setup --yes` (which also creates a starter bot `helper` when there are none), the window opens by itself once per herdbot version when a check fails, and the menu bar icon shows `⚠` (a triangle) while any check is not ok. Update the binary lookup sentence: `$HERDBOT_BIN`, then `Herdbot.app/Contents/Helpers/herdbot` inside the bundle, then `~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`.
 - [ ] **Step 2:** Add a **Manual check** (for Shane, not the agent): with a throwaway `HERDBOT_HOME` (as in the existing check) and `HERDBOT_BIN` pointing at the plan-1 build, launch the app; expect the setup window to open with `service`/`daemon` failing and a `cli-link` warning; press "Link herdbot" with `HERDBOT_LINK_DIR` set to a temp dir in the app's environment and expect the row to turn ok after the refresh; confirm the icon shows the triangle while a check fails and returns to normal after. Do not press "Install service" against a real home: it would replace the running daemon.
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add ui/menubar/README.md
+git add ui/macos/README.md
 git commit -m "docs(menubar): document the setup window, the login item and the helper lookup"
 ```
 

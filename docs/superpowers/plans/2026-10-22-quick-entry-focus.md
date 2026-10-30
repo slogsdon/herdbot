@@ -14,7 +14,7 @@
 
 - Preserve MacWhisper dictation and current Escape/send/toggle behavior.
 - Do not add dictation-app bundle-id lists or dependencies.
-- Test with `cd ui/menubar && ./scripts/test.sh`; manually exercise macOS focus behavior.
+- Test with `cd ui/macos && ./scripts/test.sh`; manually exercise macOS focus behavior.
 - Implement in a dedicated worktree from `feature/roadmap`; do not commit, push, or merge. Report branch, diff, checks, and manual results.
 
 ## Review Focus
@@ -29,8 +29,8 @@
 ### Task 1: Focus-loss policy
 
 **Files:**
-- Modify: `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`
-- Test: create a pure focus-policy test in `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift` only if the policy can live in HerdbotKit; otherwise keep AppKit callbacks small and cover via manual checklist.
+- Modify: `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`
+- Test: create a pure focus-policy test in `ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift` only if the policy can live in HerdbotKit; otherwise keep AppKit callbacks small and cover via manual checklist.
 
 **Interfaces:** Controller owns observers and a cancellable delayed dismissal; no new public app API.
 
@@ -39,5 +39,5 @@
 - [x] Adjust activation/window ordering so the panel can become key without leaving the chat window raised; AppKit behavior remains unverified until the manual check.
 - [x] Observe app deactivation and panel key loss; schedule dismissal after 300 ms and cancel when the panel regains focus.
 - [x] Remove observers and cancel pending dismissal when hiding or tearing down the controller.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`; expect all tests pass.
+- [x] Run `cd ui/macos && ./scripts/test.sh`; expect all tests pass.
 - [ ] Manually check MacWhisper with chat open/closed, ⌘Tab, click-away, another app window, and Mission Control; verify dictated text arrives.

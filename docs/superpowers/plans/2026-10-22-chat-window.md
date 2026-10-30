@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-10-22-chat-app-design.md` (The window). Depen
 - Shane approved committing each task below: explicit paths only (never `git add -A` or `git add .`), the conventional message given, **no AI or tool attribution**, no push, no merge.
 - Never run `cargo install`, never restart the daemon, never launch the menu bar app (a running instance belongs to Shane; do not kill it).
 - Swift: 4-space indent, no `@State` (a macro whose plugin is missing under Command Line Tools; use observable classes or `Binding(get:set:)`), zero Swift compiler warnings (linker `search path ... not found` warnings are an environment quirk and fine).
-- Test with `timeout 300 ./scripts/test.sh` from `ui/menubar`, never bare `swift test`. The first test build after a change can take two to three minutes; that is a slow compile, not a hang.
+- Test with `timeout 300 ./scripts/test.sh` from `ui/macos`, never bare `swift test`. The first test build after a change can take two to three minutes; that is a slow compile, not a hang.
 - Colours are system semantic colours (`.primary`, `.secondary`, `.quaternary`, `Color.accentColor`); avatars and speaker names use `Avatar.hue(for:)`.
 - JSON additions are additive; a herdbot without them must still decode (missing counts read as 0 / empty).
 - Baseline before this plan: Swift 27 tests pass.
@@ -29,7 +29,7 @@ All code below was compiled, its tests run, and the window launched, screenshott
 ### Task 1: history models and the `history` call
 
 **Files:**
-- Modify: `ui/menubar/Sources/HerdbotKit/Models.swift`, `Stream.swift`, `ProcessCLI.swift`, `QuickEntry.swift`, `ui/menubar/Tests/HerdbotKitTests/Fixtures.swift`, `DecodingTests.swift`, `ProcessCLITests.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/Models.swift`, `Stream.swift`, `ProcessCLI.swift`, `QuickEntry.swift`, `ui/macos/Tests/HerdbotKitTests/Fixtures.swift`, `DecodingTests.swift`, `ProcessCLITests.swift`
 
 **Interfaces:**
 - Produces: `BotView { items, lastAt, preview, working }` and `RoomView { items, lastAt, preview }` (JSON `last_at`; missing fields default); `HistoryItem` (`n`, `at`, `kind`, `speaker`, `text`, `state`, `id`, `isPending`); `HistoryPage`; `Recipient.historyTarget` (`alpha` or `room:crew`); `HerdbotCLI.history(of:before:limit:) async throws -> HistoryPage`; `FakeCLI` test double with `pages`, `pending`, `historyCalls`, `historyFailure`.
@@ -37,8 +37,8 @@ All code below was compiled, its tests run, and the window launched, screenshott
 - [ ] **Step 1: Write the failing tests**
 
 ```diff
---- a/ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift
-+++ b/ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift
+--- a/ui/macos/Tests/HerdbotKitTests/DecodingTests.swift
++++ b/ui/macos/Tests/HerdbotKitTests/DecodingTests.swift
 @@ -38,4 +38,34 @@
          #expect(try StreamParser.parse("not json") == nil)
          #expect(try StreamParser.parse(#"{"hello":1}"#) == nil)
@@ -77,8 +77,8 @@ All code below was compiled, its tests run, and the window launched, screenshott
 ```
 
 ```diff
---- a/ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
-+++ b/ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
+--- a/ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
++++ b/ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
 @@ -45,6 +45,29 @@
          }
      }
@@ -112,8 +112,8 @@ All code below was compiled, its tests run, and the window launched, screenshott
 ```
 
 ```diff
---- a/ui/menubar/Tests/HerdbotKitTests/Fixtures.swift
-+++ b/ui/menubar/Tests/HerdbotKitTests/Fixtures.swift
+--- a/ui/macos/Tests/HerdbotKitTests/Fixtures.swift
++++ b/ui/macos/Tests/HerdbotKitTests/Fixtures.swift
 @@ -52,4 +52,17 @@
          if let failure { throw CLIError.failed(failure) }
          sent.append((recipient, text))
@@ -136,14 +136,14 @@ All code below was compiled, its tests run, and the window launched, screenshott
 
 - [ ] **Step 2: Run to see it fail**
 
-Run (from `ui/menubar`): `timeout 300 ./scripts/test.sh`
+Run (from `ui/macos`): `timeout 300 ./scripts/test.sh`
 Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do not exist).
 
 - [ ] **Step 3: Implement**
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/Models.swift
-+++ b/ui/menubar/Sources/HerdbotKit/Models.swift
+--- a/ui/macos/Sources/HerdbotKit/Models.swift
++++ b/ui/macos/Sources/HerdbotKit/Models.swift
 @@ -17,6 +17,28 @@
      public let slug: String
      public let title: String
@@ -277,8 +277,8 @@ Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do no
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/Stream.swift
-+++ b/ui/menubar/Sources/HerdbotKit/Stream.swift
+--- a/ui/macos/Sources/HerdbotKit/Stream.swift
++++ b/ui/macos/Sources/HerdbotKit/Stream.swift
 @@ -22,6 +22,8 @@
      func focus(agent: String) async throws
      /// `herdbot send <bot> <text>` or `herdbot room send <room> <text>`: queues the text.
@@ -291,8 +291,8 @@ Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do no
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
-+++ b/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
+--- a/ui/macos/Sources/HerdbotKit/QuickEntry.swift
++++ b/ui/macos/Sources/HerdbotKit/QuickEntry.swift
 @@ -14,6 +14,14 @@
          }
      }
@@ -311,8 +311,8 @@ Expected: build FAIL (`HistoryPage`, `history(of:before:limit:)`, `lastAt` do no
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/ProcessCLI.swift
-+++ b/ui/menubar/Sources/HerdbotKit/ProcessCLI.swift
+--- a/ui/macos/Sources/HerdbotKit/ProcessCLI.swift
++++ b/ui/macos/Sources/HerdbotKit/ProcessCLI.swift
 @@ -65,29 +65,49 @@
          }
      }
@@ -384,7 +384,7 @@ Expected: PASS, 31 tests (27 plus 4 new). `swift build` has no Swift warnings.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Models.swift ui/menubar/Sources/HerdbotKit/Stream.swift ui/menubar/Sources/HerdbotKit/ProcessCLI.swift ui/menubar/Sources/HerdbotKit/QuickEntry.swift ui/menubar/Tests/HerdbotKitTests/Fixtures.swift ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
+git add ui/macos/Sources/HerdbotKit/Models.swift ui/macos/Sources/HerdbotKit/Stream.swift ui/macos/Sources/HerdbotKit/ProcessCLI.swift ui/macos/Sources/HerdbotKit/QuickEntry.swift ui/macos/Tests/HerdbotKitTests/Fixtures.swift ui/macos/Tests/HerdbotKitTests/DecodingTests.swift ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
 git commit -m "feat(menubar): read a conversation's history through the CLI"
 ```
 
@@ -393,7 +393,7 @@ git commit -m "feat(menubar): read a conversation's history through the CLI"
 ### Task 2: view-models for the sidebar and the chat
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotKit/Sidebar.swift`, `Timeline.swift`, `ChatState.swift`, `ui/menubar/Tests/HerdbotKitTests/ChatTests.swift`
+- Create: `ui/macos/Sources/HerdbotKit/Sidebar.swift`, `Timeline.swift`, `ChatState.swift`, `ui/macos/Tests/HerdbotKitTests/ChatTests.swift`
 
 **Interfaces:**
 - Consumes: Task 1's `HistoryItem`, `HistoryPage`, `HerdbotCLI.history`, `FakeCLI`, and the existing `MenuState`.
@@ -401,7 +401,7 @@ git commit -m "feat(menubar): read a conversation's history through the CLI"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `ui/menubar/Tests/HerdbotKitTests/ChatTests.swift`:
+Create `ui/macos/Tests/HerdbotKitTests/ChatTests.swift`:
 
 ```swift
 import Foundation
@@ -612,7 +612,7 @@ Expected: build FAIL (`ChatState`, `Sidebar`, `Timeline`, `Markdown`, `Avatar` d
 
 - [ ] **Step 3: Implement**
 
-Create `ui/menubar/Sources/HerdbotKit/Sidebar.swift`:
+Create `ui/macos/Sources/HerdbotKit/Sidebar.swift`:
 
 ```swift
 import Foundation
@@ -680,7 +680,7 @@ public enum Sidebar {
 }
 ```
 
-Create `ui/menubar/Sources/HerdbotKit/Timeline.swift`:
+Create `ui/macos/Sources/HerdbotKit/Timeline.swift`:
 
 ```swift
 import Foundation
@@ -774,7 +774,7 @@ public enum Markdown {
 }
 ```
 
-Create `ui/menubar/Sources/HerdbotKit/ChatState.swift`:
+Create `ui/macos/Sources/HerdbotKit/ChatState.swift`:
 
 ```swift
 import Foundation
@@ -898,7 +898,7 @@ Expected: PASS, 45 tests (31 plus 14 new).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Sidebar.swift ui/menubar/Sources/HerdbotKit/Timeline.swift ui/menubar/Sources/HerdbotKit/ChatState.swift ui/menubar/Tests/HerdbotKitTests/ChatTests.swift
+git add ui/macos/Sources/HerdbotKit/Sidebar.swift ui/macos/Sources/HerdbotKit/Timeline.swift ui/macos/Sources/HerdbotKit/ChatState.swift ui/macos/Tests/HerdbotKitTests/ChatTests.swift
 git commit -m "feat(menubar): view-models for the chat sidebar and timeline"
 ```
 
@@ -909,8 +909,8 @@ git commit -m "feat(menubar): view-models for the chat sidebar and timeline"
 No unit tests: this is SwiftUI presentation. The gate is a warning-free build and a bundle; looks and scrolling are checked by a person (the manual check below).
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotMenu/MessageViews.swift`, `SidebarView.swift`, `ChatView.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/App.swift`, `MenuContent.swift`, `ui/menubar/Package.swift`, `ui/menubar/Info.plist`, `ui/menubar/README.md`
+- Create: `ui/macos/Sources/HerdbotMenu/MessageViews.swift`, `SidebarView.swift`, `ChatView.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/App.swift`, `MenuContent.swift`, `ui/macos/Package.swift`, `ui/macos/Info.plist`, `ui/macos/README.md`
 
 **Interfaces:**
 - Consumes: Task 2's view-models.
@@ -923,7 +923,7 @@ Design notes the code encodes (do not change them without asking):
 
 - [ ] **Step 1: Create the three view files**
 
-`ui/menubar/Sources/HerdbotMenu/MessageViews.swift`:
+`ui/macos/Sources/HerdbotMenu/MessageViews.swift`:
 
 ```swift
 import HerdbotKit
@@ -1016,7 +1016,7 @@ struct DaySeparator: View {
 }
 ```
 
-`ui/menubar/Sources/HerdbotMenu/SidebarView.swift`:
+`ui/macos/Sources/HerdbotMenu/SidebarView.swift`:
 
 ```swift
 import HerdbotKit
@@ -1088,7 +1088,7 @@ struct SidebarView: View {
 }
 ```
 
-`ui/menubar/Sources/HerdbotMenu/ChatView.swift`:
+`ui/macos/Sources/HerdbotMenu/ChatView.swift`:
 
 ```swift
 import HerdbotKit
@@ -1240,8 +1240,8 @@ struct ChatWindow: View {
 - [ ] **Step 2: Wire the scene, the menu item and the floor**
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/App.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/App.swift
+--- a/ui/macos/Sources/HerdbotMenu/App.swift
++++ b/ui/macos/Sources/HerdbotMenu/App.swift
 @@ -10,6 +10,7 @@
      private let cli: ProcessCLI?
      private let notifier: Notifier
@@ -1269,8 +1269,8 @@ struct ChatWindow: View {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/MenuContent.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/MenuContent.swift
+--- a/ui/macos/Sources/HerdbotMenu/MenuContent.swift
++++ b/ui/macos/Sources/HerdbotMenu/MenuContent.swift
 @@ -7,6 +7,7 @@
      let cli: ProcessCLI?
      let hotkeyRegistered: Bool
@@ -1293,8 +1293,8 @@ struct ChatWindow: View {
 ```
 
 ```diff
---- a/ui/menubar/Package.swift
-+++ b/ui/menubar/Package.swift
+--- a/ui/macos/Package.swift
++++ b/ui/macos/Package.swift
 @@ -3,7 +3,7 @@
  
  let package = Package(
@@ -1307,8 +1307,8 @@ struct ChatWindow: View {
 ```
 
 ```diff
---- a/ui/menubar/Info.plist
-+++ b/ui/menubar/Info.plist
+--- a/ui/macos/Info.plist
++++ b/ui/macos/Info.plist
 @@ -8,7 +8,7 @@
      <key>CFBundlePackageType</key><string>APPL</string>
      <key>CFBundleShortVersionString</key><string>0.1.0</string>
@@ -1322,12 +1322,12 @@ struct ChatWindow: View {
 
 - [ ] **Step 3: Verify**
 
-Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 300 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
+Run (from `ui/macos`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 300 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
 Expected: `Build complete!` with no Swift errors or warnings, 45 tests pass, `built build/HerdbotMenu.app`. Do not launch it.
 
 - [ ] **Step 4: Docs**
 
-In `ui/menubar/README.md`:
+In `ui/macos/README.md`:
 1. Change "Needs macOS 14+" to "Needs macOS 15+".
 2. In the opening paragraph add: "A chat window (menu: Open herdbot) lists your bots and rooms and shows each conversation."
 3. Append this section at the end:
@@ -1360,7 +1360,7 @@ The Dock icon shows only while the window is open.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/MessageViews.swift ui/menubar/Sources/HerdbotMenu/SidebarView.swift ui/menubar/Sources/HerdbotMenu/ChatView.swift ui/menubar/Sources/HerdbotMenu/App.swift ui/menubar/Sources/HerdbotMenu/MenuContent.swift ui/menubar/Package.swift ui/menubar/Info.plist ui/menubar/README.md
+git add ui/macos/Sources/HerdbotMenu/MessageViews.swift ui/macos/Sources/HerdbotMenu/SidebarView.swift ui/macos/Sources/HerdbotMenu/ChatView.swift ui/macos/Sources/HerdbotMenu/App.swift ui/macos/Sources/HerdbotMenu/MenuContent.swift ui/macos/Package.swift ui/macos/Info.plist ui/macos/README.md
 git commit -m "feat(menubar): chat window with a sidebar of bots and rooms"
 ```
 

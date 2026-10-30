@@ -47,7 +47,7 @@
 **Interfaces:** Add typed state for setup rerun, daemon enable/disable, uninstall, and purge confirmation; reuse existing setup report and install status models.
 
 - [ ] Test action states, command arguments, refresh after success, surfaced errors, and purge path confirmation.
-- [ ] Run Rust and Swift test commands: `cargo test -p herdbot` and `cd ui/menubar && ./scripts/test.sh`.
+- [ ] Run Rust and Swift test commands: `cargo test -p herdbot` and `cd ui/macos && ./scripts/test.sh`.
 - [ ] Connect “Run setup again” to existing SetupView; add separate Disable/Enable and Uninstall actions with confirmation explaining retained bot data.
 - [ ] Repeat both test commands; expect all tests pass.
 - [ ] Manually verify setup rerun, disable/re-enable, uninstall confirmation, and no false success on failure.

@@ -77,6 +77,6 @@ files (~/Bots, .runs, queue, .state/events)     herdr socket
 ## Risks and assumptions
 
 - **Focus** is `agent.focus` on herdr's socket (verified 2026-10-21, protocol 22).
-- **Assumption:** the Swift package lives in `ui/menubar/` and builds with Command Line Tools (`./scripts/build-app.sh`); login-item registration is deferred (add the app in System Settings → Login Items).
+- **Assumption:** the Swift package lives in `ui/macos/` and builds with Command Line Tools (`./scripts/build-app.sh`); login-item registration is deferred (add the app in System Settings → Login Items).
 - **Assumption:** about 1 s polling for `watch` is enough; the event volume is tiny.
 - The README's open question (gpui-kit vs SwiftUI) is answered by this design: SwiftUI for the menu bar and quick-entry, gpui for the phase 3 app. Update the README when phase 0 lands.

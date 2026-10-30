@@ -59,9 +59,9 @@
 - Modify: `crates/herdbot/src/main.rs`
 - Modify: `crates/herdbot-core/src/home.rs` for retry dedupe across queue, inflight, and turns
 - Modify: `crates/herdbot-core/src/rooms.rs` and `crates/herdbot/src/rooms.rs` for additive resolved-mention and idempotency metadata
-- Modify: `ui/menubar/Sources/HerdbotKit/ProcessCLI.swift`
-- Modify: `ui/menubar/Sources/HerdbotKit/ChatState.swift` and `MentionParser.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/ChatView.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/ProcessCLI.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/ChatState.swift` and `MentionParser.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/ChatView.swift`
 - Test: Rust room/collaboration tests and Swift parser, ProcessCLI, and composer tests
 
 **Interfaces:**
@@ -72,7 +72,7 @@
 - [x] Add CLI and state tests for one batch request, stable IDs, per-target outcomes, fan-out to the active target plus unique bot/room targets, and unchanged sidebar selection.
 - [x] Implement keyboard-focusable mention suggestions and selected-target chips without changing the active sidebar selection.
 - [x] Submit using typed user provenance and stable per-target IDs; preserve drafts on partial failure and retry failed targets only. Suppress room text re-parsing and deduplicate room-mode deliveries against directly targeted bots.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`, `./scripts/build-app.sh`, `cargo build`, `cargo test -p herdbot`, and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [x] Run `cd ui/macos && ./scripts/test.sh`, `./scripts/build-app.sh`, `cargo build`, `cargo test -p herdbot`, and `cargo clippy -p herdbot -- -D warnings`; expect pass.
 - [ ] Manually verify active and mentioned targets each receive one message, room routing does not duplicate delivery, and status rows render correctly. Deferred by Shane; automated and disposable-home CLI checks are recorded separately.
 
 **EasyUI design tracking:** Adapted EasyUI's **Accessible & Type-Safe** principle with native, keyboard-focusable SwiftUI controls and accessible labels; the implementation remains source-owned in this app. Suggestion buttons, collaborator chips, per-target failure text, and the colocated **Retry failed** action keep state and feedback with the composer. Spring motion was skipped because this interaction is selection and delivery feedback, where animation would not add information. Runtime visual hierarchy, keyboard traversal, VoiceOver, visible focus, and Reduce Motion remain manual checks.
@@ -80,7 +80,7 @@
 ### Task 3: Documentation and protocol review
 
 **Files:**
-- Modify: `ui/menubar/README.md`
+- Modify: `ui/macos/README.md`
 - Modify: `README.md`
 
 **Interfaces:**
@@ -95,8 +95,8 @@
 
 **Files:**
 - Modify: `crates/herdbot-core/src/history.rs`
-- Modify: `ui/menubar/Sources/HerdbotKit/Models.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/MessageViews.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/Models.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/MessageViews.swift`
 - Test: Rust history tests and Swift model/view-presentation tests
 
 **Constraints:** Reuse the lifecycle disclosure row. Typed `bot_message` items may use their documented sender header to form a concise summary; source-less legacy items remain `unknown` and must never be classified by inspecting their text. Keep history protocol v1 and do not alter memory extraction.
@@ -106,6 +106,6 @@
 - [x] Add tests for a typed bot message summary/detail pair and an unknown legacy prompt that stays neutral even when its text resembles a sender header.
 - [x] Render typed bot messages and unknown legacy prompts as compact centered status rows; show full text only through an accessible disclosure control.
 - [x] Keep delegated lifecycle start/progress/completion rows and their summaries/details unchanged.
-- [x] Run `cargo test -p herdbot-core` (33 unit tests, 2 integration tests) and `cd ui/menubar && ./scripts/test.sh` (156 tests, 17 suites); both pass.
+- [x] Run `cargo test -p herdbot-core` (33 unit tests, 2 integration tests) and `cd ui/macos && ./scripts/test.sh` (156 tests, 17 suites); both pass.
 - [x] Build the app with `./scripts/build-app.sh`; Info.plist validation passes.
 - [x] Record that live visual, keyboard, VoiceOver, focus, and Reduce Motion checks remain deferred.

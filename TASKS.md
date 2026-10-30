@@ -23,4 +23,4 @@ For every UI plan, record the adapted principle or why none applies, review defa
 ## Open tasks
 
 - [ ] Diagnose why the Herdbot MCP `task` tool started Codex Luna sessions when Pi / DeepSeek was requested, then fix and verify harness dispatch. The committed source includes routing/fallback tracking, but the installed helper is still 0.1.2; a Pi request from this session started Codex without a surfaced fallback reason.
-- [ ] Rename `ui/menubar/` to `ui/macos/` and update its package, build, release, and documentation references; keep the app's user-facing name unchanged.
+- [x] Move the desktop Swift package to `ui/macos/` and update tracked package, build, release, and documentation references. The executable target remains `HerdbotMenu`; the user-facing app name remains `Herdbot`. Verified with 156 Swift tests, app build/signature checks, `scripts/test-release.sh` (universal dry run), `cargo build`, 144 Herdbot tests, clippy, and `git diff --check`.

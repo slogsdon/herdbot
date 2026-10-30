@@ -73,7 +73,7 @@ The app's only seam stays the CLI.
 `scripts/release.sh`:
 
 1. Build the universal CLI (`cargo build --release` for both targets, `lipo`).
-2. Build the universal app (`ui/menubar/scripts/build-app.sh`), embed the helper.
+2. Build the universal app (`ui/macos/scripts/build-app.sh`), embed the helper.
 3. Sign inside-out with the Developer ID identity and hardened runtime.
 4. Notarize with `notarytool` (a keychain profile), staple, zip.
 5. `gh release create v<version>` with the zip and its sha256.

@@ -6,7 +6,7 @@
 
 **Architecture:** Spec: `docs/superpowers/specs/2026-10-22-approval-cards-design.md` ("App (SwiftUI)"). Needs plan 1 (`2026-10-22-approval-cards-cli.md`): `cards` in the snapshot and `herdbot card answer <card-id> <option-id>`. All logic is in `HerdbotKit` with Swift Testing; the views render it. One `CardView` switches on `kind`, with a generic fallback for kinds the app does not know.
 
-**Tech Stack:** Swift 6, SwiftUI, Swift Testing (`./scripts/test.sh`). Package `ui/menubar`. No new dependencies.
+**Tech Stack:** Swift 6, SwiftUI, Swift Testing (`./scripts/test.sh`). Package `ui/macos`. No new dependencies.
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - Do not launch the app, script clicks or keystrokes, or kill a process by name. Never run `herdbot service …`, `setup` without `--only`, `uninstall` or `launchctl`.
 - Commits: conventional messages, no AI attribution, explicit `git add` paths, no push.
 
-**Branch/worktree:** from `main` after plan 1 is merged: `git -C ~/Code/herdbot worktree add .worktrees/cards-app -b feature/cards-app main`. Work from `ui/menubar`.
+**Branch/worktree:** from `main` after plan 1 is merged: `git -C ~/Code/herdbot worktree add .worktrees/cards-app -b feature/cards-app main`. Work from `ui/macos`.
 
 ## File map
 
@@ -171,7 +171,7 @@ Run the tests → PASS; run every suite once (`timeout 120` each or the full `./
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Cards.swift ui/menubar/Sources/HerdbotKit/Models.swift ui/menubar/Sources/HerdbotKit/Stream.swift ui/menubar/Sources/HerdbotKit/ProcessCLI.swift ui/menubar/Tests/HerdbotKitTests/CardTests.swift ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift ui/menubar/Tests/HerdbotKitTests/Fixtures.swift
+git add ui/macos/Sources/HerdbotKit/Cards.swift ui/macos/Sources/HerdbotKit/Models.swift ui/macos/Sources/HerdbotKit/Stream.swift ui/macos/Sources/HerdbotKit/ProcessCLI.swift ui/macos/Tests/HerdbotKitTests/CardTests.swift ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift ui/macos/Tests/HerdbotKitTests/Fixtures.swift
 git commit -m "feat(menubar): decode cards and answer them through the CLI"
 ```
 
@@ -256,7 +256,7 @@ Run → FAIL.
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Cards.swift ui/menubar/Sources/HerdbotKit/MenuState.swift ui/menubar/Sources/HerdbotKit/ChatState.swift ui/menubar/Tests/HerdbotKitTests/CardTests.swift ui/menubar/Tests/HerdbotKitTests/StateTests.swift
+git add ui/macos/Sources/HerdbotKit/Cards.swift ui/macos/Sources/HerdbotKit/MenuState.swift ui/macos/Sources/HerdbotKit/ChatState.swift ui/macos/Tests/HerdbotKitTests/CardTests.swift ui/macos/Tests/HerdbotKitTests/StateTests.swift
 git commit -m "feat(menubar): card answer state, per-bot cards and notify-once"
 ```
 
@@ -353,7 +353,7 @@ No button is a default action (`.keyboardShortcut(.defaultAction)` must not appe
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/CardViews.swift ui/menubar/Sources/HerdbotMenu/ChatView.swift ui/menubar/Sources/HerdbotMenu/MenuContent.swift ui/menubar/Sources/HerdbotMenu/Notifier.swift ui/menubar/Sources/HerdbotMenu/App.swift ui/menubar/Sources/HerdbotMenu/SetupView.swift
+git add ui/macos/Sources/HerdbotMenu/CardViews.swift ui/macos/Sources/HerdbotMenu/ChatView.swift ui/macos/Sources/HerdbotMenu/MenuContent.swift ui/macos/Sources/HerdbotMenu/Notifier.swift ui/macos/Sources/HerdbotMenu/App.swift ui/macos/Sources/HerdbotMenu/SetupView.swift
 git commit -m "feat(menubar): approval cards in the chat, menu and notifications"
 ```
 
@@ -361,14 +361,14 @@ git commit -m "feat(menubar): approval cards in the chat, menu and notifications
 
 ### Task 4: Docs and the manual check
 
-**Files:** Modify `ui/menubar/README.md`.
+**Files:** Modify `ui/macos/README.md`.
 
 - [ ] **Step 1:** Add a **Cards** section: pending prompts (v1: claude's folder-trust dialog) appear in the bot's chat as a card showing the dialog's real text and one button per choice; clicking runs `herdbot card answer`; nothing is answered automatically and no button is the default; "Jump to pane" is always there; a notification and the menu's "Waiting on you" list announce a new card; unknown card kinds show their title, text and Jump to pane.
 - [ ] **Step 2:** Add a **Manual check (for Shane, not the agent)**: with the new herdbot installed and a bot whose directory has no trusted parent (for example `herdbot new demo --class plan --cwd /Users/Shared/carddemo`), send it a message from the chat; expect the bot's conversation to show an "Trust this folder?" card with the dialog text, a notification, and the card persisting until you click; click "Yes, I trust this folder" and expect the card to disappear and the message to be delivered; repeat with "No, exit" and expect the card to come back on the next message. Remove the demo bot afterwards.
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add ui/menubar/README.md
+git add ui/macos/README.md
 git commit -m "docs(menubar): approval cards"
 ```
 

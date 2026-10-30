@@ -43,13 +43,13 @@
 
 ### Task 2: Settings session picker
 
-**Files:** Modify settings models/state and Settings view under `ui/menubar/Sources/HerdbotKit/` and `ui/menubar/Sources/HerdbotMenu/`; tests in `ui/menubar/Tests/HerdbotKitTests/`.
+**Files:** Modify settings models/state and Settings view under `ui/macos/Sources/HerdbotKit/` and `ui/macos/Sources/HerdbotMenu/`; tests in `ui/macos/Tests/HerdbotKitTests/`.
 
 **Interfaces:** The picker consumes the session choices from Task 1 metadata and saves the selected value through the existing `SettingsCLI` interface.
 
 - [ ] Test default selection, available-session choices, unavailable-list failure, save failure, and retained selection.
-- [ ] Run `cd ui/menubar && ./scripts/test.sh`; confirm failures before implementation.
+- [ ] Run `cd ui/macos && ./scripts/test.sh`; confirm failures before implementation.
 - [ ] Render the session selector only when the CLI reports named-session support; explain that changing the setting does not move existing workspaces and state the apply/restart behavior.
-- [ ] Run `cd ui/menubar && ./scripts/test.sh`; expect all tests pass.
+- [ ] Run `cd ui/macos && ./scripts/test.sh`; expect all tests pass.
 - [ ] Manually verify selection, saved value, and displayed apply timing.
 - [ ] Report branch, diff, checks, and live evidence; do not commit.

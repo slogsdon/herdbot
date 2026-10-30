@@ -4,7 +4,7 @@
 
 **Goal:** One command, `scripts/release.sh`, builds a universal `Herdbot.app` (Swift app plus the Rust CLI at `Contents/Helpers/herdbot`), signs it inside-out, optionally notarizes and staples it, zips it, and prepares a GitHub release and a Homebrew cask.
 
-**Architecture:** Spec: `docs/superpowers/specs/2026-10-22-packaging-design.md` ("Artifact", "Release and distribution"). `ui/menubar/scripts/build-app.sh` learns to assemble a bundle from environment inputs (arch list, helper binary, signing identity, version); `scripts/release.sh` drives the Rust and Swift builds around it, then signs, notarizes, zips and publishes. The cask template lives in `packaging/herdbot.rb.tmpl` and is rendered with the version and sha256.
+**Architecture:** Spec: `docs/superpowers/specs/2026-10-22-packaging-design.md` ("Artifact", "Release and distribution"). `ui/macos/scripts/build-app.sh` learns to assemble a bundle from environment inputs (arch list, helper binary, signing identity, version); `scripts/release.sh` drives the Rust and Swift builds around it, then signs, notarizes, zips and publishes. The cask template lives in `packaging/herdbot.rb.tmpl` and is rendered with the version and sha256.
 
 **Tech Stack:** bash, `cargo`, `swift build --triple`, `lipo`, `codesign`, `xcrun notarytool`/`stapler`, `ditto`, `gh`, Homebrew cask DSL.
 
@@ -31,7 +31,7 @@
 
 ## File map
 
-- Modify `ui/menubar/scripts/build-app.sh`, `ui/menubar/Info.plist`, `ui/menubar/README.md`.
+- Modify `ui/macos/scripts/build-app.sh`, `ui/macos/Info.plist`, `ui/macos/README.md`.
 - Create `scripts/release.sh`, `packaging/herdbot.rb.tmpl`, `scripts/test-release.sh`.
 - Modify `.gitignore` (add `dist/`), `README.md`.
 
@@ -39,7 +39,7 @@
 
 ### Task 1: `build-app.sh` assembles the bundle from inputs
 
-**Files:** Modify `ui/menubar/scripts/build-app.sh`, `ui/menubar/Info.plist`.
+**Files:** Modify `ui/macos/scripts/build-app.sh`, `ui/macos/Info.plist`.
 
 **Interfaces:**
 - Consumes (environment, all optional): `ARCHS` (default: the host arch only, e.g. `arm64`; space-separated, e.g. `"arm64 x86_64"`), `HERDBOT_HELPER` (path to a `herdbot` binary to embed), `SIGN_IDENTITY` (default `-` = ad-hoc), `APP_VERSION` (default: read from the repo's `Cargo.toml`), `OUT_DIR` (default `build`).
@@ -100,14 +100,14 @@ codesign --verify --deep --strict "$app"
 echo "built $app ($(lipo -archs "$app/Contents/MacOS/HerdbotMenu"), version $APP_VERSION)"
 ```
 
-- [ ] **Step 3: Verify.** From `ui/menubar`: `./scripts/build-app.sh` (host arch, no helper) then `plutil -extract CFBundleShortVersionString raw build/Herdbot.app/Contents/Info.plist` equals the `Cargo.toml` version, `codesign --verify --deep --strict build/Herdbot.app`, and `lipo -archs build/Herdbot.app/Contents/MacOS/HerdbotMenu` prints `arm64`. Then `ARCHS="arm64 x86_64" HERDBOT_HELPER=$(command -v true) OUT_DIR=/tmp/…/out ./scripts/build-app.sh` (use a scratch dir) and assert `lipo -archs` prints both architectures and `test -x …/Contents/Helpers/herdbot`. (`true` is a stand-in; the real helper is built in Task 2.) The x86_64 Swift cross-build was confirmed to work under Command Line Tools on this machine.
+- [ ] **Step 3: Verify.** From `ui/macos`: `./scripts/build-app.sh` (host arch, no helper) then `plutil -extract CFBundleShortVersionString raw build/Herdbot.app/Contents/Info.plist` equals the `Cargo.toml` version, `codesign --verify --deep --strict build/Herdbot.app`, and `lipo -archs build/Herdbot.app/Contents/MacOS/HerdbotMenu` prints `arm64`. Then `ARCHS="arm64 x86_64" HERDBOT_HELPER=$(command -v true) OUT_DIR=/tmp/…/out ./scripts/build-app.sh` (use a scratch dir) and assert `lipo -archs` prints both architectures and `test -x …/Contents/Helpers/herdbot`. (`true` is a stand-in; the real helper is built in Task 2.) The x86_64 Swift cross-build was confirmed to work under Command Line Tools on this machine.
 
-- [ ] **Step 4: Update references** to `build/HerdbotMenu.app` in `ui/menubar/README.md` (lines 12, 13, 27, 61, 95) to `build/Herdbot.app`; the inner executable path stays `Contents/MacOS/HerdbotMenu`.
+- [ ] **Step 4: Update references** to `build/HerdbotMenu.app` in `ui/macos/README.md` (lines 12, 13, 27, 61, 95) to `build/Herdbot.app`; the inner executable path stays `Contents/MacOS/HerdbotMenu`.
 
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add ui/menubar/scripts/build-app.sh ui/menubar/Info.plist ui/menubar/README.md
+git add ui/macos/scripts/build-app.sh ui/macos/Info.plist ui/macos/README.md
 git commit -m "build(menubar): assemble a universal Herdbot.app with the bundled CLI"
 ```
 
@@ -118,7 +118,7 @@ git commit -m "build(menubar): assemble a universal Herdbot.app with the bundled
 **Files:** Create `scripts/release.sh`, `scripts/test-release.sh`; modify `.gitignore`.
 
 **Interfaces:**
-- Consumes: `ui/menubar/scripts/build-app.sh` (Task 1); environment `SIGN_IDENTITY`, `NOTARY_PROFILE`, `ARCHS` (default `arm64 x86_64`), `TAP_DIR` (optional path to a checkout of the tap repo).
+- Consumes: `ui/macos/scripts/build-app.sh` (Task 1); environment `SIGN_IDENTITY`, `NOTARY_PROFILE`, `ARCHS` (default `arm64 x86_64`), `TAP_DIR` (optional path to a checkout of the tap repo).
 - Produces: `dist/Herdbot-<version>.zip`, `dist/Herdbot-<version>.zip.sha256`, `dist/herdbot.rb` (rendered cask), and with no `--dry-run` a GitHub release `v<version>`.
 
 - [ ] **Step 1: Write `scripts/release.sh`.**
@@ -184,7 +184,7 @@ if [ "${#slices[@]}" -eq 1 ]; then cp "${slices[0]}" "$dist/helper/herdbot"; els
 
 # 2. The app with the helper inside, signed inside-out.
 ARCHS="$ARCHS" HERDBOT_HELPER="$dist/helper/herdbot" SIGN_IDENTITY="$SIGN_IDENTITY" \
-  APP_VERSION="$version" OUT_DIR="$dist" "$repo/ui/menubar/scripts/build-app.sh"
+  APP_VERSION="$version" OUT_DIR="$dist" "$repo/ui/macos/scripts/build-app.sh"
 app="$dist/Herdbot.app"
 zip="$dist/Herdbot-$version.zip"
 
@@ -264,7 +264,7 @@ git commit -m "build: release script for the universal signed app and cask"
 
 ### Task 3: The cask template and docs
 
-**Files:** Create `packaging/herdbot.rb.tmpl`; modify `README.md`, `ui/menubar/README.md`.
+**Files:** Create `packaging/herdbot.rb.tmpl`; modify `README.md`, `ui/macos/README.md`.
 
 - [ ] **Step 1: `packaging/herdbot.rb.tmpl`.**
 
@@ -295,14 +295,14 @@ end
 
 The bots, memory and rooms under `~/Bots` are deliberately not in `zap`; `herdbot uninstall --purge` is the way to delete them.
 
-- [ ] **Step 2: README.** In the top-level `README.md`, add an **Install** section before "Quick start": `brew install --cask slogsdon/tap/herdbot` (after the tap exists), then open Herdbot (menu bar) and use its setup window, or run `herdbot setup` in a terminal; the zip from GitHub Releases works the same way (drag to Applications, open it, press "Set up everything"). Keep "From source" as the existing `cargo install` path. Add a **Releasing** section for the author: the prerequisites above, the exact command, `--dry-run`/`--no-notarize`, and that `scripts/test-release.sh` is the smoke test. In `ui/menubar/README.md` replace the build instructions with the env-driven `build-app.sh` description (`ARCHS`, `HERDBOT_HELPER`, `SIGN_IDENTITY`, `APP_VERSION`, `OUT_DIR`).
+- [ ] **Step 2: README.** In the top-level `README.md`, add an **Install** section before "Quick start": `brew install --cask slogsdon/tap/herdbot` (after the tap exists), then open Herdbot (menu bar) and use its setup window, or run `herdbot setup` in a terminal; the zip from GitHub Releases works the same way (drag to Applications, open it, press "Set up everything"). Keep "From source" as the existing `cargo install` path. Add a **Releasing** section for the author: the prerequisites above, the exact command, `--dry-run`/`--no-notarize`, and that `scripts/test-release.sh` is the smoke test. In `ui/macos/README.md` replace the build instructions with the env-driven `build-app.sh` description (`ARCHS`, `HERDBOT_HELPER`, `SIGN_IDENTITY`, `APP_VERSION`, `OUT_DIR`).
 
 - [ ] **Step 3: Verify.** Render the template as the script does with dummy values and check Ruby syntax: `sed -e 's/@VERSION@/0.0.0/' -e 's/@SHA256@/0/' packaging/herdbot.rb.tmpl > $TMP/herdbot.rb && ruby -c $TMP/herdbot.rb` prints `Syntax OK`. If `brew` is installed, `brew style --cask $TMP/herdbot.rb` is a bonus; do not run `brew install`.
 
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add packaging/herdbot.rb.tmpl README.md ui/menubar/README.md
+git add packaging/herdbot.rb.tmpl README.md ui/macos/README.md
 git commit -m "docs: install and release instructions, and the cask template"
 ```
 

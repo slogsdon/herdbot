@@ -4,7 +4,7 @@
 
 **Goal:** A SwiftUI menu bar app that shows herdbot's state (bots, running subagents, cooling harnesses, blocked agents), posts a notification when an agent becomes blocked, and focuses that agent's herdr pane when you click it.
 
-**Architecture:** A SwiftPM package at `ui/menubar/` with a UI-free library `HerdbotKit` (JSON models, a parser, a `HerdbotCLI` protocol with a `Process`-based implementation, and an `@Observable` `MenuState`) and a thin executable `HerdbotMenu` (menu bar scene, notifier). The app only talks to the `herdbot` CLI from phase 0: it follows `herdbot watch --json` and runs `herdbot focus <agent>`. A script wraps the executable in an ad-hoc-signed `.app` bundle, because notifications need a bundle id.
+**Architecture:** A SwiftPM package at `ui/macos/` with a UI-free library `HerdbotKit` (JSON models, a parser, a `HerdbotCLI` protocol with a `Process`-based implementation, and an `@Observable` `MenuState`) and a thin executable `HerdbotMenu` (menu bar scene, notifier). The app only talks to the `herdbot` CLI from phase 0: it follows `herdbot watch --json` and runs `herdbot focus <agent>`. A script wraps the executable in an ad-hoc-signed `.app` bundle, because notifications need a bundle id.
 
 **Tech Stack:** Swift 6.4 (Command Line Tools is enough; full Xcode is not installed), SwiftUI `MenuBarExtra`, Observation, UserNotifications, Swift Testing, macOS 14+.
 
@@ -14,7 +14,7 @@ Spec: `docs/superpowers/specs/2026-10-21-ui-layer-design.md` (phase 1). Phase 0 
 
 - The app never reads herdbot's files and never links Rust. Its only inputs are `herdbot watch --json` lines and its only action is `herdbot focus <agent>`.
 - Every line carries `"v"`; the app supports `v == 1` (`supportedVersion`) and shows "update herdbot" for anything else.
-- `swift build`, `./scripts/test.sh` and `./scripts/build-app.sh` pass at the end of every task that touches the package (run from `ui/menubar/`).
+- `swift build`, `./scripts/test.sh` and `./scripts/build-app.sh` pass at the end of every task that touches the package (run from `ui/macos/`).
 - Do not use `@State`, `@StateObject` or other SwiftUI macros that need a plugin missing from Command Line Tools: `@State` is a macro in this SDK and fails with "plugin for module 'SwiftUIMacros' not found". `@Observable` and `@MainActor` are fine.
 - `swift test` needs the Testing macro plugin path on Command Line Tools installs; always run tests through `./scripts/test.sh`.
 - Commits: conventional prefix, explicit paths (never `git add -A` / `.`), no AI attribution, no push.
@@ -28,7 +28,7 @@ Spec: `docs/superpowers/specs/2026-10-21-ui-layer-design.md` (phase 1). Phase 0 
 
 ## File Structure
 
-All new, under `ui/menubar/`:
+All new, under `ui/macos/`:
 
 - `Package.swift`, `.gitignore`, `Info.plist`
 - `scripts/test.sh`, `scripts/build-app.sh`
@@ -38,16 +38,16 @@ All new, under `ui/menubar/`:
 - `Sources/HerdbotKit/MenuState.swift` — `IconState`, `NotificationTracker`, `MenuState`
 - `Sources/HerdbotMenu/{App,MenuIcon,MenuContent,Notifier}.swift` — the app
 - `Tests/HerdbotKitTests/{Fixtures,DecodingTests,ProcessCLITests,StateTests}.swift`
-- Modified: `README.md`, the spec, `docs/superpowers/plans/README.md`; new `ui/menubar/README.md`
+- Modified: `README.md`, the spec, `docs/superpowers/plans/README.md`; new `ui/macos/README.md`
 
-Work in a worktree: `git -C ~/Code/herdbot worktree add .worktrees/ui-menubar -b feature/ui-menubar feature/ui-layer`. Every command below runs from `<worktree>/ui/menubar` unless stated.
+Work in a worktree: `git -C ~/Code/herdbot worktree add .worktrees/ui-menubar -b feature/ui-menubar feature/ui-layer`. Every command below runs from `<worktree>/ui/macos` unless stated.
 
 ---
 
 ### Task 1: Package, models and the stream parser
 
 **Files:**
-- Create: `ui/menubar/Package.swift`, `ui/menubar/.gitignore`, `ui/menubar/scripts/test.sh`
+- Create: `ui/macos/Package.swift`, `ui/macos/.gitignore`, `ui/macos/scripts/test.sh`
 - Create: `Sources/HerdbotKit/Models.swift`, `Sources/HerdbotKit/Stream.swift`
 - Create: `Tests/HerdbotKitTests/Fixtures.swift`, `Tests/HerdbotKitTests/DecodingTests.swift`
 
@@ -56,7 +56,7 @@ Work in a worktree: `git -C ~/Code/herdbot worktree add .worktrees/ui-menubar -b
 
 - [ ] **Step 1: Scaffold the package (library and test targets only)**
 
-`ui/menubar/Package.swift`:
+`ui/macos/Package.swift`:
 
 ```swift
 // swift-tools-version:6.0
@@ -72,7 +72,7 @@ let package = Package(
 )
 ```
 
-`ui/menubar/.gitignore`:
+`ui/macos/.gitignore`:
 
 ```
 .build/
@@ -295,7 +295,7 @@ Expected: `Test run with 4 tests … passed`. (If `swift test` cannot find the `
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ui/menubar/Package.swift ui/menubar/.gitignore ui/menubar/scripts/test.sh ui/menubar/Sources ui/menubar/Tests
+git add ui/macos/Package.swift ui/macos/.gitignore ui/macos/scripts/test.sh ui/macos/Sources ui/macos/Tests
 git commit -m "feat: add HerdbotKit models and stream parser for the menu bar app"
 ```
 
@@ -477,7 +477,7 @@ Expected: `realBinaryStreamsASnapshotFirst() passed` — the Swift decoder reads
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/ProcessCLI.swift ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift
+git add ui/macos/Sources/HerdbotKit/ProcessCLI.swift ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift
 git commit -m "feat: add ProcessCLI to drive herdbot watch and focus"
 ```
 
@@ -651,7 +651,7 @@ Expected: `Test run with 14 tests … passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/MenuState.swift ui/menubar/Tests/HerdbotKitTests/StateTests.swift
+git add ui/macos/Sources/HerdbotKit/MenuState.swift ui/macos/Tests/HerdbotKitTests/StateTests.swift
 git commit -m "feat: add MenuState and blocked-agent notification tracking"
 ```
 
@@ -660,7 +660,7 @@ git commit -m "feat: add MenuState and blocked-agent notification tracking"
 ### Task 4: The app and the bundle script
 
 **Files:**
-- Modify: `ui/menubar/Package.swift` (add the executable target)
+- Modify: `ui/macos/Package.swift` (add the executable target)
 - Create: `Sources/HerdbotMenu/{App,MenuIcon,MenuContent,Notifier}.swift`, `Info.plist`, `scripts/build-app.sh`
 
 **Interfaces:**
@@ -669,7 +669,7 @@ git commit -m "feat: add MenuState and blocked-agent notification tracking"
 
 - [ ] **Step 1: Add the app target**
 
-Replace `ui/menubar/Package.swift` with:
+Replace `ui/macos/Package.swift` with:
 
 ```swift
 // swift-tools-version:6.0
@@ -926,7 +926,7 @@ Expected: `Identifier=dev.herdbot.menu`, `Signature=adhoc`, and `true`. Do not l
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Package.swift ui/menubar/Sources/HerdbotMenu ui/menubar/Info.plist ui/menubar/scripts/build-app.sh
+git add ui/macos/Package.swift ui/macos/Sources/HerdbotMenu ui/macos/Info.plist ui/macos/scripts/build-app.sh
 git commit -m "feat: add the SwiftUI menu bar app and app bundle script"
 ```
 
@@ -935,10 +935,10 @@ git commit -m "feat: add the SwiftUI menu bar app and app bundle script"
 ### Task 5: Docs and the manual checklist
 
 **Files:**
-- Create: `ui/menubar/README.md`
+- Create: `ui/macos/README.md`
 - Modify: `README.md`, `docs/superpowers/specs/2026-10-21-ui-layer-design.md`, `docs/superpowers/plans/README.md`
 
-- [ ] **Step 1: Write `ui/menubar/README.md`**
+- [ ] **Step 1: Write `ui/macos/README.md`**
 
 ````markdown
 # herdbot menu bar
@@ -981,17 +981,17 @@ Icon: `○` idle, `●` subagents running, `⚠ N` agents blocked, `⊘` daemon 
 
 - [ ] **Step 2: Update the other docs**
 
-- `README.md`: in "Status", change "Not built yet: … and the desktop UI" to say the menu bar app exists in `ui/menubar` (built separately with Swift; see its README) and the full desktop app is not built. In the roadmap's UI bullet, add one sentence pointing to `ui/menubar/README.md`.
-- Spec: in Phase 1, replace "Polls `status --json` about every 2 s and tails `watch --json` for blocked events." with "Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff." In "Risks and assumptions", replace the Swift-layout assumption with "The Swift package lives in `ui/menubar/` and builds with Command Line Tools (`./scripts/build-app.sh`); login-item registration is deferred (add the app in System Settings → Login Items)."
-- `docs/superpowers/plans/README.md`: add a row for this plan after the phase 0 row: `| [Desktop UI, phase 1: menu bar app](2026-10-21-menubar-app.md) | done (committed on feature/ui-menubar), 2026-10-21 | new \`ui/menubar\` Swift package, README | ` (use the same format as the other rows; write "done" only after the commit below exists, as in earlier plans).
+- `README.md`: in "Status", change "Not built yet: … and the desktop UI" to say the menu bar app exists in `ui/macos` (built separately with Swift; see its README) and the full desktop app is not built. In the roadmap's UI bullet, add one sentence pointing to `ui/macos/README.md`.
+- Spec: in Phase 1, replace "Polls `status --json` about every 2 s and tails `watch --json` for blocked events." with "Follows `watch --json` only (its first line is a snapshot and it repeats on every change), reconnecting with a capped backoff." In "Risks and assumptions", replace the Swift-layout assumption with "The Swift package lives in `ui/macos/` and builds with Command Line Tools (`./scripts/build-app.sh`); login-item registration is deferred (add the app in System Settings → Login Items)."
+- `docs/superpowers/plans/README.md`: add a row for this plan after the phase 0 row: `| [Desktop UI, phase 1: menu bar app](2026-10-21-menubar-app.md) | done (committed on feature/ui-menubar), 2026-10-21 | new \`ui/macos\` Swift package, README | ` (use the same format as the other rows; write "done" only after the commit below exists, as in earlier plans).
 
 - [ ] **Step 3: Final checks and commit**
 
-Run from `ui/menubar`: `swift build 2>&1 | grep -E "error|Build complete"; ./scripts/test.sh 2>&1 | grep -E "error|Test run"; ./scripts/build-app.sh | tail -1`
+Run from `ui/macos`: `swift build 2>&1 | grep -E "error|Build complete"; ./scripts/test.sh 2>&1 | grep -E "error|Test run"; ./scripts/build-app.sh | tail -1`
 Run from the repo root: `cargo build && cargo test --workspace 2>&1 | grep "test result" | head -3` (the Rust side is untouched; expect 57 / 14 / 1 / 2 passed).
 
 ```bash
-git add ui/menubar/README.md README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md docs/superpowers/plans/README.md
+git add ui/macos/README.md README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md docs/superpowers/plans/README.md
 git commit -m "docs: document the menu bar app and its manual check"
 ```
 

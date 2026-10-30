@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-10-21-ui-layer-design.md` (Phase 2). Builds o
 - Shane approved committing each task below: explicit paths only (never `git add -A` or `git add .`), the conventional message given, **no AI or tool attribution**, no push, no merge.
 - Never run `cargo install`, never restart the daemon, never launch the menu bar app (a running instance of it belongs to Shane; do not kill it).
 - Swift: 4-space indent, no `@State` (a macro whose plugin is missing under Command Line Tools), zero Swift compiler warnings (linker `search path ... not found` warnings are an environment quirk and fine).
-- Test with `./scripts/test.sh` from `ui/menubar`, never bare `swift test`.
+- Test with `./scripts/test.sh` from `ui/macos`, never bare `swift test`.
 - Layout, from Shane: large message field (full width), a "To" dropdown below it aligned right in the same style, no Cancel/Send buttons, a success/error overlay covering the whole panel, 8 pt padding, a line-art gear icon for settings, a hairline border. Use only system semantic colours and materials.
 - Baseline before this plan: Swift 25 tests pass. Rust untouched.
 - Keep your ledger in `.superpowers/sdd/ui-quickentry/progress.md` (untracked; do not commit it).
@@ -28,18 +28,18 @@ All code below was compiled, its tests run, and the panel rendered and screensho
 ### Task 1: state for the result overlay
 
 **Files:**
-- Modify: `ui/menubar/Sources/HerdbotKit/QuickEntry.swift`, `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/QuickEntry.swift`, `ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift`
 
 **Interfaces:**
 - Produces: `QuickEntryState.recipientLabel: String?` (the current recipient as shown, e.g. `Alpha` or `Crew (room)`) and `QuickEntryState.dismissFailure()` (clears a `.failed` status only; the text is kept).
 
 - [ ] **Step 1: Write the failing tests**
 
-Apply to `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift` (the new tests go before `resetStartsAFreshMessage`):
+Apply to `ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift` (the new tests go before `resetStartsAFreshMessage`):
 
 ```diff
---- a/ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift
-+++ b/ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift
+--- a/ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift
++++ b/ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift
 @@ -82,6 +82,29 @@
          #expect(await state.send(using: FakeCLI()))
      }
@@ -74,14 +74,14 @@ Apply to `ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift` (the new tests
 
 - [ ] **Step 2: Run to see it fail**
 
-Run (from `ui/menubar`): `./scripts/test.sh`
+Run (from `ui/macos`): `./scripts/test.sh`
 Expected: build FAIL (`recipientLabel`, `dismissFailure` do not exist).
 
 - [ ] **Step 3: Implement**
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
-+++ b/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
+--- a/ui/macos/Sources/HerdbotKit/QuickEntry.swift
++++ b/ui/macos/Sources/HerdbotKit/QuickEntry.swift
 @@ -68,6 +68,11 @@
              ?? options.first?.recipient
      }
@@ -116,7 +116,7 @@ Expected: PASS, 27 tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/QuickEntry.swift ui/menubar/Tests/HerdbotKitTests/QuickEntryTests.swift
+git add ui/macos/Sources/HerdbotKit/QuickEntry.swift ui/macos/Tests/HerdbotKitTests/QuickEntryTests.swift
 git commit -m "feat(menubar): label the recipient and dismiss a failed send"
 ```
 
@@ -127,7 +127,7 @@ git commit -m "feat(menubar): label the recipient and dismiss a failed send"
 No unit tests: this is AppKit/SwiftUI presentation. The gate is a warning-free build; looks and accessibility behaviour are checked by a person (Task 3's checklist).
 
 **Files:**
-- Modify: `ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift`, `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`, `ui/menubar/Sources/HerdbotMenu/App.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/QuickEntryView.swift`, `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`, `ui/macos/Sources/HerdbotMenu/App.swift`
 
 **Interfaces:**
 - Consumes: `QuickEntryState.recipientLabel`, `dismissFailure()` from Task 1.
@@ -141,7 +141,7 @@ Design notes the code encodes (do not change without asking):
 - Failure overlay: dismissed by a click or by typing (`onChange` of the text); there is no auto-dismiss. Success overlay: 0.6 s, then the panel closes.
 - The panel top edge stays fixed as the field grows (`resize(toHeight:)`), placed in the upper third of the screen with the pointer.
 
-- [ ] **Step 1: Replace `ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift`**
+- [ ] **Step 1: Replace `ui/macos/Sources/HerdbotMenu/QuickEntryView.swift`**
 
 ```swift
 import AppKit
@@ -291,7 +291,7 @@ struct QuickEntryView: View {
 }
 ```
 
-- [ ] **Step 2: Replace `ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift`**
+- [ ] **Step 2: Replace `ui/macos/Sources/HerdbotMenu/QuickEntryController.swift`**
 
 ```swift
 import AppKit
@@ -427,11 +427,11 @@ final class QuickEntryController {
 }
 ```
 
-- [ ] **Step 3: Pass the hotkey label in `ui/menubar/Sources/HerdbotMenu/App.swift`**
+- [ ] **Step 3: Pass the hotkey label in `ui/macos/Sources/HerdbotMenu/App.swift`**
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/App.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/App.swift
+--- a/ui/macos/Sources/HerdbotMenu/App.swift
++++ b/ui/macos/Sources/HerdbotMenu/App.swift
 @@ -22,7 +22,7 @@
          } else {
              state.fail(CLIError.notFound.localizedDescription)
@@ -445,13 +445,13 @@ final class QuickEntryController {
 
 - [ ] **Step 4: Verify**
 
-Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `./scripts/test.sh`, `./scripts/build-app.sh`
+Run (from `ui/macos`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `./scripts/test.sh`, `./scripts/build-app.sh`
 Expected: `Build complete!` with no Swift errors or warnings, 27 tests pass, `built build/HerdbotMenu.app`. Do not launch it.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/QuickEntryView.swift ui/menubar/Sources/HerdbotMenu/QuickEntryController.swift ui/menubar/Sources/HerdbotMenu/App.swift
+git add ui/macos/Sources/HerdbotMenu/QuickEntryView.swift ui/macos/Sources/HerdbotMenu/QuickEntryController.swift ui/macos/Sources/HerdbotMenu/App.swift
 git commit -m "feat(menubar): restyle quick entry like Spotlight, on the system material"
 ```
 
@@ -460,9 +460,9 @@ git commit -m "feat(menubar): restyle quick entry like Spotlight, on the system 
 ### Task 3: docs and the manual check
 
 **Files:**
-- Modify: `ui/menubar/README.md`, `docs/superpowers/specs/2026-10-21-ui-layer-design.md`
+- Modify: `ui/macos/README.md`, `docs/superpowers/specs/2026-10-21-ui-layer-design.md`
 
-- [ ] **Step 1: `ui/menubar/README.md`**
+- [ ] **Step 1: `ui/macos/README.md`**
 
 Replace everything from the `## Quick entry` heading to the end of the file with:
 
@@ -523,10 +523,10 @@ In `docs/superpowers/specs/2026-10-21-ui-layer-design.md`, replace the first two
 
 - [ ] **Step 3: Verify and commit**
 
-Run: `git diff --stat` (only these two files), `cd ui/menubar && ./scripts/test.sh`.
+Run: `git diff --stat` (only these two files), `cd ui/macos && ./scripts/test.sh`.
 
 ```bash
-git add ui/menubar/README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md
+git add ui/macos/README.md docs/superpowers/specs/2026-10-21-ui-layer-design.md
 git commit -m "docs: document the quick-entry redesign and its manual check"
 ```
 

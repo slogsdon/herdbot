@@ -4,7 +4,7 @@
 
 **Goal:** The setup window explains itself: "Set up everything" is enabled only when something can be fixed, shows progress while it runs and a result afterwards, and checks that have no automatic fix say what the user must do.
 
-**Architecture:** All logic goes in `HerdbotKit` (`SetupState`, a pure `hint(for:)`), covered by Swift Testing; `SetupView` only renders it. Package: `ui/menubar`.
+**Architecture:** All logic goes in `HerdbotKit` (`SetupState`, a pure `hint(for:)`), covered by Swift Testing; `SetupView` only renders it. Package: `ui/macos`.
 
 **Tech Stack:** Swift 6, SwiftUI, Swift Testing (`./scripts/test.sh`). No new dependencies.
 
@@ -22,7 +22,7 @@
 - Do not launch the app or script clicks; never kill a process by name.
 - Commits: conventional messages, no AI attribution, explicit `git add` paths, no push.
 
-**Branch/worktree:** `git -C ~/Code/herdbot worktree add .worktrees/setup-feedback -b fix/setup-feedback main` (after `fix/gui-path` is merged, so the app and CLI agree). Work from `ui/menubar`.
+**Branch/worktree:** `git -C ~/Code/herdbot worktree add .worktrees/setup-feedback -b fix/setup-feedback main` (after `fix/gui-path` is merged, so the app and CLI agree). Work from `ui/macos`.
 
 ## File map
 
@@ -152,7 +152,7 @@ Check the current `fixAll` in the file first and keep any behaviour it has that 
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Doctor.swift ui/menubar/Sources/HerdbotKit/SetupState.swift ui/menubar/Tests/HerdbotKitTests/Fixtures.swift ui/menubar/Tests/HerdbotKitTests/SetupTests.swift
+git add ui/macos/Sources/HerdbotKit/Doctor.swift ui/macos/Sources/HerdbotKit/SetupState.swift ui/macos/Tests/HerdbotKitTests/Fixtures.swift ui/macos/Tests/HerdbotKitTests/SetupTests.swift
 git commit -m "feat(menubar): setup result, fixable state and hints"
 ```
 
@@ -171,7 +171,7 @@ git commit -m "feat(menubar): setup result, fixable state and hints"
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/SetupView.swift
+git add ui/macos/Sources/HerdbotMenu/SetupView.swift
 git commit -m "fix(menubar): show progress, result and hints in the setup window"
 ```
 

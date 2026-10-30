@@ -15,7 +15,7 @@
 - Depends on `2026-10-22-settings-config.md` and its published version-1 JSON contract. Herdr session controls are deferred until the named-session spike and session-setting plan produce their contract.
 - No direct TOML parsing or filesystem edits in Swift.
 - Per-bot settings included; routing table excluded; herdr session defaults to `default` and named choices depend on the session spike.
-- Test with `cd ui/menubar && ./scripts/test.sh`.
+- Test with `cd ui/macos && ./scripts/test.sh`.
 - Implement in a dedicated worktree from `feature/roadmap`; do not commit, push, or merge. Report branch, diff, checks, and manual results.
 
 ## Review Focus
@@ -29,25 +29,25 @@
 
 ### Task 1: Settings models and CLI seam
 
-**Files:** Modify `ui/menubar/Sources/HerdbotKit/Stream.swift`, `ProcessCLI.swift`; tests `DecodingTests.swift`, `ProcessCLITests.swift`, `Fixtures.swift`.
+**Files:** Modify `ui/macos/Sources/HerdbotKit/Stream.swift`, `ProcessCLI.swift`; tests `DecodingTests.swift`, `ProcessCLITests.swift`, `Fixtures.swift`.
 
 **Interfaces:** `SettingsCLI` exposes `listSettings(bot: String?) async throws -> [SettingDescriptor]`, `getSetting(key: String, bot: String?) async throws -> SettingDescriptor`, `setSetting(key: String, value: String, bot: String?) async throws -> SettingDescriptor`, and `unsetSetting(key: String, bot: String?) async throws -> SettingDescriptor`. `SettingDescriptor` decodes the version-1 fields in `2026-10-22-settings-config.md`.
 
 - [x] Add fixture-based decode tests for global/per-bot metadata, values, and apply timing; add process argument tests for list/get/set/unset.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`; confirm failures.
+- [x] Run `cd ui/macos && ./scripts/test.sh`; confirm failures.
 - [x] Implement typed settings models and ProcessCLI calls; preserve actionable stderr errors.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`; expect all tests pass.
+- [x] Run `cd ui/macos && ./scripts/test.sh`; expect all tests pass.
 
 ### Task 2: Settings navigation and forms
 
-**Files:** Create `ui/menubar/Sources/HerdbotKit/SettingsState.swift`; modify `ui/menubar/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `MenuContent.swift`, `App.swift`; tests in `ui/menubar/Tests/HerdbotKitTests/`.
+**Files:** Create `ui/macos/Sources/HerdbotKit/SettingsState.swift`; modify `ui/macos/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `MenuContent.swift`, `App.swift`; tests in `ui/macos/Tests/HerdbotKitTests/`.
 
 **Interfaces:** Settings state loads global and selected-bot settings, edits values, and reports per-key save status; navigation accepts an optional bot slug.
 
 **Map control:** Show existing `paths` entries and support adding/replacing one `FROM=TO` entry through `config set paths`; provide a reset-all action through `config unset paths`. Per-entry deletion is deferred because the current CLI contract does not expose it.
 
 - [x] Test load, select bot, save, validation error, load error, and preserving unsaved values after failure.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`; confirm failures.
+- [x] Run `cd ui/macos && ./scripts/test.sh`; confirm failures.
 - [x] Add sidebar Settings destination and menu “Settings…” deep link; render controls by metadata type and show description/default/apply timing.
-- [x] Run `cd ui/menubar && ./scripts/test.sh`; expect all tests pass.
+- [x] Run `cd ui/macos && ./scripts/test.sh`; expect all tests pass.
 - [ ] Manually verify global and per-bot forms and navigation from both entry points.

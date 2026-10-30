@@ -12,7 +12,7 @@ Toolchain: Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0 host, package platform m
 
 ## Task 1: Settings models and CLI seam — done
 
-- [x] Baseline `cd ui/menubar && ./scripts/test.sh` green: **116 tests in 15 suites**, 30.5 s.
+- [x] Baseline `cd ui/macos && ./scripts/test.sh` green: **116 tests in 15 suites**, 30.5 s.
 - [x] Failing tests first: fixtures + decode tests + process argument tests.
 - [x] Red run `./scripts/test.sh`: build failed — `cannot find 'SettingsList' in scope`,
       `cannot find 'SettingsEntry' in scope` (Fixtures.swift:130/135). Recorded, not committed.
@@ -53,13 +53,13 @@ Toolchain: Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0 host, package platform m
 
 ## Files touched (this task)
 
-- `ui/menubar/Sources/HerdbotKit/Stream.swift` (+164): settings models, envelopes, `SettingsCLI`,
+- `ui/macos/Sources/HerdbotKit/Stream.swift` (+164): settings models, envelopes, `SettingsCLI`,
   `supportedSettingsVersion`.
-- `ui/menubar/Sources/HerdbotKit/ProcessCLI.swift` (+40): `ProcessCLI: SettingsCLI`.
-- `ui/menubar/Tests/HerdbotKitTests/Fixtures.swift` (+34): `globalSettingsJSON`, `botSettingsJSON`,
+- `ui/macos/Sources/HerdbotKit/ProcessCLI.swift` (+40): `ProcessCLI: SettingsCLI`.
+- `ui/macos/Tests/HerdbotKitTests/Fixtures.swift` (+34): `globalSettingsJSON`, `botSettingsJSON`,
   `botMemorySettingJSON`, `settings(from:)`, `setting(from:)`.
-- `ui/menubar/Tests/HerdbotKitTests/DecodingTests.swift` (+81): 6 tests.
-- `ui/menubar/Tests/HerdbotKitTests/ProcessCLITests.swift` (+58): 6 tests.
+- `ui/macos/Tests/HerdbotKitTests/DecodingTests.swift` (+81): 6 tests.
+- `ui/macos/Tests/HerdbotKitTests/ProcessCLITests.swift` (+58): 6 tests.
 
 ## Task 2: Settings navigation and forms — done except manual UI check
 
@@ -75,7 +75,7 @@ Toolchain: Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0 host, package platform m
 - [x] `./scripts/build-app.sh` -> `built build/Herdbot.app (arm64, version 0.1.2)`; the binary exists
       and is executable. No warnings from either build.
 - [ ] Manual UI inspection (for Shane; cannot be done by the agent): see the Settings manual check
-      in `ui/menubar/README.md`.
+      in `ui/macos/README.md`.
 
 ### State behaviour
 
@@ -113,18 +113,18 @@ Toolchain: Swift 6.4 (swiftlang-6.4.0.34.1), macOS 27.0 host, package platform m
 
 ## Files touched in Task 2
 
-- `ui/menubar/Sources/HerdbotKit/SettingsState.swift` (new, 244 lines): scopes, drafts/baselines,
+- `ui/macos/Sources/HerdbotKit/SettingsState.swift` (new, 244 lines): scopes, drafts/baselines,
   per-key status, save/unset, map entries, presentation flag.
-- `ui/menubar/Sources/HerdbotMenu/SettingsView.swift` (new, 183 lines): metadata-driven form, scope
+- `ui/macos/Sources/HerdbotMenu/SettingsView.swift` (new, 183 lines): metadata-driven form, scope
   picker, load-error banner, per-row status. New file rather than inlining into `ChatView.swift`,
   matching the existing `SetupView.swift` convention; the plan's file list did not name it.
-- `ui/menubar/Tests/HerdbotKitTests/SettingsTests.swift` (new, 375 lines): fake settings CLI, `Gate`,
+- `ui/macos/Tests/HerdbotKitTests/SettingsTests.swift` (new, 375 lines): fake settings CLI, `Gate`,
   16 tests (load, no CLI, select bot, load error, load-error recovery, per-bot save scoping, rejected
   save, unset, failed unset, stale save after scope switch, drafts per scope, reload refresh, map
   entries/set/reset, empty map entry, present/dismiss, edit clears status).
-- `ui/menubar/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `MenuContent.swift`,
+- `ui/macos/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `MenuContent.swift`,
   `App.swift`: navigation wiring and the `SettingsState` instance.
-- `ui/menubar/README.md`: Settings section plus a manual check list for Shane.
+- `ui/macos/README.md`: Settings section plus a manual check list for Shane.
 
 ## Not done, deliberately
 

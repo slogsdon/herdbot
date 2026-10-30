@@ -16,7 +16,7 @@ Spec: `docs/superpowers/specs/2026-10-22-chat-app-design.md` (The window: Compos
 - Shane approved committing each task below: explicit paths only (never `git add -A` or `git add .`), the conventional message given, **no AI or tool attribution**, no push, no merge.
 - Never run `cargo install`, never restart the daemon, never launch the menu bar app (a running instance belongs to Shane; do not kill it). Never script keystrokes or clicks (System Events) either: they go to whatever window is in front.
 - Swift: 4-space indent, no `@State` (a macro whose plugin is missing under Command Line Tools), zero Swift compiler warnings (linker `search path ... not found` warnings are fine).
-- Test with `timeout 300 ./scripts/test.sh` from `ui/menubar`, never bare `swift test`. The first test build after a change can take two to three minutes; that is a slow compile, not a hang.
+- Test with `timeout 300 ./scripts/test.sh` from `ui/macos`, never bare `swift test`. The first test build after a change can take two to three minutes; that is a slow compile, not a hang.
 - Nothing is sent without a keypress: dictated text goes into the composer and waits for Return.
 - Baseline before this plan: Swift 45 tests pass.
 - Keep your ledger in `.superpowers/sdd/chat-composer/progress.md` (untracked; do not commit it).
@@ -28,8 +28,8 @@ All code below was compiled and its tests run in a scratch copy, and the compose
 ### Task 1: draft, send, unread and agent-to-bot mapping
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotKit/Unread.swift`, `ui/menubar/Tests/HerdbotKitTests/ComposerTests.swift`
-- Modify: `ui/menubar/Sources/HerdbotKit/ChatState.swift`, `ui/menubar/Sources/HerdbotKit/QuickEntry.swift`
+- Create: `ui/macos/Sources/HerdbotKit/Unread.swift`, `ui/macos/Tests/HerdbotKitTests/ComposerTests.swift`
+- Modify: `ui/macos/Sources/HerdbotKit/ChatState.swift`, `ui/macos/Sources/HerdbotKit/QuickEntry.swift`
 
 **Interfaces:**
 - Consumes: plan 2's `ChatState`, `FakeCLI`, `MenuState`, `Recipient`.
@@ -37,7 +37,7 @@ All code below was compiled and its tests run in a scratch copy, and the compose
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `ui/menubar/Tests/HerdbotKitTests/ComposerTests.swift`:
+Create `ui/macos/Tests/HerdbotKitTests/ComposerTests.swift`:
 
 ```swift
 import Foundation
@@ -175,12 +175,12 @@ import Testing
 
 - [ ] **Step 2: Run to see it fail**
 
-Run (from `ui/menubar`): `timeout 300 ./scripts/test.sh`
+Run (from `ui/macos`): `timeout 300 ./scripts/test.sh`
 Expected: build FAIL (`draft`, `send`, `bot(forAgent:)`, `UnreadTracker` do not exist).
 
 - [ ] **Step 3: Implement**
 
-Create `ui/menubar/Sources/HerdbotKit/Unread.swift`:
+Create `ui/macos/Sources/HerdbotKit/Unread.swift`:
 
 ```swift
 import Foundation
@@ -237,8 +237,8 @@ public final class UnreadTracker {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/ChatState.swift
-+++ b/ui/menubar/Sources/HerdbotKit/ChatState.swift
+--- a/ui/macos/Sources/HerdbotKit/ChatState.swift
++++ b/ui/macos/Sources/HerdbotKit/ChatState.swift
 @@ -25,11 +25,64 @@
          let working: Bool
      }
@@ -307,8 +307,8 @@ public final class UnreadTracker {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
-+++ b/ui/menubar/Sources/HerdbotKit/QuickEntry.swift
+--- a/ui/macos/Sources/HerdbotKit/QuickEntry.swift
++++ b/ui/macos/Sources/HerdbotKit/QuickEntry.swift
 @@ -7,7 +7,7 @@
      case room(String)
  
@@ -328,7 +328,7 @@ Expected: PASS, 54 tests (45 plus 9 new).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotKit/Unread.swift ui/menubar/Sources/HerdbotKit/ChatState.swift ui/menubar/Sources/HerdbotKit/QuickEntry.swift ui/menubar/Tests/HerdbotKitTests/ComposerTests.swift
+git add ui/macos/Sources/HerdbotKit/Unread.swift ui/macos/Sources/HerdbotKit/ChatState.swift ui/macos/Sources/HerdbotKit/QuickEntry.swift ui/macos/Tests/HerdbotKitTests/ComposerTests.swift
 git commit -m "feat(menubar): chat drafts, sending and unread tracking"
 ```
 
@@ -339,8 +339,8 @@ git commit -m "feat(menubar): chat drafts, sending and unread tracking"
 No unit tests: this is SwiftUI and AppKit wiring. The gate is a warning-free build and a bundle; a person checks it (Task 3).
 
 **Files:**
-- Create: `ui/menubar/Sources/HerdbotMenu/WindowOpener.swift`
-- Modify: `ui/menubar/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `App.swift`, `Notifier.swift`
+- Create: `ui/macos/Sources/HerdbotMenu/WindowOpener.swift`
+- Modify: `ui/macos/Sources/HerdbotMenu/ChatView.swift`, `SidebarView.swift`, `App.swift`, `Notifier.swift`
 
 **Interfaces:**
 - Consumes: Task 1's `ChatState` composer API and `UnreadTracker`.
@@ -353,7 +353,7 @@ Design notes the code encodes (do not change them without asking):
 
 - [ ] **Step 1: Add `WindowOpener.swift`**
 
-`ui/menubar/Sources/HerdbotMenu/WindowOpener.swift`:
+`ui/macos/Sources/HerdbotMenu/WindowOpener.swift`:
 
 ```swift
 import SwiftUI
@@ -378,8 +378,8 @@ struct OpenerCapture: ViewModifier {
 - [ ] **Step 2: Apply the view and app changes**
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/ChatView.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/ChatView.swift
+--- a/ui/macos/Sources/HerdbotMenu/ChatView.swift
++++ b/ui/macos/Sources/HerdbotMenu/ChatView.swift
 @@ -15,6 +15,7 @@
                  Divider()
                  banner(selection)
@@ -476,8 +476,8 @@ struct OpenerCapture: ViewModifier {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/SidebarView.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/SidebarView.swift
+--- a/ui/macos/Sources/HerdbotMenu/SidebarView.swift
++++ b/ui/macos/Sources/HerdbotMenu/SidebarView.swift
 @@ -16,18 +16,28 @@
  
  private struct Row: View {
@@ -531,8 +531,8 @@ struct OpenerCapture: ViewModifier {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/App.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/App.swift
+--- a/ui/macos/Sources/HerdbotMenu/App.swift
++++ b/ui/macos/Sources/HerdbotMenu/App.swift
 @@ -11,6 +11,8 @@
      private let notifier: Notifier
      private let quickEntry: QuickEntryController
@@ -579,8 +579,8 @@ struct OpenerCapture: ViewModifier {
 ```
 
 ```diff
---- a/ui/menubar/Sources/HerdbotMenu/Notifier.swift
-+++ b/ui/menubar/Sources/HerdbotMenu/Notifier.swift
+--- a/ui/macos/Sources/HerdbotMenu/Notifier.swift
++++ b/ui/macos/Sources/HerdbotMenu/Notifier.swift
 @@ -1,12 +1,15 @@
  import HerdbotKit
  import UserNotifications
@@ -617,13 +617,13 @@ struct OpenerCapture: ViewModifier {
 
 - [ ] **Step 3: Verify**
 
-Run (from `ui/menubar`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 300 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
+Run (from `ui/macos`): `swift build 2>&1 | grep -E "error|warning: [^s]|Build"`, `timeout 300 ./scripts/test.sh`, `timeout 300 ./scripts/build-app.sh`
 Expected: `Build complete!` with no Swift errors or warnings, 54 tests pass, `built build/HerdbotMenu.app`. Do not launch it.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add ui/menubar/Sources/HerdbotMenu/WindowOpener.swift ui/menubar/Sources/HerdbotMenu/ChatView.swift ui/menubar/Sources/HerdbotMenu/SidebarView.swift ui/menubar/Sources/HerdbotMenu/App.swift ui/menubar/Sources/HerdbotMenu/Notifier.swift
+git add ui/macos/Sources/HerdbotMenu/WindowOpener.swift ui/macos/Sources/HerdbotMenu/ChatView.swift ui/macos/Sources/HerdbotMenu/SidebarView.swift ui/macos/Sources/HerdbotMenu/App.swift ui/macos/Sources/HerdbotMenu/Notifier.swift
 git commit -m "feat(menubar): chat composer, unread badges, notification opens chat"
 ```
 
@@ -632,9 +632,9 @@ git commit -m "feat(menubar): chat composer, unread badges, notification opens c
 ### Task 3: docs and the manual check
 
 **Files:**
-- Modify: `ui/menubar/README.md`, `README.md`, `docs/superpowers/plans/README.md`, `docs/superpowers/specs/2026-10-22-chat-app-design.md`
+- Modify: `ui/macos/README.md`, `README.md`, `docs/superpowers/plans/README.md`, `docs/superpowers/specs/2026-10-22-chat-app-design.md`
 
-- [ ] **Step 1: `ui/menubar/README.md`**
+- [ ] **Step 1: `ui/macos/README.md`**
 
 In the "## Chat window" section (added by plan 2): replace its last two sentences ("This window is read-only; sending is the quick-entry panel for now. The Dock icon shows only while the window is open.") with:
 
@@ -656,17 +656,17 @@ In the status paragraph where the menu bar app is mentioned, add "and a chat win
 In `docs/superpowers/plans/README.md` add three rows after the phase 2 rows:
 
 `| [Desktop UI, phase 3.1: chat data seam](2026-10-22-chat-data-seam.md) ([spec](../specs/2026-10-22-chat-app-design.md)) | done (committed on feature/ui-chat), 2026-10-22 | `herdbot-core` (`history.rs`, `rooms.rs`, `home.rs`, `snapshot.rs`), `main.rs`, `daemon.rs`, README |`
-`| [Desktop UI, phase 3.2: chat window](2026-10-22-chat-window.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` sidebar, chat view, history models; macOS floor 15 |`
-`| [Desktop UI, phase 3.3: composer, unread, notifications](2026-10-22-chat-composer.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/menubar` composer, unread tracker, notifier |`
+`| [Desktop UI, phase 3.2: chat window](2026-10-22-chat-window.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/macos` sidebar, chat view, history models; macOS floor 15 |`
+`| [Desktop UI, phase 3.3: composer, unread, notifications](2026-10-22-chat-composer.md) | done (committed on feature/ui-chat), 2026-10-22 | `ui/macos` composer, unread tracker, notifier |`
 
 In the chat app spec, change its first line under the title to "Approved 2026-10-22; built across three plans (data seam, window, composer)." (it currently reads "Approved 2026-10-22. Follows ..."; keep the rest of that sentence).
 
 - [ ] **Step 4: Verify and commit**
 
-Run: `git diff --stat` (only these four files), `timeout 300 ./scripts/test.sh` from `ui/menubar`.
+Run: `git diff --stat` (only these four files), `timeout 300 ./scripts/test.sh` from `ui/macos`.
 
 ```bash
-git add ui/menubar/README.md README.md docs/superpowers/plans/README.md docs/superpowers/specs/2026-10-22-chat-app-design.md
+git add ui/macos/README.md README.md docs/superpowers/plans/README.md docs/superpowers/specs/2026-10-22-chat-app-design.md
 git commit -m "docs: document the chat composer, unread counts and notifications"
 ```
 

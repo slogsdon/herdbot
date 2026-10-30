@@ -20,7 +20,7 @@ Approved 2026-10-22; built across three plans (data seam, window, composer). Fol
 | Question | Decision | Why |
 |---|---|---|
 | Scope | Read history and send | A chat client over the existing queue; read-only would not feel like chat. |
-| Toolkit | SwiftUI, in the existing `ui/menubar` package | Native Liquid Glass and accessibility settings come free and match the quick-entry panel. gpui could match them only through per-OS shims, and no screen-reader support was found for it (checked 2026-10-22). A port to another OS later gets its own shell over the same CLI. |
+| Toolkit | SwiftUI, in the existing `ui/macos` package | Native Liquid Glass and accessibility settings come free and match the quick-entry panel. gpui could match them only through per-OS shims, and no screen-reader support was found for it (checked 2026-10-22). A port to another OS later gets its own shell over the same CLI. |
 | App shape | A window inside the menu bar app | One process already follows `watch`, owns the hotkey and the notifications. |
 | In-flight prompt | The daemon records it | `turns.jsonl` gets a line only when a turn ends (prompt and reply together), so between delivery and turn end the message is in no file. |
 
@@ -34,7 +34,7 @@ files: <bot>/turns.jsonl, rooms/<slug>/transcript.jsonl, .queue/<agent>.jsonl,
                          |
    herdbot CLI:  history --json | status/watch --json | send | room send | focus
                          |
-        ui/menubar Swift package  (HerdbotKit models + state, HerdbotMenu views)
+        ui/macos Swift package  (HerdbotKit models + state, HerdbotMenu views)
 ```
 
 The Swift app never reads herdbot's files itself; its only seam is the CLI, as in phases 1 and 2. Every new JSON field is additive and `"v": 1` stays. The Swift decoder treats a missing new field as empty, so an older herdbot degrades instead of failing.

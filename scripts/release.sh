@@ -62,7 +62,7 @@ if [ "${#slices[@]}" -eq 1 ]; then cp "${slices[0]}" "$dist/helper/herdbot"; els
 
 # 2. The app with the helper inside, signed inside-out.
 ARCHS="$ARCHS" HERDBOT_HELPER="$dist/helper/herdbot" SIGN_IDENTITY="$SIGN_IDENTITY" \
-  APP_VERSION="$version" OUT_DIR="$dist" "$repo/ui/menubar/scripts/build-app.sh"
+  APP_VERSION="$version" OUT_DIR="$dist" "$repo/ui/macos/scripts/build-app.sh"
 app="$dist/Herdbot.app"
 zip="$dist/Herdbot-$version.zip"
 

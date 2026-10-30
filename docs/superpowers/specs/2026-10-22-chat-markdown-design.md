@@ -23,7 +23,7 @@ Render common block markdown in chat replies so headings and lists read as struc
 
 ## Constraints and builder choices
 
-- The current `MarkdownText` is in `ui/menubar/Sources/HerdbotMenu/MessageViews.swift`; parser/model code is in HerdbotKit `Timeline.swift`.
+- The current `MarkdownText` is in `ui/macos/Sources/HerdbotMenu/MessageViews.swift`; parser/model code is in HerdbotKit `Timeline.swift`.
 - Keep parsing pure and testable in HerdbotKit. Use semantic SwiftUI text styles and indentation; avoid custom colors.
 - Preserve original textual content for unsupported constructs.
 
