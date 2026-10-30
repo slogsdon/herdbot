@@ -4,7 +4,7 @@
 
 **Goal:** Show who authored each chat item and let a submitted message name bot/room collaborators independently of the open conversation.
 
-**Architecture:** Extend typed source metadata through queue, inflight, turn, history, and memory records. Reuse the lifecycle disclosure row for bot-to-bot and subagent system entries. Resolve `@` mentions as the sole recipient at the existing CLI seam, independent of sidebar selection.
+**Architecture:** Extend typed source metadata through queue, inflight, turn, history, and memory records. Reuse the lifecycle disclosure row for bot-to-bot and subagent system entries. On submit, fan out to the active conversation and unique `@` targets without changing sidebar selection.
 
 **Tech Stack:** Rust 2024, JSONL, Swift 6, SwiftUI, existing CLI protocol.
 
@@ -13,18 +13,19 @@
 ## Global Constraints
 
 - Queue source and message ID survive delivery into inflight and `turns.jsonl`; new prompts are never implicitly classified as `user`.
-- Known legacy wrappers are recognized exactly; other old messages are marked `legacy` rather than asserting a source.
-- User-authored text, bot messages, and Herdbot notices remain separate data kinds in chat and memory.
-- A mention sends nothing until submit; the mention-selected bot or room is the sole recipient, independent of the active sidebar conversation.
+- Source-less legacy prompts are marked `unknown`; no prefix heuristic is used.
+- User-authored text, bot messages, and Herdbot notices remain separate data kinds in chat; non-user prompts and lifecycle notices are excluded from OptChat user-instruction memory.
+- A mention sends nothing until submit; submit fans out to the active conversation and unique mentioned bots/rooms.
+- History and snapshot protocol versions remain `v:1`; new fields and kinds are additive and unknown values decode to a neutral row.
 - Never commit, push, merge, install, or launch the running daemon.
 
 ## Review Focus
 
-- User text begins with a string that resembles a generated message prefix: only exact Herdbot wrapper syntax is classified as legacy system content.
+- Legacy source-less text resembles a generated message prefix: it remains `unknown`, regardless of its text.
 - Mention references a missing or ambiguous slug/title: show an error and do not send.
-- The active sidebar target differs from the mention-selected target: send only to the mention-selected target and leave the active sidebar selection unchanged.
+- The active sidebar target differs from mention targets: send once to the active target and each unique mentioned target, leaving sidebar selection unchanged.
 - Room and bot are both mentioned: preserve each target type and existing room rules.
-- Mention-selected target rejects delivery: retain the draft and report the delivery failure.
+- A fan-out target rejects delivery: retain the draft, show per-target results, and retry only failed targets.
 
 ---
 
@@ -33,6 +34,7 @@
 **Files:**
 - Modify: `crates/herdbot-core/src/home.rs`
 - Modify: `crates/herdbot-core/src/history.rs`
+- Modify: `crates/herdbot-core/src/events.rs`
 - Modify: `crates/herdbot/src/daemon.rs`
 - Modify: `crates/herdbot/src/hook.rs`
 - Modify: `crates/herdbot/src/tools.rs`
@@ -41,34 +43,39 @@
 
 **Interfaces:**
 - Consumes: queue IDs/source and `HistoryItem.source` from the reliability plan.
-- Produces: typed `source` (`user`, `bot_message`, `subagent`, `herdbot`, `legacy`) on persisted prompt/turn/history records; room bot posts keep their existing `speaker` slug.
+- Produces: typed `source` (`user`, `bot_message`, `subagent`, `herdbot`, `unknown`) and stable IDs on persisted prompt/turn/history/event records; room bot posts keep their existing `speaker` slug.
 
-- [ ] Add tests proving `send_to_agent` prompt source remains `bot` through queue, inflight, turn logging, history, and memory extraction.
-- [ ] Add tests for exact legacy `[message from …]` and `[subagent …]` wrappers, plus ordinary user text containing similar words.
-- [ ] Carry source and stable message ID through queue decode, inflight marker, `MainAgents` delivery state, `turn_to_log`, and `turns.jsonl`.
-- [ ] Make `history` emit agent-authored messages as system/agent items; mark unmatched legacy prompts `legacy`.
-- [ ] Update OptChat extraction so agent-authored prompts are not emitted as `user`; retain bot-message bodies as a distinct `agent` kind and exclude lifecycle-only status entries.
-- [ ] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [x] Add tests proving `send_to_agent` prompt source remains `bot_message` through queue, inflight, turn logging, history, and memory exclusion.
+- [x] Add tests proving source-less legacy prompts decode as `unknown`, including wrapper-shaped text and ordinary text.
+- [x] Carry source and stable message ID through queue decode, inflight marker, `MainAgents` delivery state, `turn_to_log`, and `turns.jsonl`.
+- [x] Project lifecycle notices from the persisted run-event records into bot history; keep room notices in their existing transcript model.
+- [x] Make `history` emit agent-authored messages and notices as system/status items; mark every source-less legacy prompt `unknown`.
+- [x] Update OptChat extraction to exclude all non-user prompts, unknown prompts, and lifecycle notices from user-instruction memory.
+- [x] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
 
 ### Task 2: Mention suggestions and selected collaborators
 
 **Files:**
 - Modify: `crates/herdbot/src/main.rs`
-- Modify: `crates/herdbot/src/tools.rs` or add a focused collaboration module
+- Modify: `crates/herdbot-core/src/home.rs` for retry dedupe across queue, inflight, and turns
+- Modify: `crates/herdbot-core/src/rooms.rs` and `crates/herdbot/src/rooms.rs` for additive resolved-mention and idempotency metadata
 - Modify: `ui/menubar/Sources/HerdbotKit/ProcessCLI.swift`
+- Modify: `ui/menubar/Sources/HerdbotKit/ChatState.swift` and `MentionParser.swift`
 - Modify: `ui/menubar/Sources/HerdbotMenu/ChatView.swift`
-- Test: CLI and composer tests
+- Test: Rust room/collaboration tests and Swift parser, ProcessCLI, and composer tests
 
 **Interfaces:**
-- Consumes: typed bot/room roster from existing `list_bots`/`list_rooms` JSON or a new versioned CLI response.
-- Produces: mention completion for `@bot` and `@room`, and a submit request addressed only to the mention-selected target, without changing sidebar selection.
+- Consumes: typed bot/room roster from existing `list_bots`/`list_rooms` JSON or a new additive v1 CLI response.
+- Produces: mention completion for `@bot` and `@room`, and a submit request fanning out to the active target plus mentioned targets, without changing sidebar selection.
 
-- [ ] Add pure parser tests for `@` completion, case-insensitive lookup, bot title/slug resolution, room references, duplicate targets, unknown targets, and plain email addresses.
-- [ ] Add CLI tests proving a submitted mention addresses only the selected mention target (bot and room cases), with stable agent-message provenance and no change to active sidebar selection.
-- [ ] Implement keyboard-navigable mention suggestions and selected-target chips without changing the active sidebar selection.
-- [ ] Submit the message only to the mention-selected bot or room with bot-to-bot provenance; render it using the collapsed system/status entry. If delivery fails, keep the draft and report the target failure.
-- [ ] Run `cd ui/menubar && ./scripts/test.sh`, `./scripts/build-app.sh`, and `cargo test -p herdbot`; expect pass.
-- [ ] Add live manual checks that mention-selected bot/room receives the message, the active sidebar conversation does not, and the received message is a collapsed system/status entry.
+- [x] Add pure parser tests for case-insensitive lookup, bot title/slug resolution, room references, duplicate targets, unknown targets, and plain email addresses.
+- [x] Add CLI and state tests for one batch request, stable IDs, per-target outcomes, fan-out to the active target plus unique bot/room targets, and unchanged sidebar selection.
+- [x] Implement keyboard-focusable mention suggestions and selected-target chips without changing the active sidebar selection.
+- [x] Submit using typed user provenance and stable per-target IDs; preserve drafts on partial failure and retry failed targets only. Suppress room text re-parsing and deduplicate room-mode deliveries against directly targeted bots.
+- [x] Run `cd ui/menubar && ./scripts/test.sh`, `./scripts/build-app.sh`, `cargo build`, `cargo test -p herdbot`, and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [ ] Manually verify active and mentioned targets each receive one message, room routing does not duplicate delivery, and status rows render correctly. Deferred by Shane; automated and disposable-home CLI checks are recorded separately.
+
+**EasyUI design tracking:** Adapted EasyUI's **Accessible & Type-Safe** principle with native, keyboard-focusable SwiftUI controls and accessible labels; the implementation remains source-owned in this app. Suggestion buttons, collaborator chips, per-target failure text, and the colocated **Retry failed** action keep state and feedback with the composer. Spring motion was skipped because this interaction is selection and delivery feedback, where animation would not add information. Runtime visual hierarchy, keyboard traversal, VoiceOver, visible focus, and Reduce Motion remain manual checks.
 
 ### Task 3: Documentation and protocol review
 
@@ -80,6 +87,6 @@
 - Consumes: Tasks 1–2.
 - Produces: documented mention, provenance, legacy-labeling, and memory behavior.
 
-- [ ] Document mention syntax and submit semantics in the app README.
-- [ ] Document message source fields and legacy compatibility in the CLI protocol section.
-- [ ] Run `git diff --check` and verify no unrelated files changed.
+- [x] Document mention syntax and submit semantics in the app README.
+- [x] Document message source fields and legacy compatibility in the CLI protocol section.
+- [x] Run `git diff --check`; reviewed the worktree paths and preserved the pre-existing cumulative Task 1 and prerequisite-plan edits.

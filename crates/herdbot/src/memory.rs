@@ -340,12 +340,13 @@ pub fn check(tries: &[String]) -> Verdict {
     ))
 }
 
-/// One turns.jsonl line (number `t`) → its messages: `user` for the delivered prompt (absent
-/// when typed in the pane), then `talk` for the reply.
+/// One turns.jsonl line (number `t`) → only human-origin prompts enter memory, then the reply.
 pub fn turn_messages(line: &serde_json::Value, next: usize, t: usize) -> Vec<Message> {
     let at = line["at"].as_i64().unwrap_or_default();
     let mut out = Vec::new();
-    if let Some(prompt) = line["prompt"].as_str() {
+    let user_origin = line["messages"].as_array().is_some_and(|messages|
+        !messages.is_empty() && messages.iter().all(|message| message["source"] == "user"));
+    if user_origin && let Some(prompt) = line["prompt"].as_str() {
         out.push(Message { t, ..Message::new(next, "user", prompt, at) });
     }
     if let Some(reply) = line["reply"].as_str() {
@@ -608,7 +609,10 @@ pub async fn tick(
                 {
                     let context = mem.context_lines(Mem::job_end(key));
                     let prompt = mem.job_prompt(key, &context, true);
-                    let r = crate::run::spawn(herdr, &slug, "herdbot-memory", "compact", None, "memory compactor", &prompt).await?;
+                    let r = crate::run::spawn(herdr, &slug, "herdbot-memory", crate::run::SpawnRequest {
+                        class: "compact", explicit_model: None, description: "memory compactor",
+                        prompt: &prompt, done_when: None, wall_clock_limit: None,
+                    }).await?;
                     if r.status == "running" {
                         running += 1;
                         st.run_bytes = prompt.len();
@@ -791,13 +795,21 @@ mod tests {
 
     #[test]
     fn imports_turns_and_decides_recycles() {
-        let both = serde_json::json!({"at": 5, "prompt": "hi", "reply": "yo"});
+        let both = serde_json::json!({"at": 5, "prompt": "hi", "reply": "yo", "messages": [{"source": "user"}]});
         let m = turn_messages(&both, 3, 7);
         assert_eq!((m[0].i, m[0].kind.as_str(), m[1].i, m[1].kind.as_str()), (3, "user", 4, "talk"));
         assert_eq!(m[0].size, "user: hi".len());
         assert_eq!((m[0].t, m[1].t), (7, 7));
         let typed = serde_json::json!({"at": 5, "prompt": null, "reply": "yo"});
         assert_eq!(turn_messages(&typed, 0, 0).len(), 1);
+        let legacy = serde_json::json!({"at": 5, "prompt": "old prompt", "reply": "yo"});
+        assert_eq!(turn_messages(&legacy, 0, 0).len(), 1, "legacy prompt is unknown, not human input");
+        let bot_message = serde_json::json!({"at": 5, "prompt": "bot prompt", "reply": "yo", "messages": [{"source": "bot_message"}]});
+        assert_eq!(turn_messages(&bot_message, 0, 0).len(), 1, "bot-to-bot prompt is excluded from memory");
+        for source in ["subagent", "herdbot", "lifecycle", "unknown"] {
+            let message = serde_json::json!({"at": 5, "prompt": "system notice", "reply": "yo", "messages": [{"source": source}]});
+            assert_eq!(turn_messages(&message, 0, 0).len(), 1, "{source} prompt is excluded from user-instruction memory");
+        }
         assert!(should_recycle(129, 64, "idle", true, true));
         assert!(!should_recycle(128, 64, "idle", true, true));
         assert!(!should_recycle(129, 64, "working", true, true));
@@ -809,7 +821,7 @@ mod tests {
 
     #[test]
     fn importing_twice_is_a_no_op() {
-        let turns = [r#"{"at":1,"prompt":"a","reply":"b"}"#, r#"{"at":2,"prompt":null,"reply":"c"}"#];
+        let turns = [r#"{"at":1,"prompt":"a","reply":"b","messages":[{"source":"user"}]}"#, r#"{"at":2,"prompt":null,"reply":"c"}"#];
         let mut mem = Mem::new(1000);
         let first = new_messages(&mem, &turns);
         assert_eq!(first.iter().map(|m| (m.i, m.kind.as_str(), m.t)).collect::<Vec<_>>(), [(0, "user", 0), (1, "talk", 0), (2, "talk", 1)]);

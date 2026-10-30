@@ -74,6 +74,18 @@ private final class ProcessOutput: @unchecked Sendable {
     }
 }
 
+private struct CollaborationRequest: Encodable {
+    let request_id: String
+    let text: String
+    let targets: [Recipient]
+}
+
+private struct CollaborationResponse: Decodable {
+    let version: Int
+    let request_id: String
+    let results: [CollaborationTargetResult]
+}
+
 public struct ProcessCLI: HerdbotCLI {
     public let binary: URL
     public let environment: [String: String]
@@ -142,6 +154,16 @@ public struct ProcessCLI: HerdbotCLI {
         }
     }
 
+    public func collaborate(requestID: String, text: String, targets: [Recipient]) async throws -> [CollaborationTargetResult] {
+        let request = CollaborationRequest(request_id: requestID, text: text, targets: targets)
+        let input = try JSONEncoder().encode(request)
+        let data = try await output(["collaborate", "--json"], input: input)
+        let response = try JSONDecoder().decode(CollaborationResponse.self, from: data)
+        guard response.version == 1 else { throw CLIError.unsupported(response.version) }
+        guard response.request_id == requestID else { throw CLIError.failed("herdbot returned a result for a different collaboration request") }
+        return response.results
+    }
+
     public func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage {
         var arguments = ["history", target.historyTarget, "--json", "--limit", String(limit)]
         if let before { arguments += ["--before", String(before)] }
@@ -157,16 +179,18 @@ public struct ProcessCLI: HerdbotCLI {
 
     /// Run `herdbot <arguments>` to completion and return its stdout; a non-zero exit throws its
     /// stderr. Both streams are drained while the process runs, so a large page can't stall it.
-    private func output(_ arguments: [String], acceptingExit accepted: Set<Int32> = [0]) async throws -> Data {
+    private func output(_ arguments: [String], input: Data? = nil, acceptingExit accepted: Set<Int32> = [0]) async throws -> Data {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             let process = Process()
             let outputs = Pipe()
             let errors = Pipe()
+            let inputs = input.map { _ in Pipe() }
             process.executableURL = binary
             process.arguments = arguments
             process.environment = environment
             process.standardOutput = outputs
             process.standardError = errors
+            if let inputs { process.standardInput = inputs }
             let result = ProcessOutput(process: process, continuation: continuation, accepted: accepted)
             outputs.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
@@ -191,6 +215,12 @@ public struct ProcessCLI: HerdbotCLI {
             }
             do {
                 try process.run()
+                if let input, let inputs {
+                    DispatchQueue.global().async {
+                        try? inputs.fileHandleForWriting.write(contentsOf: input)
+                        try? inputs.fileHandleForWriting.close()
+                    }
+                }
             } catch {
                 outputs.fileHandleForReading.readabilityHandler = nil
                 errors.fileHandleForReading.readabilityHandler = nil

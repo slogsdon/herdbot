@@ -34,6 +34,9 @@ public final class ChatState {
 
     public private(set) var sendStatus: SendStatus = .idle
     private var drafts: [Recipient: String] = [:]
+    private var collaboratorResultsByConversation: [Recipient: [Recipient: CollaborationTargetResult]] = [:]
+    private var collaborators: [Recipient: [Recipient]] = [:]
+    private var pendingCollaboration: [Recipient: (id: String, text: String, targets: [Recipient])] = [:]
 
     public init(menu: MenuState, cli: (any HerdbotCLI)?) {
         self.menu = menu
@@ -43,7 +46,51 @@ public final class ChatState {
     /// What you are typing to the open conversation; each conversation keeps its own.
     public var draft: String {
         get { selection.flatMap { drafts[$0] } ?? "" }
-        set { if let selection { drafts[selection] = newValue } }
+        set {
+            if let selection {
+                if drafts[selection] != newValue {
+                    pendingCollaboration[selection] = nil
+                    collaboratorResultsByConversation[selection] = nil
+                }
+                drafts[selection] = newValue
+            }
+        }
+    }
+
+    public var selectedCollaborators: [Recipient] { selection.flatMap { collaborators[$0] } ?? [] }
+    public var collaboratorResults: [Recipient: CollaborationTargetResult] { selection.flatMap { collaboratorResultsByConversation[$0] } ?? [:] }
+    public var hasPendingCollaboration: Bool { selection.flatMap { pendingCollaboration[$0] } != nil }
+    public var mentionOptions: [RecipientOption] {
+        guard let snapshot = menu.snapshot else { return [] }
+        return snapshot.bots.map { RecipientOption(recipient: .bot($0.slug), label: $0.title.isEmpty ? $0.slug : $0.title) }
+            + snapshot.rooms.map { RecipientOption(recipient: .room($0.slug), label: "\($0.name.isEmpty ? $0.slug : $0.name) (room)") }
+    }
+    public var mentionQuery: String? {
+        guard let selection, let text = drafts[selection],
+              let range = text.range(of: #"(?:^|\s)@([A-Za-z0-9_-]*)$"#, options: .regularExpression) else { return nil }
+        let token = text[range]
+        return String(token.drop { $0 == " " || $0 == "\n" || $0 == "\t" }.dropFirst())
+    }
+
+    public func addCollaborator(_ recipient: Recipient) {
+        guard let selection, recipient != selection, pendingCollaboration[selection] == nil else { return }
+        var selected = collaborators[selection] ?? []
+        if !selected.contains(recipient) {
+            selected.append(recipient)
+            pendingCollaboration[selection] = nil
+            collaboratorResultsByConversation[selection] = nil
+        }
+        collaborators[selection] = selected
+        if let text = drafts[selection], let range = text.range(of: #"(?:^|\s)@[A-Za-z0-9_-]*$"#, options: .regularExpression) {
+            drafts[selection] = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    public func removeCollaborator(_ recipient: Recipient) {
+        guard let selection, pendingCollaboration[selection] == nil else { return }
+        collaborators[selection]?.removeAll { $0 == recipient }
+        pendingCollaboration[selection] = nil
+        collaboratorResultsByConversation[selection] = nil
     }
 
     public var canSend: Bool {
@@ -59,10 +106,51 @@ public final class ChatState {
     public func send() async -> Bool {
         guard canSend, let cli, let target = selection else { return false }
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedMentions: [Recipient]
+        do {
+            parsedMentions = try MentionParser.resolve(message, options: mentionOptions)
+        } catch MentionParser.Failure.unknown(let name) {
+            sendStatus = .failed("No bot or room matches @\(name)")
+            return false
+        } catch MentionParser.Failure.ambiguous(let name) {
+            sendStatus = .failed("@\(name) matches more than one bot or room")
+            return false
+        } catch {
+            sendStatus = .failed(error.localizedDescription)
+            return false
+        }
+        let request: (id: String, text: String, targets: [Recipient])
+        if let pending = pendingCollaboration[target], pending.text == message {
+            request = pending
+        } else {
+            collaboratorResultsByConversation[target] = nil
+            var targets = [target] + (collaborators[target] ?? []) + parsedMentions
+            targets = targets.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+            request = (UUID().uuidString.replacingOccurrences(of: "-", with: ""), message, targets)
+            pendingCollaboration[target] = request
+        }
+        let priorResults = collaboratorResultsByConversation[target] ?? [:]
+        let retryTargets = request.targets.filter { priorResults[$0]?.status != "queued" }
         sendStatus = .sending
         do {
-            try await cli.send(to: target, text: message)
+            let results = try await cli.collaborate(requestID: request.id, text: request.text, targets: retryTargets)
+            var currentResults = collaboratorResultsByConversation[target] ?? [:]
+            for result in results { currentResults[result.target] = result }
+            collaboratorResultsByConversation[target] = currentResults
+            let failures = request.targets.compactMap { recipient -> String? in
+                guard currentResults[recipient]?.status == "queued" else {
+                    return "\(recipient.key): \(currentResults[recipient]?.error ?? "delivery failed")"
+                }
+                return nil
+            }
+            guard failures.isEmpty else {
+                sendStatus = .failed(failures.joined(separator: "; "))
+                return false
+            }
             drafts[target] = ""
+            collaborators[target] = []
+            pendingCollaboration[target] = nil
+            collaboratorResultsByConversation[target] = nil
             sendStatus = .idle
             await refresh()
             return true

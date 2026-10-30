@@ -173,15 +173,28 @@ pub fn grace_over(harness: &str, settled_at: Option<i64>, now: i64) -> bool {
     !installed(harness) || settled_at.is_some_and(|t| now - t >= HOOK_GRACE)
 }
 
-/// `<slug>/turns.jsonl`: one line per main-agent turn, the input OptChat memory builds on.
-pub fn append_turn(slug: &str, at: i64, prompt: Option<&str>, reply: &str) -> Result<()> {
-    let line = serde_json::json!({ "at": at, "prompt": prompt, "reply": reply });
+/// `<slug>/turns.jsonl`: one line per main-agent turn, with source event and queue identities.
+pub fn append_turn_with_messages(slug: &str, at: i64, prompt: Option<&str>, reply: &str, event_id: &str, messages: &[home::QueueReference]) -> Result<()> {
+    append_turn_record(&home::bot_dir(slug).join("turns.jsonl"), at, prompt, reply, event_id, messages)
+}
+
+pub(crate) fn append_turn_record(path: &std::path::Path, at: i64, prompt: Option<&str>, reply: &str, event_id: &str, messages: &[home::QueueReference]) -> Result<()> {
+    if !event_id.is_empty() && std::fs::read_to_string(path).unwrap_or_default().lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .any(|turn| turn["id"].as_str() == Some(event_id)) { return Ok(()); }
+    let line = serde_json::json!({ "id": event_id, "messages": messages, "at": at, "prompt": prompt, "reply": reply });
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(home::bot_dir(slug).join("turns.jsonl"))?;
+        .open(path)?;
     file.write_all(format!("{line}\n").as_bytes())?;
     Ok(())
+}
+
+pub fn turn_event_seen(slug: &str, event_id: &str) -> bool {
+    std::fs::read_to_string(home::bot_dir(slug).join("turns.jsonl")).unwrap_or_default().lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .any(|turn| turn["id"].as_str() == Some(event_id))
 }
 
 pub fn run(harness: &str, args: &[String]) {
@@ -195,6 +208,16 @@ pub fn run(harness: &str, args: &[String]) {
             let _ = writeln!(log, "{} {harness}: {error}", home::now());
         }
     }
+}
+
+/// Stable FNV-1a identity fallback for harness payloads without a turn/event ID.
+/// Identical deliveries from one agent collapse; collisions are possible but negligible for
+/// this small hook queue and can be upgraded to a wider digest if the queue becomes shared.
+fn stable_id(agent: &str, supplied: Option<&str>, kind: &str, payload: &str) -> String {
+    if let Some(id) = supplied.filter(|id| !id.is_empty()) { return format!("hook:{agent}:{id}"); }
+    let input = format!("{agent}\0{kind}\0{payload}");
+    let hash = input.bytes().fold(0xcbf29ce484222325u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
+    format!("hook:{agent}:{hash:016x}")
 }
 
 fn handle(harness: &str, args: &[String]) -> Result<()> {
@@ -213,15 +236,21 @@ fn handle(harness: &str, args: &[String]) -> Result<()> {
     ) else {
         return Ok(());
     };
-    let Some(parsed) = parse_hook(harness, &serde_json::from_str(&payload)?) else {
+    let value: Value = serde_json::from_str(&payload)?;
+    let Some(parsed) = parse_hook(harness, &value) else {
         return Ok(());
     };
     let (kind, text, reason) = match parsed {
         Parsed::TurnEnd(text) => ("turn_end", Some(cap(&text)), None),
         Parsed::Blocked(reason) => ("blocked", None, Some(cap(&reason))),
     };
+    let at = home::now();
+    let supplied = ["event_id", "turn_id", "id", "eventId"]
+        .iter().find_map(|key| value.get(*key).and_then(Value::as_str));
     append_event(&Event {
-        at: home::now(),
+        id: stable_id(&agent, supplied, kind, &value.to_string()),
+        source: "hook".into(),
+        at,
         agent,
         kind: kind.into(),
         text,
@@ -360,8 +389,37 @@ mod tests {
         assert_eq!(codex_notify("model = \"x\"\n"), None);
     }
 
+    #[test]
+    fn hook_ids_use_harness_identity_or_deterministic_fallback() {
+        assert_eq!(stable_id("bot-r1", Some("turn-9"), "turn_end", "payload"), "hook:bot-r1:turn-9");
+        assert_eq!(stable_id("bot-r1", None, "turn_end", "payload"), stable_id("bot-r1", None, "turn_end", "payload"));
+        assert_ne!(stable_id("bot-r1", None, "turn_end", "payload"), stable_id("bot-r1", None, "blocked", "payload"));
+        let legacy: Event = serde_json::from_str(r#"{"at":1,"agent":"a","kind":"turn_end","harness":"pi"}"#).unwrap();
+        assert_eq!(legacy.id, "");
+        assert_eq!(legacy.source, "hook");
+    }
+
+    #[test]
+    fn turn_log_persists_queue_message_id_source_and_text() {
+        let path = std::env::temp_dir().join(format!("herdbot-turn-{}-{}.jsonl", std::process::id(), home::now()));
+        let messages = [home::QueueReference {
+            id: Some("queue-17".into()),
+            source: "bot_message".into(),
+            text: Some("[message from beta] inspect this".into()),
+        }];
+        append_turn_record(&path, 12, Some("joined prompt"), "reply", "turn-17", &messages).unwrap();
+        let value: Value = serde_json::from_str(std::fs::read_to_string(&path).unwrap().trim()).unwrap();
+        assert_eq!(value["id"], "turn-17");
+        assert_eq!(value["messages"][0]["id"], "queue-17");
+        assert_eq!(value["messages"][0]["source"], "bot_message");
+        assert_eq!(value["messages"][0]["text"], "[message from beta] inspect this");
+        let _ = std::fs::remove_file(path);
+    }
+
     fn event(kind: &str) -> Event {
         Event {
+            id: "test-event".into(),
+            source: "hook".into(),
             at: 1,
             agent: "b-r1".into(),
             kind: kind.into(),

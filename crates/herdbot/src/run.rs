@@ -292,15 +292,22 @@ async fn took_prompt(herdr: &Client, agent: &str, before: &str) -> bool {
 }
 
 /// Open a pane next to `parent_agent`'s bot, start a routed agent in it, hand it the task.
+pub struct SpawnRequest<'a> {
+    pub class: &'a str,
+    pub explicit_model: Option<&'a str>,
+    pub description: &'a str,
+    pub prompt: &'a str,
+    pub done_when: Option<&'a str>,
+    pub wall_clock_limit: Option<u64>,
+}
+
 pub async fn spawn(
     herdr: &Client,
     slug: &str,
     parent_agent: &str,
-    class: &str,
-    explicit_model: Option<&str>,
-    description: &str,
-    prompt: &str,
+    request: SpawnRequest<'_>,
 ) -> Result<Run> {
+    let SpawnRequest { class, explicit_model, description, prompt, done_when, wall_clock_limit } = request;
     let bot = home::load_bot(slug)?;
     let state = up(herdr, slug).await?;
     let id = home::run_id();
@@ -313,6 +320,7 @@ pub async fn spawn(
         &home::cwd(slug, &bot),
     )
     .await?;
+    let started_at = home::now();
     let mut run = Run {
         id: id.clone(),
         bot: slug.to_owned(),
@@ -324,12 +332,25 @@ pub async fn spawn(
         description: description.to_owned(),
         status: "running".into(),
         result: None,
-        started_at: home::now(),
+        started_at,
         pane_closed: false,
         notified_blocked: false,
         prompt: prompt.to_owned(),
         result_source: String::new(),
         settled_at: None,
+        outbox: Vec::new(),
+        event_ids: Vec::new(),
+        requested_route: None,
+        fallback_reason: None,
+        done_when: done_when.map(str::to_owned),
+        wall_clock_limit,
+        active_seconds: wall_clock_limit.map(|_| 0),
+        budget_checked_at: None,
+        events: vec![home::RunEvent {
+            id: format!("run:{id}:started"), at: started_at, kind: "started".into(),
+            summary: format!("Started: {description}"), detail: Some(prompt.to_owned()),
+        }],
+        ..Run::default()
     };
     home::save_run(&run)?;
     let task = if class == "compact" {
@@ -352,16 +373,38 @@ pub async fn spawn(
     )
     .await
     {
-        Ok(route) => run.route = route.to_string(),
+        Ok(route) => {
+            run = home::load_run(&id).unwrap_or(run);
+            run.route = format!("{}:{}{}", route.harness, route.model, route.effort.as_ref().map(|effort| format!(":{effort}")).unwrap_or_default());
+            run.requested_route = requested_route(explicit_model, &route);
+            run.fallback_reason = route.fallback_reason.clone();
+            run.budget_checked_at = wall_clock_limit.map(|_| home::now());
+        }
         Err(e) => {
             run.status = "failed".into();
             run.result = Some(format!("failed to start: {e}"));
+            run.events.push(home::RunEvent {
+                id: format!("run:{id}:failed"),
+                at: home::now(),
+                kind: "failed".into(),
+                summary: "Task failed to start.".into(),
+                detail: run.result.clone(),
+            });
             let _ = herdr.pane_close(&pane).await;
             run.pane_closed = true;
         }
     }
     home::save_run(&run)?;
+    if let (Some(requested), Some(reason)) = (&run.requested_route, &run.fallback_reason) {
+        let notice = format!("Explicit route {requested} was unavailable; using {}. Reason: {reason}", run.route);
+        let notice_id = format!("run:{}:route-fallback", run.id);
+        home::enqueue_run_notice(&mut run, &notice_id, &notice)?;
+    }
     Ok(run)
+}
+
+fn requested_route(explicit_model: Option<&str>, route: &crate::route::Route) -> Option<String> {
+    route.requested.clone().or_else(|| explicit_model.map(str::to_owned))
 }
 
 /// `idle`, `working`, `blocked`, `done`, `unknown`, or `None` if the agent is gone.
@@ -422,7 +465,21 @@ fn blocked_card(
 
 #[cfg(test)]
 mod tests {
-    use super::{marks_launch_ready, prompt_taken};
+    use super::{marks_launch_ready, prompt_taken, requested_route};
+
+    #[test]
+    fn explicit_request_is_retained_for_exact_and_fallback_routes() {
+        let exact = crate::route::Route {
+            harness: "pi".into(), model: "deepseek-v4-pro".into(), effort: Some("medium".into()),
+            requested: None, fallback_reason: None,
+        };
+        assert_eq!(requested_route(Some("pi:deepseek-v4-pro:medium"), &exact).as_deref(), Some("pi:deepseek-v4-pro:medium"));
+        let fallback = crate::route::Route {
+            harness: "codex".into(), model: "gpt-6-luna".into(), effort: Some("medium".into()),
+            requested: Some("pi:deepseek-v4-pro:medium".into()), fallback_reason: Some("Pi unavailable".into()),
+        };
+        assert_eq!(requested_route(Some("pi:deepseek-v4-pro:medium"), &fallback).as_deref(), Some("pi:deepseek-v4-pro:medium"));
+    }
 
     #[test]
     fn a_blocked_claude_start_with_a_matching_pane_is_a_card_otherwise_an_error() {

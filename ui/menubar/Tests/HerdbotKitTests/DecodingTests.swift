@@ -70,6 +70,27 @@ import Testing
         #expect(page.warnings == ["w"])
     }
 
+    @Test func historyLifecycleFieldsAreOptionalAndDecodeEveryTerminalState() throws {
+        let old = try JSONDecoder().decode(HistoryItem.self, from: Data(#"{"n":0,"at":1,"kind":"notice","text":"legacy"}"#.utf8))
+        #expect(old.eventID == nil)
+        #expect(old.source == nil)
+        #expect(old.detail == nil)
+        #expect(old.id == "n0")
+
+        let states = ["completed", "blocked", "failed", "stopped", "expired"]
+        for (index, state) in states.enumerated() {
+            let detail = String(repeating: "private result ", count: 100)
+            let json = """
+            {"n":null,"at":2,"id":"run-event-\(index)","kind":"notice","source":"lifecycle","text":"\(state)","state":"\(state)","detail":"\(detail)"}
+            """
+            let item = try JSONDecoder().decode(HistoryItem.self, from: Data(json.utf8))
+            #expect(item.state == state)
+            #expect(item.source == "lifecycle")
+            #expect(item.detail == detail)
+            #expect(item.id == "run-event-\(index)")
+        }
+    }
+
     @Test func globalSettingsDecodeMetadataValuesAndApplyTiming() throws {
         let settings = try settings(from: globalSettingsJSON)
         #expect(settings.map(\.key) == ["approvals.mode", "memory.max_compactors", "paths", "cua.host"])

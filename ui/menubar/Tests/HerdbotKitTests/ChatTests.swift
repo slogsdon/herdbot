@@ -198,6 +198,19 @@ func turns(_ count: Int, from start: Int = 0) -> [HistoryItem] {
         #expect(Set(entries.map(\.id)).count == entries.count)
     }
 
+    @Test func lifecycleTimelineUsesStableEventIDsAndGenericNotificationCopy() {
+        let item = HistoryItem(n: nil, at: 100, kind: "notice", text: "done", state: "completed", eventID: "run-7-completed", source: "lifecycle", detail: "full private result")
+        let entries = Timeline.entries([item])
+        #expect(entries.compactMap { entry -> String? in
+            if case .item(let value) = entry { return value.id }
+            return nil
+        } == ["run-7-completed"])
+        let notificationContent = [NotificationCopy.blockedTitle, NotificationCopy.blockedBody, NotificationCopy.approvalTitle, NotificationCopy.approvalBody].joined(separator: " ")
+        #expect(!notificationContent.contains("private"))
+        #expect(!notificationContent.contains("approval title"))
+        #expect(!notificationContent.contains("event reason"))
+    }
+
     @Test func markdownSplitsFencedCodeFromText() {
         let source = "Here:\n\n```swift\nlet x = 1\n```\n\nand `inline` after\n```\nunclosed\nstill code"
         #expect(Markdown.blocks(source) == [

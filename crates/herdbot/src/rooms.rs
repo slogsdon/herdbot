@@ -34,19 +34,29 @@ pub fn validate(room: &Room, bots: &[String]) -> std::result::Result<(), String>
 }
 
 /// One JSON line. serde_json escapes newlines in `text`, so an entry is always one line.
-fn entry_line(speaker: &str, text: &str, at: i64) -> String {
-    let entry = Entry { at, speaker: speaker.to_owned(), text: text.to_owned() };
-    format!("{}\n", serde_json::to_string(&entry).unwrap_or_default())
+fn entry_line(speaker: &str, text: &str, at: i64, id: Option<&str>, mentions_resolved: bool, exclude_targets: &[String]) -> Result<String> {
+    let entry = Entry { id: id.map(str::to_owned), at, speaker: speaker.to_owned(), text: text.to_owned(), mentions_resolved, exclude_targets: exclude_targets.to_vec() };
+    Ok(format!("{}\n", serde_json::to_string(&entry)?))
 }
 
 /// Append one entry. A single write on an append-mode file, so concurrent writers (room send,
 /// room_post, the daemon's notices) never interleave; line numbers are the sequence.
 pub fn append(slug: &str, speaker: &str, text: &str) -> Result<()> {
+    append_with_id(slug, speaker, text, None, false, &[])
+}
+
+pub fn append_with_id(slug: &str, speaker: &str, text: &str, id: Option<&str>, mentions_resolved: bool, exclude_targets: &[String]) -> Result<()> {
+    let path = room_dir(slug).join("transcript.jsonl");
+    if let Some(id) = id
+        && read_entries(slug).iter().flatten().any(|entry| entry.id.as_deref() == Some(id))
+    {
+        return Ok(());
+    }
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(room_dir(slug).join("transcript.jsonl"))?;
-    file.write_all(entry_line(speaker, text, home::now()).as_bytes())?;
+        .open(path)?;
+    file.write_all(entry_line(speaker, text, home::now(), id, mentions_resolved, exclude_targets)?.as_bytes())?;
     Ok(())
 }
 
@@ -112,8 +122,10 @@ fn start_at(
     from: usize,
     now: i64,
     notices: &mut Vec<String>,
+    excluded: &[String],
 ) -> Vec<String> {
     for (i, m) in room.members.iter().enumerate().skip(from) {
+        if excluded.contains(m) { continue; }
         if names.contains_key(m) {
             st.round = Some(Round { next: i, called_at: now });
             return vec![m.clone()];
@@ -162,7 +174,7 @@ pub fn route(
                 }
             }
         }
-        let named = || mentioned(&entry.text, &room.members, names);
+        let named = || if entry.mentions_resolved { Vec::new() } else { mentioned(&entry.text, &room.members, names) };
         let next: Vec<String> = match room.mode {
             Mode::Channel => named(),
             Mode::Moderated => {
@@ -172,24 +184,24 @@ pub fn route(
             Mode::RoundRobin => {
                 let turn = st.round.as_ref().map(|r| r.next);
                 if speaker == "you" {
-                    start_at(room, names, &mut st, 0, now, &mut notices)
+                    start_at(room, names, &mut st, 0, now, &mut notices, &entry.exclude_targets)
                 } else if let Some(i) = turn
                     && room.members.get(i).is_some_and(|m| m == speaker)
                 {
-                    start_at(room, names, &mut st, i + 1, now, &mut notices)
+                    start_at(room, names, &mut st, i + 1, now, &mut notices, &entry.exclude_targets)
                 } else {
                     Vec::new()
                 }
             }
         };
-        calls.extend(next.into_iter().filter(|m| m != speaker));
+        calls.extend(next.into_iter().filter(|m| m != speaker && !entry.exclude_targets.contains(m)));
     }
     if !st.paused
         && let Some(r) = st.round.clone()
         && now - r.called_at >= room.turn_timeout_secs
     {
         notices.push(format!("[herdbot: {} did not answer]", room.members[r.next]));
-        calls.extend(start_at(room, names, &mut st, r.next + 1, now, &mut notices));
+        calls.extend(start_at(room, names, &mut st, r.next + 1, now, &mut notices, &[]));
     }
     for m in &calls {
         if !names.contains_key(m) && st.missing_notified.insert(m.clone()) {
@@ -240,6 +252,20 @@ pub fn delivery_prompt(slug: &str, room: &Room, entries: &[Option<Entry>], d: &D
     })
 }
 
+fn delivery_id(slug: &str, entries: &[Option<Entry>], delivery: &Delivery) -> String {
+    let requests: BTreeSet<String> = entries.get(delivery.after..delivery.through.min(entries.len()))
+        .into_iter().flatten().flatten()
+        .filter_map(|entry| entry.id.as_deref()?.strip_prefix("collab:")?.split(':').next().map(str::to_owned))
+        .collect();
+    if requests.len() == 1 {
+        format!("collab:{}:bot:{}", requests.first().unwrap(), delivery.member)
+    } else if !requests.is_empty() {
+        format!("collab-batch:{}:bot:{}", requests.into_iter().collect::<Vec<_>>().join("+"), delivery.member)
+    } else {
+        format!("room:{slug}:{}:{}", delivery.member, delivery.through)
+    }
+}
+
 pub fn check_member(room: &Room, bot: &str, in_run: bool) -> std::result::Result<(), String> {
     if in_run {
         return Err("rooms are for a bot's main agent, not subagent runs".into());
@@ -274,7 +300,8 @@ pub fn tick(now: i64) -> Result<()> {
         let (deliveries, notices, state) = route(&room, &names, state, new, start + 1, now);
         for d in &deliveries {
             if let Some(text) = delivery_prompt(&slug, &room, &entries, d) {
-                home::enqueue(&crate::run::main_agent(&d.member), &text)?;
+                let id = delivery_id(&slug, &entries, d);
+                home::enqueue_with_id(&crate::run::main_agent(&d.member), id, "room_message", &text)?;
                 println!("room {slug}: called {}", d.member);
             }
         }
@@ -313,7 +340,7 @@ mod tests {
     }
 
     fn e(speaker: &str, text: &str, at: i64) -> Option<Entry> {
-        Some(Entry { at, speaker: speaker.into(), text: text.into() })
+        Some(Entry { id: None, at, speaker: speaker.into(), text: text.into(), mentions_resolved: false, exclude_targets: Vec::new() })
     }
 
     fn called(d: &[Delivery]) -> Vec<&str> {
@@ -347,6 +374,39 @@ mod tests {
         let (d, _, _) = route(&r, &names(), st, &[e("bob", "@bob @ann thoughts?", 102)], 3, 102);
         assert_eq!(called(&d), ["ann"]);
         assert_eq!((d[0].after, d[0].through), (0, 3));
+    }
+
+    #[test]
+    fn resolved_composer_mentions_are_not_routed_again_from_room_text() {
+        let r = room(Mode::Channel);
+        let mut entry = e("you", "hi @bob", 1).unwrap();
+        entry.mentions_resolved = true;
+        let (deliveries, _, _) = route(&r, &names(), State::default(), &[Some(entry)], 1, 1);
+        assert!(deliveries.is_empty());
+    }
+
+    #[test]
+    fn room_fanout_delivery_ids_dedupe_the_same_request_across_rooms() {
+        let mut first = e("you", "hi", 1).unwrap();
+        first.id = Some("collab:req-1:room:one".into());
+        let mut second = first.clone();
+        second.id = Some("collab:req-1:room:two".into());
+        let one = delivery_id("one", &[Some(first)], &Delivery { member: "beta".into(), after: 0, through: 1 });
+        let two = delivery_id("two", &[Some(second)], &Delivery { member: "beta".into(), after: 0, through: 1 });
+        assert_eq!(one, "collab:req-1:bot:beta");
+        assert_eq!(one, two);
+    }
+
+    #[test]
+    fn room_mode_skips_members_already_targeted_by_the_same_composer_request() {
+        let mut r = room(Mode::RoundRobin);
+        r.member_cooldown_secs = 0;
+        let mut entry = e("you", "hi @ann", 1).unwrap();
+        entry.mentions_resolved = true;
+        entry.exclude_targets = vec!["ann".into()];
+        let (deliveries, _, state) = route(&r, &names(), State::default(), &[Some(entry)], 1, 1);
+        assert_eq!(called(&deliveries), ["bob"]);
+        assert_eq!(state.round.unwrap().next, 1);
     }
 
     #[test]
@@ -493,12 +553,18 @@ mod tests {
 
     #[test]
     fn transcript_lines_round_trip_and_render() {
-        let line = entry_line("ann", "hello\nthere", 0);
+        let line = entry_line("ann", "hello\nthere", 0, None, false, &[]).unwrap();
         assert!(line.ends_with('\n') && line.matches('\n').count() == 1);
         let entry: Entry = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!((entry.speaker.as_str(), entry.text.as_str()), ("ann", "hello\nthere"));
         let md = render_md(&[Some(entry), None]);
         assert!(md.starts_with("**ann** · "));
         assert!(md.contains("\nhello\nthere\n"));
+        let legacy: Entry = serde_json::from_str(r#"{"at":2,"speaker":"you","text":"old"}"#).unwrap();
+        assert!(legacy.id.is_none() && !legacy.mentions_resolved && legacy.exclude_targets.is_empty());
+        let composed: Entry = serde_json::from_str(entry_line("you", "@ann", 3, Some("r1"), true, &["ann".into()]).unwrap().trim()).unwrap();
+        assert_eq!(composed.id.as_deref(), Some("r1"));
+        assert!(composed.mentions_resolved);
+        assert_eq!(composed.exclude_targets, ["ann"]);
     }
 }

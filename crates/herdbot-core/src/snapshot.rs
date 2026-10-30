@@ -199,7 +199,9 @@ pub fn snapshot() -> Snapshot {
             }
         })
         .collect();
-    let mut runs: Vec<RunView> = home::list_runs()
+    let mut saved_runs = home::list_runs();
+    sort_runs(&mut saved_runs);
+    let runs: Vec<RunView> = saved_runs
         .into_iter()
         .filter(|run| run.status == "running")
         .map(|run| RunView {
@@ -210,7 +212,6 @@ pub fn snapshot() -> Snapshot {
             description: run.description,
         })
         .collect();
-    runs.sort_by(|a, b| a.id.cmp(&b.id));
     let mut blocked: Vec<Event> = event_logs(&mut warnings)
         .into_values()
         .filter_map(|events| latest_blocked(&events).cloned())
@@ -232,6 +233,10 @@ pub fn snapshot() -> Snapshot {
         cards: crate::cards::read_cards(),
         warnings,
     }
+}
+
+fn sort_runs(runs: &mut [home::Run]) {
+    runs.sort_by(|a, b| a.started_at.cmp(&b.started_at).then_with(|| a.id.cmp(&b.id)));
 }
 
 /// Polls the state and says what changed. Poll about once a second.
@@ -296,5 +301,16 @@ mod tests {
         let (events, _) = parse_events(&format!("{}\n{}\n", line("blocked"), line("turn_end")));
         assert!(latest_blocked(&events).is_none());
         assert!(latest_blocked(&[]).is_none());
+    }
+
+    #[test]
+    fn run_order_uses_start_time_then_stable_id() {
+        let mut runs = vec![
+            home::Run { id: "z".into(), started_at: 2, ..Default::default() },
+            home::Run { id: "b".into(), started_at: 1, ..Default::default() },
+            home::Run { id: "a".into(), started_at: 1, ..Default::default() },
+        ];
+        sort_runs(&mut runs);
+        assert_eq!(runs.iter().map(|run| run.id.as_str()).collect::<Vec<_>>(), ["a", "b", "z"]);
     }
 }

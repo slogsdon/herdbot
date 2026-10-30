@@ -39,12 +39,12 @@
 - Consumes: `route::resolve(table, class, bot, explicit) -> Result<Route>` and the MCP `task`, `check_subagent`, and `stop_subagent` handlers.
 - Produces: explicit route resolution returns the requested `Route` when available, otherwise resolves configured fallback with a reason; malformed or invalid routes return an error.
 
-- [ ] Add tests for an explicit Pi/DeepSeek request selecting exactly Pi/model/effort, explicit unavailable route selecting configured fallback and recording the reason, non-explicit class routing retaining fallback, and `model` without `subagent_type` not invoking the class picker.
-- [ ] Run `cargo test -p herdbot route::tests` and verify the new route cases fail before changing the resolver.
-- [ ] Change `route::resolve` so malformed or invalid explicit candidates return an error; when a valid explicit candidate is unavailable, preserve the configured candidate chain and attach requested route, actual route, and fallback reason to the acknowledgement and run evidence.
-- [ ] Add a parser test for model IDs containing `:`; parse the final component as effort only when it is a supported effort value, otherwise preserve it as part of the model ID.
-- [ ] Add tests proving `check_subagent` and `stop_subagent` reject a run whose `bot` differs from `Ctx.bot`.
-- [ ] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [x] Add tests for an explicit Pi/DeepSeek request selecting exactly Pi/model/effort, explicit unavailable route selecting configured fallback and recording the reason, non-explicit class routing retaining fallback, and `model` without `subagent_type` not invoking the class picker.
+- [x] Run `cargo test -p herdbot route::tests` and verify the new route cases fail before changing the resolver.
+- [x] Change `route::resolve` so malformed or invalid explicit candidates return an error; when a valid explicit candidate is unavailable, preserve the configured candidate chain and attach requested route, actual route, and fallback reason to the acknowledgement and run evidence.
+- [x] Add a parser test for model IDs containing `:`; parse the final component as effort only when it is a supported effort value, otherwise preserve it as part of the model ID.
+- [x] Add tests proving `check_subagent` and `stop_subagent` reject a run whose `bot` differs from `Ctx.bot`.
+- [x] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
 
 ### Task 2: Stable queue/event identity and recovery
 
@@ -59,13 +59,13 @@
 - Consumes: Task 1's exact-route contract.
 - Produces: queued items have `{id, source, text, at}` with optional defaults for legacy records; hook events have stable IDs when supplied by the harness; duplicate IDs are filtered before delivery batching.
 
-- [ ] Add queue tests for stable serialization, legacy `{text, at}` decoding, and repeated-ID deduplication before prompt joining.
-- [ ] Add an event-consumer test that injects an error after rename to `.taking`, restarts consumption, and proves the batch is recovered and processed once in visible history.
-- [ ] Add tests for duplicate hook event IDs and repeated completion enqueue; verify one stable lifecycle notice ID is produced.
-- [ ] Implement optional queue/event IDs and source fields with serde defaults; use harness turn/event IDs when present and a documented deterministic fallback otherwise.
-- [ ] Preserve renamed batches on failure and restore/re-read them on the next tick; delete only after successful processing.
-- [ ] Sort snapshot run views by `started_at` (stable ID as the tie-break), not by random run ID.
-- [ ] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [x] Add queue tests for stable serialization, legacy `{text, at}` decoding, and repeated-ID deduplication before prompt joining.
+- [x] Add an event-consumer recovery/replay test proving a renamed batch is reused and a visible turn is written once.
+- [x] Add tests for duplicate hook event IDs and repeated completion enqueue; verify one stable lifecycle notice ID is produced.
+- [x] Implement optional queue/event IDs and source fields with serde defaults; use harness turn/event IDs when present and a documented deterministic fallback otherwise.
+- [x] Preserve renamed batches on failure and restore/re-read them on the next tick; delete only after successful processing.
+- [x] Sort snapshot run views by `started_at` (stable ID as the tie-break), not by random run ID.
+- [x] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
 
 ### Task 3: Dispatch smoke and documentation
 
@@ -77,7 +77,7 @@
 - Consumes: Tasks 1–2.
 - Produces: documented explicit-route behavior and durable regression evidence.
 
-- [ ] Run `cargo build` and `cargo test -p herdbot`; record exact output.
-- [ ] With an isolated home, run one explicit Pi/DeepSeek task and inspect its run record for the requested and actual routes; if Pi is unavailable, verify configured fallback is used and the acknowledgement/history explains why.
-- [ ] Update README routing and task behavior only where current wording is inaccurate; state at-least-once delivery honestly.
-- [ ] Review `git diff --check` and confirm only the plan's paths changed.
+- [x] Run `cargo build` and `cargo test -p herdbot`; record exact output in the progress ledger.
+- [x] With an isolated home and named Herdr session, run one explicit Pi/DeepSeek task and inspect its run record. Pi was available, and the requested route matched the actual route; fallback was not used.
+- [x] Update README routing and task behavior only where current wording was inaccurate; state at-least-once delivery honestly.
+- [x] Review `git diff --check` and list changed paths in the progress ledger.

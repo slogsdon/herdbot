@@ -78,10 +78,17 @@ pub struct State {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub at: i64,
     /// "you", a bot slug, or "herdbot".
     pub speaker: String,
     pub text: String,
+    /// The composer already resolved @ targets, so the daemon must not parse the text again.
+    #[serde(default)]
+    pub mentions_resolved: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_targets: Vec<String>,
 }
 
 pub fn parse_room(text: &str) -> Result<Room> {

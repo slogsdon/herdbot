@@ -141,6 +141,20 @@ struct Composer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             note
+            if !chat.selectedCollaborators.isEmpty {
+                HStack {
+                    ForEach(chat.selectedCollaborators, id: \.self) { recipient in
+                        Button {
+                            chat.removeCollaborator(recipient)
+                        } label: {
+                            Label(recipientLabel(recipient), systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .accessibilityLabel("Remove \(recipientLabel(recipient))")
+                        .disabled(chat.hasPendingCollaboration)
+                    }
+                }
+            }
             TextField("Message \(title)", text: Binding(get: { chat.draft }, set: { chat.draft = $0 }), axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
@@ -157,6 +171,22 @@ struct Composer: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            if let query = chat.mentionQuery {
+                let options = MentionParser.suggestions(for: query, options: chat.mentionOptions)
+                if options.isEmpty {
+                    Text("No bots or rooms match @\(query)").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        ForEach(options.prefix(6)) { option in
+                            Button(option.label) { chat.addCollaborator(option.recipient) }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .disabled(chat.hasPendingCollaboration)
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Mention suggestions")
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -167,11 +197,19 @@ struct Composer: View {
         }
     }
 
+    private func recipientLabel(_ recipient: Recipient) -> String {
+        chat.mentionOptions.first { $0.recipient == recipient }?.label ?? recipient.key
+    }
+
     @ViewBuilder private var note: some View {
         if !hasHerdbot {
             Text("herdbot not found").font(.caption).foregroundStyle(.red)
         } else if case .failed(let message) = chat.sendStatus {
-            Text(message).font(.caption).foregroundStyle(.red).lineLimit(2)
+            HStack(spacing: 8) {
+                Text(message).font(.caption).foregroundStyle(.red).lineLimit(2)
+                Button("Retry failed") { Task { await chat.send() } }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
         } else if chat.daemonDown {
             Text("daemon not running; messages wait until it is").font(.caption).foregroundStyle(.orange)
         }

@@ -54,6 +54,27 @@ import Testing
         }
     }
 
+    @Test func collaborationSendsOneJSONBatchAndDecodesPerTargetResults() async throws {
+        let response = #"{"version":1,"request_id":"req-1","results":[{"target":{"kind":"bot","slug":"alpha"},"status":"queued","error":null},{"target":{"kind":"room","slug":"crew"},"status":"failed","error":"room unavailable"}]}"#
+        let script = try fakeHerdbot("""
+[ "$*" = 'collaborate --json' ] || exit 2
+payload=$(cat)
+printf '%s' "$payload" | grep -q '"request_id":"req-1"' || exit 3
+printf '%s' "$payload" | grep -q '"kind":"bot"' || exit 3
+printf '%s' "$payload" | grep -q '"slug":"alpha"' || exit 3
+printf '%s' "$payload" | grep -q '"kind":"room"' || exit 3
+printf '%s' "$payload" | grep -q '"slug":"crew"' || exit 3
+printf '%s\\n' '\(response)'
+""")
+        let results = try await ProcessCLI(binary: script).collaborate(requestID: "req-1", text: "hello world", targets: [.bot("alpha"), .room("crew")])
+        #expect(results == [CollaborationTargetResult(target: .bot("alpha"), status: "queued"), CollaborationTargetResult(target: .room("crew"), status: "failed", error: "room unavailable")])
+
+        let future = try fakeHerdbot(##"echo '{"version":2,"request_id":"req-1","results":[]}'"##)
+        await #expect(throws: CLIError.unsupported(2)) {
+            _ = try await ProcessCLI(binary: future).collaborate(requestID: "req-1", text: "x", targets: [.bot("alpha")])
+        }
+    }
+
     @Test func historyAsksForAPageAndDecodesIt() async throws {
         let page = ##"{"v":1,"target":"room:crew","total":1,"items":[{"n":0,"at":1,"kind":"user","text":"hi"}],"warnings":[]}"##
         let newest = try fakeHerdbot("[ \"$*\" = 'history room:crew --json --limit 3' ] && echo '\(page)'")

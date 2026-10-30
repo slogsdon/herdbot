@@ -42,6 +42,14 @@ public enum Timeline {
     }
 }
 
+/// Notification text stays generic so private prompts, results, and approval reasons remain in the app.
+public enum NotificationCopy {
+    public static let blockedTitle = "herdbot needs input"
+    public static let blockedBody = "An agent needs your input. Open herdbot to review."
+    public static let approvalTitle = "herdbot needs approval"
+    public static let approvalBody = "An agent needs your approval. Open herdbot to review."
+}
+
 public enum MarkdownListMarker: Hashable, Sendable {
     case bullet
     case ordered(Int)

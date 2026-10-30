@@ -41,13 +41,13 @@
 - Consumes: stable queue IDs from `2026-10-22-orchestration-reliability.md` Task 2.
 - Produces: `RunEvent { id, at, kind, summary, detail }`; optional `done_when`, `wall_clock_limit`, `active_seconds`, `summary`, and ordered `events` on `Run`.
 
-- [ ] Add tests for legacy Run deserialization, opt-in budget metadata, blocked-time pause/resume, expiration only after active-time limit, and stable event IDs.
-- [ ] Add tool schema tests for optional `done_when` and `wall_clock_limit` on `task`, `summary` on `report_result`, and the new `report_progress` tool.
-- [ ] Add the minimal serialized `RunEvent` and optional Run fields with serde defaults.
-- [ ] Record `started` and `progress` events in the run; coalesce progress inside 60 seconds by retaining the newest detail.
-- [ ] Enforce explicit wall-clock budgets in `watch_runs`; pause elapsed active time while herdr reports `blocked`, and mark an expired run distinctly before closing its pane.
-- [ ] Ensure `report_progress` writes only to the run record and does not enqueue a parent prompt; keep `report_result` queue delivery unchanged except for a concise summary plus the full result.
-- [ ] Run `cargo test -p herdbot` and `cargo clippy -p herdbot -- -D warnings`; expect pass.
+- [x] Add tests for legacy Run deserialization, opt-in budget metadata, blocked-time pause/resume, expiration only after active-time limit, and stable event IDs.
+- [x] Add tool schema tests for optional `done_when` and `wall_clock_limit` on `task`, `summary` on `report_result`, and the new `report_progress` tool.
+- [x] Add the minimal serialized `RunEvent` and optional Run fields with serde defaults.
+- [x] Record `started` and `progress` events in the run; coalesce progress inside 60 seconds by retaining the newest detail.
+- [x] Enforce explicit wall-clock budgets in `watch_runs`; pause elapsed active time while herdr reports `blocked`, and mark an expired run distinctly before closing its pane.
+- [x] Ensure `report_progress` writes only to the run record and does not enqueue a parent prompt; keep `report_result` queue delivery unchanged except for a concise summary plus the full result.
+- [x] Run `cargo test -p herdbot` (138 passed) and `cargo clippy -p herdbot -- -D warnings`; expect pass.
 
 ### Task 2: History projection for run events
 
@@ -60,11 +60,11 @@
 - Consumes: `RunEvent` and Run metadata from Task 1.
 - Produces: history items with stable ID, `kind: "notice"`, typed `source`, concise `text`, and optional full `detail`.
 
-- [ ] Add a fixture with two runs, progress events, a completed result, and ordinary turns; assert history merges by timestamp and deduplicates event IDs.
-- [ ] Project runs whose `parent_agent` matches the requested bot into its history; do not add these events to `turns.jsonl` or OptChat memory.
-- [ ] Use the explicit `report_result` summary; when no summary exists, use the first nonblank line capped at 120 characters while preserving full detail.
-- [ ] Preserve history protocol v1 for additive optional fields and new string kind values; add decoding tests for absent fields.
-- [ ] Run `cargo test -p herdbot` and inspect `herdbot history <bot> --json` output in a disposable home.
+- [x] Add a fixture with two runs, progress events, a completed result, and ordinary turns; assert history merges by timestamp and deduplicates event IDs.
+- [x] Project runs whose `parent_agent` matches the requested bot into its history; do not add these events to `turns.jsonl` or OptChat memory.
+- [x] Use the explicit `report_result` summary; when no summary exists, use the first nonblank line capped at 120 characters while preserving full detail.
+- [x] Preserve history protocol v1 for additive optional fields and new string kind values; add decoding tests for absent fields.
+- [x] Run `cargo test -p herdbot` (138 passed) and inspect `herdbot history alpha --json` in a disposable home; verify lifecycle IDs/source/kind/state and full detail.
 
 ### Task 3: Chat lifecycle entries and safe notifications
 
@@ -79,8 +79,10 @@
 - Consumes: Task 2 history item fields.
 - Produces: collapsed status row with source/state/summary and a click disclosure of full detail.
 
-- [ ] Add Swift decode/view-model tests for missing optional fields, completed/blocked/failed/expired states, long details, and ID-stable timeline entries.
-- [ ] Render `notice` and run lifecycle entries as compact centered system rows; add an accessible disclosure control for full detail.
-- [ ] Change blocked/card notification bodies to generic text; verify neither card title nor event reason appears in notification content.
-- [ ] Run `cd ui/menubar && ./scripts/test.sh` and `./scripts/build-app.sh`; expect all tests and the app target to pass.
-- [ ] Leave live notification/UI inspection for Shane and document the exact manual cases.
+**EasyUI-informed review:** Applies EasyUI's **Accessible & Type-Safe** principle through native SwiftUI disclosure controls and explicit accessibility labels; the implementation remains source-owned in this app. Each lifecycle row shows state and a concise summary, with full detail behind its disclosure. Custom spring motion was skipped because persisted status rows do not benefit from decorative movement; native disclosure behavior remains system-controlled. Loading/error states do not apply to persisted history entries; failed/blocked/stopped/expired are represented as states. Keyboard, VoiceOver, focus visibility, Reduce Motion, and visual hierarchy still require Shane's live UI check below.
+
+- [x] Add Swift decode/view-model tests for missing optional fields, completed/blocked/failed/stopped/expired states, long details, and ID-stable timeline entries.
+- [x] Render `notice` and run lifecycle entries as compact centered system rows; add an accessible disclosure control for full detail.
+- [x] Change blocked/card notification bodies to generic text; verify neither card title nor event reason appears in notification content.
+- [x] Run `cd ui/menubar && ./scripts/test.sh` (147 tests, 16 suites) and `./scripts/build-app.sh`; both pass.
+- [ ] Manual visual, notification, notification-routing, and VoiceOver checks are deferred by Shane (2026-10-29), not verified. The cases remain recorded in `.superpowers/sdd/2026-10-22-delegated-task-lifecycle/progress.md`.

@@ -6,11 +6,15 @@ The supplied *Build Your Own Duet* PDF is an independent engineering synthesis, 
 
 | Plan | State | Depends on |
 |---|---|---|
-| [Orchestration reliability](2026-10-22-orchestration-reliability.md) ([spec](../specs/2026-10-22-orchestration-reliability-design.md)) | Draft; unavailable explicit routes may fall back with visible route and reason | — |
-| [Delegated task lifecycle](2026-10-22-delegated-task-lifecycle.md) ([spec](../specs/2026-10-22-delegated-task-lifecycle-design.md)) | Draft; progress is chat-only | reliability plan |
-| [Chat provenance and collaboration](2026-10-22-chat-provenance.md) ([spec](../specs/2026-10-22-chat-provenance-design.md)) | Draft; agent messages are retained in memory; @ target is sole recipient | reliability and lifecycle plans |
+| [Orchestration reliability](2026-10-22-orchestration-reliability.md) ([spec](../specs/2026-10-22-orchestration-reliability-design.md)) | Tasks 1–3 implemented and automated-verified in uncommitted worktrees; live dispatch smoke passed | — |
+| [Delegated task lifecycle](2026-10-22-delegated-task-lifecycle.md) ([spec](../specs/2026-10-22-delegated-task-lifecycle-design.md)) | Tasks 1–3 implemented and automated-verified in uncommitted worktree; manual UI checks deferred by Shane (not verified) | reliability plan |
+| [Chat provenance and collaboration](2026-10-22-chat-provenance.md) ([spec](../specs/2026-10-22-chat-provenance-design.md)) | Tasks 1–3 implemented and automated-verified; live visual/accessibility checks deferred by Shane | reliability and lifecycle plans |
 
 These plans capture the resolved product decisions and remain sequenced after the active usability/settings roadmap.
+
+## Cross-cutting UI design review
+
+For each UI implementation or redesign, apply the tracked EasyUI-inspired review in `TASKS.md`: clear surface hierarchy and spacing, restrained tactile feedback, complete interaction states, keyboard/focus accessibility, and reduced-motion support. Keep components source-owned and follow native SwiftUI/AppKit conventions; EasyUI's React/Tailwind tokens and pointer effects are references, not implementation requirements. Sources: [EasyUI introduction](https://easyui.site/docs/introduction), [design system](https://github.com/Surajmaurya1/easyui/blob/main/EASYUI_COMPONENT_DESIGN_SYSTEM.md).
 
 Written 2026-10-20 for the roadmap items in the top-level README.
 

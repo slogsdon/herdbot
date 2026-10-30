@@ -79,9 +79,39 @@ struct MessageRow: View {
         switch item.kind {
         case "user": bubble(alignment: .trailing, fill: AnyShapeStyle(Color.accentColor), foreground: .white)
         case "notice":
-            Text(item.text).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            if item.source == "lifecycle" || item.state != nil {
+                lifecycleNotice
+            } else {
+                Text(item.text).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            }
         default: bubble(alignment: .leading, fill: AnyShapeStyle(.quaternary), foreground: .primary)
         }
+    }
+
+    private var lifecycleNotice: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                if let source = item.source { Text(source).textCase(.uppercase) }
+                if let state = item.state { Text(state) }
+                Text(item.text).lineLimit(2)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            if let detail = item.detail, !detail.isEmpty {
+                DisclosureGroup("Show details") {
+                    MarkdownText(source: detail)
+                        .font(.caption)
+                        .frame(maxWidth: 520, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .font(.caption2)
+                .frame(maxWidth: 520)
+                .accessibilityLabel("Lifecycle details")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 3)
     }
 
     private func bubble(alignment: HorizontalAlignment, fill: AnyShapeStyle, foreground: Color) -> some View {

@@ -234,7 +234,104 @@ pub struct Run {
     /// When the daemon first saw the agent settled; cleared while it works.
     #[serde(default)]
     pub settled_at: Option<i64>,
+    /// Stable lifecycle notices waiting for durable parent-queue delivery.
+    #[serde(default)]
+    pub outbox: Vec<RunNotice>,
+    /// Stable lifecycle notice and hook event IDs already applied to this run.
+    #[serde(default)]
+    pub event_ids: Vec<String>,
+    #[serde(default)]
+    pub requested_route: Option<String>,
+    #[serde(default)]
+    pub fallback_reason: Option<String>,
+    /// Optional completion criterion supplied with the task.
+    #[serde(default)]
+    pub done_when: Option<String>,
+    /// Explicit active-time budget in seconds. None means no timeout.
+    #[serde(default)]
+    pub wall_clock_limit: Option<u64>,
+    /// Accumulated active time in seconds when a budget is enabled.
+    #[serde(default)]
+    pub active_seconds: Option<u64>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub events: Vec<RunEvent>,
+    /// Internal accounting checkpoints used to pause a budget during approval blocks.
+    #[serde(default)]
+    pub blocked_since: Option<i64>,
+    #[serde(default)]
+    pub budget_checked_at: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunEvent {
+    pub id: String,
+    pub at: i64,
+    pub kind: String,
+    pub summary: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// Store one progress event per 60-second window, replacing its detail with the newest report.
+pub fn record_progress(run: &mut Run, detail: &str, at: i64) {
+    if let Some(event) = run.events.iter_mut().rev().find(|event| event.kind == "progress")
+        && at.saturating_sub(event.at) < 60
+    {
+        event.at = at;
+        event.summary = first_line_preview(detail);
+        event.detail = Some(detail.to_owned());
+        return;
+    }
+    run.events.push(RunEvent {
+        id: format!("run:{}:progress:{}", run.id, at),
+        at,
+        kind: "progress".into(),
+        summary: first_line_preview(detail),
+        detail: Some(detail.to_owned()),
+    });
+}
+
+pub fn first_line_preview(text: &str) -> String {
+    let line = text.lines().find(|line| !line.trim().is_empty()).unwrap_or("").trim();
+    line.chars().take(120).collect()
+}
+
+/// Persist a lifecycle notice before queueing it. The queue ID makes retries idempotent while
+/// the item is pending; delivery to herdr remains at-least-once across its API boundary.
+pub fn enqueue_run_notice(run: &mut Run, id: &str, text: &str) -> Result<()> {
+    stage_run_notice(run, id, text);
+    save_run(run)?;
+    drain_run_outbox(run)
+}
+
+fn stage_run_notice(run: &mut Run, id: &str, text: &str) {
+    if !run.outbox.iter().any(|notice| notice.id == id) && !run.event_ids.iter().any(|seen| seen == id) {
+        run.outbox.push(RunNotice { id: id.into(), text: text.into(), source: "lifecycle".into() });
+    }
+}
+
+pub fn drain_run_outbox(run: &mut Run) -> Result<()> {
+    let notices = run.outbox.clone();
+    for notice in notices {
+        enqueue_with_id(&run.parent_agent, notice.id.clone(), &notice.source, &notice.text)?;
+        run.outbox.retain(|pending| pending.id != notice.id);
+        run.event_ids.push(notice.id);
+        save_run(run)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunNotice {
+    pub id: String,
+    pub text: String,
+    #[serde(default = "notice_source")]
+    pub source: String,
+}
+
+fn notice_source() -> String { "lifecycle".into() }
 
 pub fn run_path(id: &str) -> PathBuf {
     sub(".runs").join(format!("{id}.json"))
@@ -278,14 +375,71 @@ pub fn now() -> i64 {
 
 /// Queue a prompt for `agent`. Only the daemon delivers, and only once the agent is idle:
 /// herdr's agent.prompt steers a busy pi turn and drops its in-flight answer.
-pub fn enqueue(agent: &str, text: &str) -> Result<()> {
-    let line = serde_json::to_string(&serde_json::json!({ "text": text, "at": now() }))?;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueuedItem {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default = "unknown_queue_source")]
+    pub source: String,
+    pub text: String,
+    pub at: i64,
+}
+
+pub fn dedupe_queue_items(items: impl IntoIterator<Item = QueuedItem>) -> Vec<QueuedItem> {
+    let mut seen = std::collections::HashSet::new();
+    items.into_iter().filter(|item| item.id.as_ref().is_none_or(|id| seen.insert(id.clone()))).collect()
+}
+
+fn unknown_queue_source() -> String { "unknown".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueReference {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default = "unknown_queue_source")]
+    pub source: String,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// Queue a prompt with a stable identity; repeated IDs are ignored before prompt joining.
+pub fn enqueue_with_id(agent: &str, id: impl Into<String>, source: &str, text: &str) -> Result<()> {
+    let id = id.into();
+    let path = sub(".queue").join(format!("{agent}.jsonl"));
+    let taken = path.with_extension("taking");
+    let inflight = root().join(".state").join("inflight").join(format!("{agent}.json"));
+    let turns = bot_dir(agent).join("turns.jsonl");
+    if [&path, &taken, &inflight, &turns].iter().any(|path| jsonl_has_message_id(path, &id)) {
+        return Ok(());
+    }
+    let line = serde_json::to_string(&QueuedItem { id: Some(id), source: source.into(), text: text.into(), at: now() })?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(sub(".queue").join(format!("{agent}.jsonl")))?;
     writeln!(file, "{line}")?;
     Ok(())
+}
+
+fn jsonl_has_message_id(path: &std::path::Path, wanted: &str) -> bool {
+    fs::read_to_string(path).unwrap_or_default().lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|value| json_contains_id(&value, wanted))
+}
+
+fn json_contains_id(value: &serde_json::Value, wanted: &str) -> bool {
+    value.get("id").and_then(serde_json::Value::as_str) == Some(wanted)
+        || value.as_array().is_some_and(|values| values.iter().any(|v| json_contains_id(v, wanted)))
+        || value.as_object().is_some_and(|values| values.values().any(|v| json_contains_id(v, wanted)))
+}
+
+/// Legacy enqueue gets a unique ID; callers retrying a lifecycle action should use enqueue_with_id.
+pub fn enqueue(agent: &str, text: &str) -> Result<()> {
+    enqueue_with_id(agent, run_id(), "unknown", text)
+}
+
+pub fn enqueue_from(agent: &str, source: &str, text: &str) -> Result<()> {
+    enqueue_with_id(agent, run_id(), source, text)
 }
 
 pub fn queue_dir() -> PathBuf {
@@ -474,6 +628,8 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 pub struct Inflight {
     pub prompt: String,
     pub at: i64,
+    #[serde(default)]
+    pub messages: Vec<QueueReference>,
 }
 
 /// A marker older than this is a crash's leftover, not a bot still working.
@@ -485,9 +641,13 @@ fn inflight_path(bot: &str) -> PathBuf {
 
 /// Mark `prompt` as delivered to `bot`'s main agent. A later delivery replaces it.
 pub fn write_inflight(bot: &str, prompt: &str) -> Result<()> {
+    write_inflight_with_messages(bot, prompt, Vec::new())
+}
+
+pub fn write_inflight_with_messages(bot: &str, prompt: &str, messages: Vec<QueueReference>) -> Result<()> {
     let path = inflight_path(bot);
     fs::create_dir_all(path.parent().unwrap())?;
-    write_json(&path, &Inflight { prompt: prompt.to_owned(), at: now() })
+    write_json(&path, &Inflight { prompt: prompt.to_owned(), at: now(), messages })
 }
 
 pub fn clear_inflight(bot: &str) {
@@ -507,6 +667,88 @@ mod tests {
     fn daemon_info_round_trips() {
         let info = DaemonInfo { version: "0.1.0".into(), exe: "/bin/herdbot".into(), pid: 42 };
         assert_eq!(serde_json::from_str::<DaemonInfo>(&serde_json::to_string(&info).unwrap()).unwrap(), info);
+    }
+
+    #[test]
+    fn queued_item_round_trips_and_legacy_records_decode() {
+        let item = QueuedItem { id: Some("q-1".into()), source: "hook".into(), text: "hello".into(), at: 7 };
+        assert_eq!(serde_json::from_str::<QueuedItem>(&serde_json::to_string(&item).unwrap()).unwrap(), item);
+        let legacy: QueuedItem = serde_json::from_str(r#"{"text":"old","at":4}"#).unwrap();
+        assert_eq!(legacy, QueuedItem { id: None, source: "unknown".into(), text: "old".into(), at: 4 });
+        let inflight: Inflight = serde_json::from_str(r#"{"prompt":"old","at":4}"#).unwrap();
+        assert!(inflight.messages.is_empty());
+    }
+
+    #[test]
+    fn inflight_keeps_queue_identity_and_source() {
+        let inflight = Inflight {
+            prompt: "joined".into(),
+            at: 4,
+            messages: vec![QueueReference { id: Some("q-1".into()), source: "bot_message".into(), text: Some("hello".into()) }],
+        };
+        let decoded: Inflight = serde_json::from_str(&serde_json::to_string(&inflight).unwrap()).unwrap();
+        assert_eq!(decoded, inflight);
+    }
+
+    #[test]
+    fn repeated_lifecycle_completion_keeps_one_stable_outbox_id() {
+        let mut run = Run { id: "r-7".into(), ..Run::default() };
+        let notice_id = format!("run:{}:completed", run.id);
+        stage_run_notice(&mut run, &notice_id, "finished");
+        stage_run_notice(&mut run, &notice_id, "finished");
+        assert_eq!(run.outbox.len(), 1);
+        assert_eq!(run.outbox[0].id, "run:r-7:completed");
+    }
+
+    #[test]
+    fn legacy_run_decodes_and_new_budget_metadata_is_opt_in() {
+        let legacy = r#"{"id":"old","bot":"b","parent_agent":"p","agent":"a","pane":"w:p1","class":"code","route":"pi:model","description":"old task","status":"running","started_at":10}"#;
+        let run: Run = serde_json::from_str(legacy).unwrap();
+        assert_eq!(run.wall_clock_limit, None);
+        assert!(run.events.is_empty());
+        let mut run = Run { wall_clock_limit: Some(300), done_when: Some("tests pass".into()), ..Default::default() };
+        run.active_seconds = Some(12);
+        let decoded: Run = serde_json::from_str(&serde_json::to_string(&run).unwrap()).unwrap();
+        assert_eq!(decoded.wall_clock_limit, Some(300));
+        assert_eq!(decoded.done_when.as_deref(), Some("tests pass"));
+        assert_eq!(decoded.active_seconds, Some(12));
+    }
+
+    #[test]
+    fn progress_is_coalesced_and_event_ids_are_stable() {
+        let mut run = Run { id: "r1".into(), ..Default::default() };
+        record_progress(&mut run, "first update", 100);
+        let id = run.events[0].id.clone();
+        record_progress(&mut run, "newest update", 159);
+        assert_eq!(run.events.len(), 1);
+        assert_eq!(run.events[0].id, id);
+        assert_eq!(run.events[0].at, 159);
+        assert_eq!(run.events[0].detail.as_deref(), Some("newest update"));
+        record_progress(&mut run, "later update", 219);
+        assert_eq!(run.events.len(), 2);
+        assert_ne!(run.events[1].id, id);
+    }
+
+    #[test]
+    fn fallback_preview_uses_first_nonblank_line_and_caps_at_120_chars() {
+        let input = format!("\n  {}\nsecond line", "x".repeat(130));
+        assert_eq!(first_line_preview(&input), "x".repeat(120));
+    }
+
+    #[test]
+    fn duplicate_queue_ids_are_removed_before_joining() {
+        let item = |id: Option<&str>, text: &str| QueuedItem { id: id.map(str::to_owned), source: "user".into(), text: text.into(), at: 1 };
+        let items = dedupe_queue_items([item(Some("same"), "first"), item(Some("same"), "duplicate"), item(None, "legacy")]);
+        assert_eq!(items.iter().map(|item| item.text.as_str()).collect::<Vec<_>>(), ["first", "legacy"]);
+    }
+
+    #[test]
+    fn message_id_lookup_covers_inflight_and_logged_turns() {
+        let inflight = serde_json::json!({"prompt":"joined","messages":[{"id":"collab:r:bot:a","source":"user"}]});
+        let turn = serde_json::json!({"id":"event-1","messages":[{"id":"collab:r:bot:a"}]});
+        assert!(json_contains_id(&inflight, "collab:r:bot:a"));
+        assert!(json_contains_id(&turn, "collab:r:bot:a"));
+        assert!(!json_contains_id(&turn, "collab:r:bot:b"));
     }
 
     #[test]

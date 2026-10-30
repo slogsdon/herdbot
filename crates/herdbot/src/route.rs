@@ -1,7 +1,8 @@
 //! routing.toml → (harness, model, effort) → herdr `agent.start` kind + args.
 
 use std::process::Command;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::{collections::HashMap, fmt};
 
 use toml::Value;
 
@@ -10,11 +11,28 @@ use crate::home::{self, Result};
 
 pub const DEFAULT_ROUTING: &str = include_str!("../../../routing.toml");
 
+#[derive(Debug)]
+enum AvailabilityError {
+    Unavailable(String),
+    Unknown(String),
+}
+
+impl fmt::Display for AvailabilityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable(reason) | Self::Unknown(reason) => f.write_str(reason),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Route {
     pub harness: String,
     pub model: String,
     pub effort: Option<String>,
+    /// Present only when an explicit request could not be used and fallback was selected.
+    pub requested: Option<String>,
+    pub fallback_reason: Option<String>,
 }
 
 impl std::fmt::Display for Route {
@@ -23,18 +41,48 @@ impl std::fmt::Display for Route {
         if let Some(e) = &self.effort {
             write!(f, ":{e}")?;
         }
+        if let (Some(requested), Some(reason)) = (&self.requested, &self.fallback_reason) {
+            write!(
+                f,
+                " (actual route {}; requested {requested}; fallback: {reason})",
+                self.route_name()
+            )?;
+        }
         Ok(())
     }
 }
 
+impl Route {
+    fn route_name(&self) -> String {
+        let mut route = format!("{}:{}", self.harness, self.model);
+        if let Some(effort) = &self.effort {
+            route.push(':');
+            route.push_str(effort);
+        }
+        route
+    }
+}
+
 pub fn parse(candidate: &str) -> Option<Route> {
-    let mut parts = candidate.splitn(3, ':');
-    let harness = parts.next()?.to_owned();
-    let model = parts.next()?.to_owned();
+    let (harness, rest) = candidate.split_once(':')?;
+    if harness.is_empty() || rest.is_empty() {
+        return None;
+    }
+    let (model, effort) = match rest.rsplit_once(':') {
+        Some((model, effort)) if matches!(effort, "low" | "medium" | "high") => {
+            (model, Some(effort.to_owned()))
+        }
+        _ => (rest, None),
+    };
+    if model.is_empty() {
+        return None;
+    }
     Some(Route {
-        harness,
-        model,
-        effort: parts.next().map(str::to_owned),
+        harness: harness.to_owned(),
+        model: model.to_owned(),
+        effort,
+        requested: None,
+        fallback_reason: None,
     })
 }
 
@@ -62,17 +110,62 @@ fn class_key(class: &str) -> &str {
 /// First available candidate for `class`, honouring `[bots.<slug>]` overrides and an
 /// explicit `model` ("harness:model[:effort]") when given.
 pub fn resolve(table: &Value, class: &str, bot: &str, explicit: Option<&str>) -> Result<Route> {
+    resolve_with(table, class, bot, explicit, available)
+}
+
+fn resolve_with(
+    table: &Value,
+    class: &str,
+    bot: &str,
+    explicit: Option<&str>,
+        is_available: fn(&Value, &Route) -> std::result::Result<(), AvailabilityError>,
+) -> Result<Route> {
+    let requested = if let Some(candidate) = explicit {
+        let route = parse(candidate).ok_or_else(|| format!("invalid explicit route {candidate:?}; expected harness:model[:effort]"))?;
+        if binary(&route.harness).is_none() {
+            return Err(format!("invalid explicit route {candidate:?}: unknown harness {:?}", route.harness).into());
+        }
+        Some((candidate.to_owned(), route))
+    } else {
+        None
+    };
+    if let Some((requested_text, route)) = &requested {
+        match is_available(table, route) {
+            Ok(()) => {
+                let effort = route.effort.clone().or_else(|| Some(default_effort(table, class)));
+                return Ok(Route { effort, ..route.clone() });
+            }
+            Err(AvailabilityError::Unknown(reason)) => {
+                return Err(format!("explicit route {requested_text} is invalid: {reason}").into());
+            }
+            Err(AvailabilityError::Unavailable(reason)) => {
+                let fallback = resolve_candidates(table, class, bot, is_available).map_err(|error| {
+                    format!("explicit route {requested_text} unavailable: {reason}; no configured fallback: {error}")
+                })?;
+                return Ok(Route {
+                    requested: Some(requested_text.clone()),
+                    fallback_reason: Some(reason),
+                    ..fallback
+                });
+            }
+        }
+    }
+    resolve_candidates(table, class, bot, is_available)
+}
+
+fn resolve_candidates(
+    table: &Value,
+    class: &str,
+    bot: &str,
+    is_available: fn(&Value, &Route) -> std::result::Result<(), AvailabilityError>,
+) -> Result<Route> {
     let key = class_key(class);
     let strings = |v: Option<&Value>| -> Vec<String> {
         v.and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|s| s.as_str().map(str::to_owned))
-                    .collect()
-            })
+            .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect())
             .unwrap_or_default()
     };
-    let mut candidates: Vec<String> = explicit.map(str::to_owned).into_iter().collect();
+    let mut candidates: Vec<String> = Vec::new();
     candidates.extend(strings(
         table
             .get("bots")
@@ -97,7 +190,7 @@ pub fn resolve(table: &Value, class: &str, bot: &str, explicit: Option<&str>) ->
             rejected.push(format!("{c}: not harness:model[:effort]"));
             continue;
         };
-        match available(table, &route) {
+        match is_available(table, &route) {
             Ok(()) => {
                 let effort = route.effort.clone().or_else(|| Some(default_effort(table, class)));
                 return Ok(Route { effort, ..route });
@@ -143,19 +236,19 @@ fn on_path(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn available(table: &Value, route: &Route) -> std::result::Result<(), String> {
-    let bin = binary(&route.harness).ok_or("unknown harness")?;
+fn available(table: &Value, route: &Route) -> std::result::Result<(), AvailabilityError> {
+    let bin = binary(&route.harness).ok_or_else(|| AvailabilityError::Unknown("unknown harness".into()))?;
     if !on_path(bin) {
-        return Err(format!("{bin} not on PATH"));
+        return Err(AvailabilityError::Unavailable(format!("{bin} not on PATH")));
     }
     if let Some(c) = cooldown::active(&route.harness) {
-        return Err(format!(
+        return Err(AvailabilityError::Unavailable(format!(
             "cooling down until {} ({})",
             c.until_local(),
             // The kind only: this error reaches agents' panes, and the raw CLI line would trip
             // detection there.
             c.reason.split(':').next().unwrap_or_default()
-        ));
+        )));
     }
     if route.harness == "pi" {
         let provider = table
@@ -164,33 +257,68 @@ fn available(table: &Value, route: &Route) -> std::result::Result<(), String> {
             .and_then(|p| p.get("provider"))
             .and_then(Value::as_str)
             .unwrap_or("opencode-go");
-        if !pi_models(provider).iter().any(|m| m == &route.model) {
-            return Err(format!(
-                "{} is not a {provider} model in `pi --list-models`",
-                route.model
-            ));
-        }
+        return pi_model_available(provider, &route.model);
     }
     Ok(())
 }
 
-/// Model ids `pi --list-models` lists for `provider` (read once per process).
-fn pi_models(provider: &str) -> &'static [String] {
-    static MODELS: OnceLock<Vec<String>> = OnceLock::new();
-    MODELS.get_or_init(|| {
-        let out = Command::new("pi")
+fn parse_pi_models(provider: &str, output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut cols = line.split_whitespace();
+            (cols.next()? == provider).then(|| cols.next().map(str::to_owned))?
+        })
+        .collect()
+}
+
+type PiModelCache = Mutex<HashMap<String, Vec<String>>>;
+
+fn parse_pi_model_listing(
+    provider: &str,
+    successful: bool,
+    output: &str,
+) -> std::result::Result<Vec<String>, AvailabilityError> {
+    if !successful {
+        return Err(AvailabilityError::Unavailable("`pi --list-models` did not complete successfully".into()));
+    }
+    Ok(parse_pi_models(provider, output))
+}
+
+fn check_pi_model_listing(
+    provider: &str,
+    model: &str,
+    models: &[String],
+) -> std::result::Result<(), AvailabilityError> {
+    if models.iter().any(|listed| listed == model) {
+        Ok(())
+    } else {
+        Err(AvailabilityError::Unknown(format!(
+            "{model} is not a {provider} model in the successful `pi --list-models` output"
+        )))
+    }
+}
+
+/// Successful model listings are cached per provider; failed lookups can be retried.
+fn pi_model_available(provider: &str, model: &str) -> std::result::Result<(), AvailabilityError> {
+    static MODELS: OnceLock<PiModelCache> = OnceLock::new();
+    let cache = MODELS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !cache.contains_key(provider) {
+        let output = Command::new("pi")
             .arg("--list-models")
             .output()
-            .map(|o| o.stdout)
-            .unwrap_or_default();
-        String::from_utf8_lossy(&out)
-            .lines()
-            .filter_map(|l| {
-                let mut cols = l.split_whitespace();
-                (cols.next()? == provider).then(|| cols.next().map(str::to_owned))?
-            })
-            .collect()
-    })
+            .map_err(|error| {
+                AvailabilityError::Unavailable(format!("could not run `pi --list-models`: {error}"))
+            })?;
+        let models = parse_pi_model_listing(
+            provider,
+            output.status.success(),
+            &String::from_utf8_lossy(&output.stdout),
+        )?;
+        cache.insert(provider.to_owned(), models);
+    }
+    check_pi_model_listing(provider, model, cache.get(provider).unwrap())
 }
 
 /// Launch flags for `mode`. Auto is each harness's own automatic review, never a bypass:
@@ -490,6 +618,26 @@ fn pi_extension() -> Result<String> {
 mod tests {
     use super::*;
 
+    fn all_available(_: &Value, _: &Route) -> std::result::Result<(), AvailabilityError> {
+        Ok(())
+    }
+
+    fn pi_unavailable(_: &Value, route: &Route) -> std::result::Result<(), AvailabilityError> {
+        if route.harness == "pi" {
+            Err(AvailabilityError::Unavailable("model listing unavailable".into()))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn pi_unknown(_: &Value, route: &Route) -> std::result::Result<(), AvailabilityError> {
+        if route.harness == "pi" {
+            Err(AvailabilityError::Unknown("model proven absent".into()))
+        } else {
+            Ok(())
+        }
+    }
+
     #[test]
     fn cursor_hook_config_preserves_and_adds_once() {
         let user_hook = serde_json::json!({ "command": "user-hook" });
@@ -608,14 +756,83 @@ mod tests {
             Some(Route {
                 harness: "codex".into(),
                 model: "gpt-6.1-sol".into(),
-                effort: Some("medium".into())
+                effort: Some("medium".into()),
+                requested: None,
+                fallback_reason: None,
             })
         );
         assert_eq!(parse("claude:claude-opus-5-5").unwrap().effort, None);
         assert_eq!(parse("claude"), None);
+        assert_eq!(parse("pi:provider:model:low"), Some(Route {
+            harness: "pi".into(), model: "provider:model".into(), effort: Some("low".into()), requested: None, fallback_reason: None
+        }));
+        assert_eq!(parse("pi:model:custom"), Some(Route {
+            harness: "pi".into(), model: "model:custom".into(), effort: None, requested: None, fallback_reason: None
+        }));
         assert_eq!(class_key("bash"), "shell");
         assert_eq!(class_key("compact"), "compact");
         assert_eq!(class_key("watch_video"), "default");
+    }
+
+    #[test]
+    fn explicit_pi_route_is_selected_exactly() {
+        let t: Value = "[default]\ncandidates = [\"codex:fallback:medium\"]\n".parse::<toml::Table>().unwrap().into();
+        let route = resolve_with(&t, "explore", "bot", Some("pi:deepseek-v4-flash:low"), all_available).unwrap();
+        assert_eq!(route.harness, "pi");
+        assert_eq!(route.model, "deepseek-v4-flash");
+        assert_eq!(route.effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn non_explicit_class_route_keeps_configured_candidate_order() {
+        let t: Value = "[default]\ncandidates = [\"codex:default:medium\"]\n[classes.explore]\ncandidates = [\"codex:class:low\"]\n"
+            .parse::<toml::Table>()
+            .unwrap()
+            .into();
+        let route = resolve_with(&t, "explore", "bot", None, all_available).unwrap();
+        assert_eq!(route.model, "class");
+        assert_eq!(route.effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn unavailable_explicit_route_uses_configured_fallback_with_reason() {
+        let t: Value = "[default]\ncandidates = [\"codex:fallback:medium\"]\n".parse::<toml::Table>().unwrap().into();
+        let route = resolve_with(&t, "explore", "bot", Some("pi:not-a-listed-model:low"), pi_unavailable).unwrap();
+        assert_eq!(route.harness, "codex");
+        assert_eq!(route.model, "fallback");
+        assert!(route.to_string().contains("actual route codex:fallback:medium"));
+        assert!(route.to_string().contains("requested pi:not-a-listed-model:low"));
+        assert!(route.to_string().contains("model listing unavailable"));
+    }
+
+    #[test]
+    fn authoritative_unknown_model_does_not_fall_back() {
+        let t: Value = "[default]\ncandidates = [\"codex:fallback:medium\"]\n".parse::<toml::Table>().unwrap().into();
+        let error = resolve_with(&t, "explore", "bot", Some("pi:unknown:low"), pi_unknown)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("model proven absent"));
+        assert!(!error.contains("fallback"));
+    }
+
+    #[test]
+    fn failed_model_listing_is_unavailable_but_successful_absence_is_unknown() {
+        assert!(matches!(
+            parse_pi_model_listing("opencode-go", false, ""),
+            Err(AvailabilityError::Unavailable(_))
+        ));
+        let models = parse_pi_model_listing("opencode-go", true, "opencode-go listed\n").unwrap();
+        assert!(matches!(
+            check_pi_model_listing("opencode-go", "missing", &models),
+            Err(AvailabilityError::Unknown(_))
+        ));
+        assert!(check_pi_model_listing("opencode-go", "listed", &models).is_ok());
+    }
+
+    #[test]
+    fn malformed_explicit_route_is_an_error() {
+        let t: Value = "[default]\ncandidates = [\"codex:fallback:medium\"]\n".parse::<toml::Table>().unwrap().into();
+        assert!(resolve_with(&t, "explore", "bot", Some("pi:"), all_available).is_err());
     }
 
     #[test]
@@ -713,6 +930,8 @@ mod tests {
                 harness: "codex".into(),
                 model: "gpt-6.1-sol".into(),
                 effort: Some("medium".into()),
+                requested: None,
+                fallback_reason: None,
             };
             let launch = launch(
                 &table,
@@ -740,6 +959,8 @@ mod tests {
                 harness: "codex".into(),
                 model: "gpt-6.1-sol".into(),
                 effort: Some("medium".into()),
+                requested: None,
+                fallback_reason: None,
             };
             for approvals in [home::Approvals::Auto, home::Approvals::Ask] {
                 let launch = launch(
@@ -774,6 +995,8 @@ mod tests {
                 harness: "claude".into(),
                 model: "claude-opus-5-5".into(),
                 effort: Some("medium".into()),
+                requested: None,
+                fallback_reason: None,
             };
             let sandboxed = launch(
                 &table,

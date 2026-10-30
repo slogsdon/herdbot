@@ -66,8 +66,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             await refreshStatus()
             guard authorized else { return }
             let content = UNMutableNotificationContent()
-            content.title = "\(card.bot) needs your approval"
-            content.body = card.title
+            content.title = NotificationCopy.approvalTitle
+            content.body = NotificationCopy.approvalBody
             content.sound = .default
             content.userInfo = ["agent": card.agent]
             let request = UNNotificationRequest(identifier: "card-\(card.id)", content: content, trigger: nil)
@@ -81,8 +81,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     private func add(_ event: Event) async {
         let content = UNMutableNotificationContent()
-        content.title = "\(event.agent) is waiting"
-        content.body = event.reason ?? "needs your input"
+        content.title = NotificationCopy.blockedTitle
+        content.body = NotificationCopy.blockedBody
         content.sound = .default
         content.userInfo = ["agent": event.agent]
         let request = UNNotificationRequest(identifier: "blocked-\(event.agent)-\(event.at)", content: content, trigger: nil)

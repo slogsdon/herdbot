@@ -6,7 +6,7 @@ import Testing
 @Suite struct Composer {
     func make(_ cli: FakeCLI, daemon: String = "up") -> (ChatState, MenuState) {
         let menu = MenuState()
-        menu.apply(line(snapshot(daemon: daemon, bots: [BotView(slug: "alpha", title: "Alpha", up: true), BotView(slug: "beta", title: "Beta", up: true)])))
+        menu.apply(line(snapshot(daemon: daemon, bots: [BotView(slug: "alpha", title: "Alpha", up: true), BotView(slug: "beta", title: "Beta", up: true)], rooms: [RoomView(slug: "crew", name: "Crew", mode: "channel", paused: false)])))
         return (ChatState(menu: menu, cli: cli), menu)
     }
 
@@ -75,6 +75,58 @@ import Testing
         chat.draft = "hi"
         #expect(chat.daemonDown)
         #expect(await chat.send())
+    }
+
+    @Test func fanoutIncludesTheOpenConversationAndUniqueStagedCollaborators() async {
+        let cli = FakeCLI()
+        let (chat, _) = make(cli)
+        await chat.select(.bot("alpha"))
+        chat.draft = "hello @be"
+        #expect(chat.mentionQuery == "be")
+        chat.addCollaborator(.bot("beta"))
+        chat.addCollaborator(.room("crew"))
+        #expect(chat.draft == "hello")
+        chat.addCollaborator(.bot("beta"))
+        chat.draft = "hello there"
+        #expect(await chat.send())
+        #expect(chat.selection == .bot("alpha"))
+        #expect(cli.collaborationCalls.count == 1)
+        #expect(cli.collaborationCalls[0].1 == "hello there")
+        #expect(cli.collaborationCalls[0].2 == [.bot("alpha"), .bot("beta"), .room("crew")])
+        #expect(chat.draft.isEmpty)
+    }
+
+    @Test func typedMentionsResolveAtSubmitAndUnknownMentionsDoNotSend() async {
+        let cli = FakeCLI()
+        let (chat, _) = make(cli)
+        await chat.select(.bot("alpha"))
+        chat.draft = "ask @BETA and @alpha; email me@beta.com"
+        #expect(await chat.send())
+        #expect(cli.collaborationCalls[0].2 == [.bot("alpha"), .bot("beta")])
+
+        chat.draft = "ask @missing"
+        #expect(!(await chat.send()))
+        #expect(chat.draft == "ask @missing")
+        #expect(chat.sendStatus == .failed("No bot or room matches @missing"))
+        #expect(cli.collaborationCalls.count == 1)
+    }
+
+    @Test func partialFailureKeepsDraftAndRetriesOnlyFailedTargetsWithSameRequestID() async {
+        let cli = FakeCLI()
+        cli.collaborationFailures[.room("crew")] = "room unavailable"
+        let (chat, _) = make(cli)
+        await chat.select(.bot("alpha"))
+        chat.addCollaborator(.room("crew"))
+        chat.draft = "keep me"
+        #expect(!(await chat.send()))
+        #expect(chat.draft == "keep me")
+        #expect(cli.collaborationCalls[0].2 == [.bot("alpha"), .room("crew")])
+        let firstID = cli.collaborationCalls[0].0
+        cli.collaborationFailures = [:]
+        #expect(await chat.send())
+        #expect(cli.collaborationCalls[1].0 == firstID)
+        #expect(cli.collaborationCalls[1].2 == [.room("crew")])
+        #expect(chat.selection == .bot("alpha"))
     }
 
     @Test func anAgentMapsToItsBot() async {

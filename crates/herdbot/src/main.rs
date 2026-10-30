@@ -17,7 +17,7 @@ mod setup;
 mod shellenv;
 mod tools;
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use herdbot_core::{cooldown, history, home, snapshot};
 use herdr_client::Client;
@@ -46,6 +46,7 @@ const USAGE: &str = "usage:
   herdbot card list [--json]            prompts waiting for you
   herdbot card answer <card-id> <option-id>   answer one, after checking it is still on screen
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
+  herdbot collaborate --json              fan out one JSON request from stdin
   herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
   herdbot room send <room> <text…> | room list | room up <room>
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
@@ -259,10 +260,11 @@ async fn cli() -> Result<()> {
             let bot = args.first().ok_or(USAGE)?.clone();
             // Only the daemon launches bots: it brings a stopped bot up when it finds its queue.
             home::load_bot(&bot)?;
-            home::enqueue(&run::main_agent(&bot), &rest(&args, 1))?;
+            home::enqueue_from(&run::main_agent(&bot), "user", &rest(&args, 1))?;
             println!("queued for {bot} (the daemon delivers it)");
             Ok(())
         }
+        "collaborate" => collaborate(&args),
         "task" => {
             let (bot, class) = (
                 args.first().ok_or(USAGE)?.clone(),
@@ -273,10 +275,14 @@ async fn cli() -> Result<()> {
                 &herdr,
                 &bot,
                 &run::main_agent(&bot),
-                &class,
-                None,
-                "shell task",
-                &prompt,
+                run::SpawnRequest {
+                    class: &class,
+                    explicit_model: None,
+                    description: "shell task",
+                    prompt: &prompt,
+                    done_when: None,
+                    wall_clock_limit: None,
+                },
             )
             .await?;
             println!("run {} {} on {} in {}", r.id, r.status, r.route, r.pane);
@@ -415,5 +421,94 @@ async fn cli() -> Result<()> {
             Ok(())
         }
         _ => Err(USAGE.into()),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CollaborationRequest {
+    request_id: String,
+    text: String,
+    targets: Vec<CollaborationTarget>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq, Hash)]
+struct CollaborationTarget {
+    kind: String,
+    slug: String,
+}
+
+#[derive(serde::Serialize)]
+struct CollaborationResult {
+    version: u8,
+    request_id: String,
+    results: Vec<CollaborationTargetResult>,
+}
+
+#[derive(serde::Serialize)]
+struct CollaborationTargetResult {
+    target: CollaborationTarget,
+    status: &'static str,
+    error: Option<String>,
+}
+
+fn collaboration_target_id(request_id: &str, target: &CollaborationTarget) -> String {
+    format!("collab:{request_id}:{}:{}", target.kind, target.slug)
+}
+
+fn unique_collaboration_targets(targets: Vec<CollaborationTarget>) -> Vec<CollaborationTarget> {
+    let mut seen = std::collections::HashSet::new();
+    targets.into_iter().filter(|target| seen.insert(target.clone())).collect()
+}
+
+fn collaborate(args: &[String]) -> Result<()> {
+    if args != ["--json"] { return Err(USAGE.into()); }
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let request: CollaborationRequest = serde_json::from_str(&input)?;
+    if request.request_id.is_empty() || request.request_id.len() > 80 ||
+        !request.request_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err("request_id must be 1-80 ASCII letters, digits, '_' or '-'".into());
+    }
+    if request.text.trim().is_empty() || request.targets.is_empty() {
+        return Err("text and at least one target are required".into());
+    }
+    let mut results = Vec::new();
+    let explicitly_targeted_bots: Vec<String> = request.targets.iter()
+        .filter(|target| target.kind == "bot")
+        .map(|target| target.slug.clone())
+        .collect();
+    for target in unique_collaboration_targets(request.targets) {
+        let stable_id = collaboration_target_id(&request.request_id, &target);
+        let slug = home::slug(&target.slug);
+        let outcome = match target.kind.as_str() {
+            "bot" if !slug.is_empty() && slug == target.slug => {
+                home::load_bot(&slug).and_then(|_| home::enqueue_with_id(&run::main_agent(&slug), stable_id, "user", &request.text))
+            }
+            "room" if !slug.is_empty() && slug == target.slug => {
+                rooms::load_room(&slug).and_then(|_| rooms::append_with_id(&slug, "you", &request.text, Some(&stable_id), true, &explicitly_targeted_bots))
+            }
+            "bot" | "room" => Err(format!("invalid or unknown target {:?}", target.slug).into()),
+            kind => Err(format!("unknown target kind {kind:?}").into()),
+        };
+        match outcome {
+            Ok(()) => results.push(CollaborationTargetResult { target, status: "queued", error: None }),
+            Err(error) => results.push(CollaborationTargetResult { target, status: "failed", error: Some(error.to_string()) }),
+        }
+    }
+    println!("{}", serde_json::to_string(&CollaborationResult { version: 1, request_id: request.request_id, results })?);
+    Ok(())
+}
+
+#[cfg(test)]
+mod collaboration_tests {
+    use super::*;
+
+    #[test]
+    fn targets_are_deduplicated_by_type_and_have_stable_ids() {
+        let bot = CollaborationTarget { kind: "bot".into(), slug: "alpha".into() };
+        let room = CollaborationTarget { kind: "room".into(), slug: "alpha".into() };
+        assert_eq!(unique_collaboration_targets(vec![bot.clone(), bot.clone(), room.clone()]), [bot.clone(), room]);
+        assert_eq!(collaboration_target_id("r-1", &bot), "collab:r-1:bot:alpha");
     }
 }

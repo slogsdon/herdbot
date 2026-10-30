@@ -78,6 +78,8 @@ let failHarnesses = DoctorCheck(id: "harnesses", status: .fail, message: "none o
 /// Records what quick entry sends; `failure` makes the next send throw.
 final class FakeCLI: HerdbotCLI, @unchecked Sendable {
     nonisolated(unsafe) var sent: [(Recipient, String)] = []
+    nonisolated(unsafe) var collaborationCalls: [(String, String, [Recipient])] = []
+    nonisolated(unsafe) var collaborationFailures: [Recipient: String] = [:]
     nonisolated(unsafe) var failure: String?
 
     func watch() -> AsyncThrowingStream<StreamLine, Error> { AsyncThrowingStream { $0.finish() } }
@@ -85,6 +87,18 @@ final class FakeCLI: HerdbotCLI, @unchecked Sendable {
     func send(to recipient: Recipient, text: String) async throws {
         if let failure { throw CLIError.failed(failure) }
         sent.append((recipient, text))
+    }
+    func collaborate(requestID: String, text: String, targets: [Recipient]) async throws -> [CollaborationTargetResult] {
+        if let failure { throw CLIError.failed(failure) }
+        collaborationCalls.append((requestID, text, targets))
+        return targets.map { target in
+            if let error = collaborationFailures[target] {
+                return CollaborationTargetResult(target: target, status: "failed", error: error)
+            } else {
+                sent.append((target, text))
+                return CollaborationTargetResult(target: target, status: "queued")
+            }
+        }
     }
     /// What `history` answers, keyed by target; an absent target is an empty conversation.
     nonisolated(unsafe) var pages: [Recipient: [HistoryItem]] = [:]

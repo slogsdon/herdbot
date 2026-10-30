@@ -172,6 +172,8 @@ public struct HistoryItem: Codable, Hashable, Sendable, Identifiable {
     /// Index among the persisted items, stable as new ones append. nil while pending.
     public let n: Int?
     public let at: Int
+    /// Stable run-event identifier when `source` is lifecycle.
+    public let eventID: String?
     /// "user", "bot" or "notice".
     public let kind: String
     /// A room's speaker (a bot slug) on `bot` items.
@@ -179,17 +181,27 @@ public struct HistoryItem: Codable, Hashable, Sendable, Identifiable {
     public let text: String
     /// "inflight" or "queued" on pending items.
     public let state: String?
+    public let source: String?
+    /// Full result or event reason, disclosed on demand for lifecycle entries.
+    public let detail: String?
 
-    public init(n: Int?, at: Int, kind: String, speaker: String? = nil, text: String, state: String? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case n, at, eventID = "id", kind, speaker, text, state, source, detail
+    }
+
+    public init(n: Int?, at: Int, kind: String, speaker: String? = nil, text: String, state: String? = nil, eventID: String? = nil, source: String? = nil, detail: String? = nil) {
         self.n = n
         self.at = at
+        self.eventID = eventID
         self.kind = kind
         self.speaker = speaker
         self.text = text
         self.state = state
+        self.source = source
+        self.detail = detail
     }
 
-    public var id: String { n.map { "n\($0)" } ?? "p:\(state ?? ""):\(at):\(text)" }
+    public var id: String { eventID ?? n.map { "n\($0)" } ?? "p:\(state ?? ""):\(at):\(text)" }
     public var isPending: Bool { n == nil }
 }
 

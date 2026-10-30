@@ -81,6 +81,7 @@ herdbot config unset <key> [--bot BOT] [--json]         remove one setting (its 
 herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
 herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
 herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation's items, newest page first (for UIs)
+herdbot collaborate --json              accept one stable-ID multi-target request on stdin
 herdbot focus <agent>                  focus an agent's pane in herdr
 herdbot up <bot> | down <bot>          start or stop a bot's workspace
 herdbot room new | send | list | up    group conversations between bots and you
@@ -213,6 +214,8 @@ A prompt sent to a busy agent steers its current turn, and the answer it was wor
 
 When the daemon delivers a prompt to a bot's main agent it also writes `.state/inflight/<bot>.json` (`{"prompt","at"}`), and removes it when that turn is logged to `turns.jsonl`. `turns.jsonl` only gets a line when a turn ends, so this marker is how a UI shows your message while the bot works (`working` in `status --json`, and an `inflight` item in `history`). A marker older than an hour is ignored. If two prompts are delivered before a turn ends, only the latest is shown.
 
+`herdbot collaborate --json` accepts a version-1 JSON request on stdin with `request_id`, `text`, and typed bot/room `targets`. It returns one queued/failed result per unique target. Bot queue records use stable IDs derived from the request and target and source `user`; retried requests do not enqueue a duplicate even after delivery is recorded in inflight or turn history. Room posts use the same stable ID in `transcript.jsonl`; composer-resolved mentions are not parsed again by the room router, and bots already directly targeted are excluded from room fan-out. Old queue and turn records without source metadata appear as `unknown` in history and are not imported as user instructions into OptChat memory. History and watch remain protocol v1 with additive fields.
+
 Two known limitations:
 
 - While a trust or warning modal is up (codex's first run in a directory, for example), herdr can report the agent as idle. The daemon then types into the modal and the queued item is lost. When `fm` is available, the daemon holds the delivery (up to 8 retries, about 2 min) while fm reads a prompt in the pane, so accepting the modal lets it through. Without fm it is lost as before. I haven't seen this hold fire on a real modal: codex showed no trust prompt in the two fresh directories I tried.
@@ -223,7 +226,7 @@ Two known limitations:
 1. A bot calls `task{description, prompt, subagent_type?, model?}`.
 2. The router resolves the task class, any bot override and any explicit model to `harness:model[:effort]` (see Routing).
 3. herdbot splits a pane to the right of the bot's root pane, with `HERDBOT_BOT/RUN/TOOLS/EXE/HOME` in its environment.
-4. It starts the agent as `<slug>-<run>` and sends one prompt, which is the task plus a footer asking for `report_result`. If the agent is still idle 15 s later, the prompt goes out once more. If that fails too, the run fails with "did not start a turn". I've seen the lost prompt once, with codex, and haven't reproduced it, so the resend path is untested. A main agent that fails to start this way has its workspace closed instead of being left running with no recorded route.
+4. It starts the agent as `<slug>-<run>` and submits the task plus a footer asking for `report_result`. If the agent is still idle 15 s later, herdbot retries the prompt once. Delivery across herdr is at-least-once where its API has no idempotency key, so a retry may deliver a duplicate. If the retry fails too, the run fails with "did not start a turn". I've seen the lost prompt once, with codex, and haven't reproduced it, so the resend path is untested. A main agent that fails to start this way has its workspace closed instead of being left running with no recorded route.
 5. `task` returns the run id once the agent has taken the task, usually within a few seconds. Tool calls never wait on a subagent, because harness tool timeouts are short.
 6. The run finishes one of four ways:
    - **`report_result`** marks the run done and queues `[subagent <id> "<desc>" finished]` with the result for the parent.
@@ -346,6 +349,8 @@ The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in 
 4. `[default]`
 
 The first available candidate wins. A harness is available when its binary is on `PATH` and it isn't cooling down after a quota or auth failure. Task classes are Grok Bot's subagent types (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`, and `compact` for a memory bot's compactor runs (see [Memory](#memory)). The model IDs were listed by the installed CLIs on 2026-10-19. Which model suits which task is my judgment, so tune it.
+
+An available explicit `model` launches that exact harness, model and effort. If a valid explicit route is unavailable, herdbot may use the configured fallback and reports the requested route, actual route and reason in its acknowledgement and history. Invalid explicit routes return an actionable error.
 
 Every launched agent gets an explicit effort. A candidate without one takes its class's `effort`, then `[default] effort`, then `medium`, so a harness never falls back to your global setting.
 

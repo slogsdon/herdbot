@@ -22,7 +22,9 @@ pub fn list(in_run: bool) -> Value {
                 "description": { "type": "string", "description": "3-6 word label" },
                 "prompt": { "type": "string", "description": "Complete, self-contained task. The subagent sees nothing else." },
                 "subagent_type": { "type": "string", "description": "Routing class: explore, shell, plan, code, review, debug, research, media_review, browser_use, computer_use, custom. Default: default." },
-                "model": { "type": "string", "description": "Optional harness:model[:effort] override, e.g. pi:kimi-k2.7-code:medium" }
+                "model": { "type": "string", "description": "Optional harness:model[:effort] override, e.g. pi:kimi-k2.7-code:medium" },
+                "done_when": { "type": "string", "description": "Optional completion criterion for this task." },
+                "wall_clock_limit": { "type": "integer", "minimum": 1, "description": "Optional active-time limit in seconds. Time waiting for approval is paused." }
             }}
         }),
         json!({
@@ -53,7 +55,12 @@ pub fn list(in_run: bool) -> Value {
         tools.push(json!({
             "name": "report_result",
             "description": "Deliver your final answer to whoever started you. Call once, at the end.",
-            "inputSchema": { "type": "object", "required": ["result"], "properties": { "result": { "type": "string" } } }
+            "inputSchema": { "type": "object", "required": ["result"], "properties": { "result": { "type": "string" }, "summary": { "type": "string", "description": "Optional concise completion summary." } } }
+        }));
+        tools.push(json!({
+            "name": "report_progress",
+            "description": "Report a concise progress update. Updates are coalesced and shown in chat; this does not wake the parent agent.",
+            "inputSchema": { "type": "object", "required": ["progress"], "properties": { "progress": { "type": "string", "description": "Current progress, blockers, or next step." } } }
         }));
     }
     if !in_run {
@@ -136,6 +143,17 @@ fn refuse_self(target: &str, ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
+fn should_pick_class(subagent_type: Option<&str>, model: Option<&str>) -> bool {
+    subagent_type.is_none() && model.is_none()
+}
+
+fn check_run_owner(owner: &str, ctx: &Ctx) -> Result<()> {
+    if owner != ctx.bot {
+        return Err(format!("run belongs to bot {owner:?}, not {:?}", ctx.bot).into());
+    }
+    Ok(())
+}
+
 /// Resolve a bot name or slug to an existing slug.
 fn find_bot(name: &str) -> Result<String> {
     let wanted = home::slug(name);
@@ -165,32 +183,46 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
     match name {
         "task" => {
             let named = args.get("subagent_type").and_then(Value::as_str);
-            let picked = match named {
-                Some(_) => None,
-                None => crate::fm::pick_class(arg(args, "description")?, arg(args, "prompt")?).await,
+            let model = args.get("model").and_then(Value::as_str);
+            let picked = if should_pick_class(named, model) {
+                crate::fm::pick_class(arg(args, "description")?, arg(args, "prompt")?).await
+            } else {
+                None
             };
             let class = named.or(picked).unwrap_or("default");
-            let model = args.get("model").and_then(Value::as_str);
+            let done_when = args.get("done_when").map(|value| {
+                value.as_str().ok_or("done_when must be a string")
+            }).transpose()?;
+            let wall_clock_limit = match args.get("wall_clock_limit") {
+                Some(value) => Some(value.as_u64().filter(|limit| *limit > 0)
+                    .ok_or("wall_clock_limit must be a positive integer")?),
+                None => None,
+            };
             let run = run::spawn(
                 &herdr,
                 &ctx.bot,
                 &me,
-                class,
-                model,
-                arg(args, "description")?,
-                arg(args, "prompt")?,
+                crate::run::SpawnRequest {
+                    class,
+                    explicit_model: model,
+                    description: arg(args, "description")?,
+                    prompt: arg(args, "prompt")?,
+                    done_when,
+                    wall_clock_limit,
+                },
             )
             .await?;
             Ok(match run.status.as_str() {
                 "failed" => format!("run {} failed: {}", run.id, run.result.unwrap_or_default()),
-                _ => format!(
-                    "started run {} on {} in pane {}. Its result will arrive as a message.",
-                    run.id, run.route, run.pane
-                ),
+                _ => match (&run.requested_route, &run.fallback_reason) {
+                    (Some(requested), Some(reason)) => format!("started run {} on {} in pane {}. Requested route {} was unavailable: {}. Its result will arrive as a message.", run.id, run.route, run.pane, requested, reason),
+                    _ => format!("started run {} on {} in pane {}. Its result will arrive as a message.", run.id, run.route, run.pane),
+                },
             })
         }
         "check_subagent" => {
             let run = home::load_run(arg(args, "run_id")?).ok_or("unknown run id")?;
+            check_run_owner(&run.bot, ctx)?;
             let live = run::status(&herdr, &run.agent)
                 .await
                 .unwrap_or_else(|| "gone".into());
@@ -203,11 +235,19 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
         }
         "stop_subagent" => {
             let mut run = home::load_run(arg(args, "run_id")?).ok_or("unknown run id")?;
+            check_run_owner(&run.bot, ctx)?;
             let _ = herdr.pane_close(&run.pane).await;
             run.pane_closed = true;
             if run.status == "running" {
                 run.status = "failed".into();
                 run.result = Some("stopped".into());
+                run.events.push(home::RunEvent {
+                    id: format!("run:{}:stopped", run.id),
+                    at: home::now(),
+                    kind: "stopped".into(),
+                    summary: "Task stopped.".into(),
+                    detail: None,
+                });
             }
             home::save_run(&run)?;
             Ok(format!("stopped {}", run.id))
@@ -216,8 +256,9 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             // Enqueue only; the daemon starts the target if it is down (one launcher, no races).
             let target = find_bot(arg(args, "bot")?)?;
             refuse_self(&target, ctx)?;
-            home::enqueue(
+            home::enqueue_from(
                 &run::main_agent(&target),
+                "bot_message",
                 &format!(
                     "[message from {}]\n{}\n\n(Reply with send_to_agent to \"{}\" if a reply is needed.)",
                     ctx.bot,
@@ -260,18 +301,30 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 .ok_or("report_result is only for subagent runs")?;
             let mut run = home::load_run(id).ok_or("unknown run")?;
             let result = arg(args, "result")?.to_owned();
+            let summary = args.get("summary").and_then(Value::as_str).map(str::to_owned)
+                .unwrap_or_else(|| home::first_line_preview(&result));
             run.status = "done".into();
             run.result = Some(result.clone());
             run.result_source = "report".into();
-            home::save_run(&run)?;
-            home::enqueue(
-                &run.parent_agent,
-                &format!(
-                    "[subagent {} \"{}\" finished]\n{result}",
+            run.summary = Some(summary.clone());
+            run.events.push(home::RunEvent {
+                id: format!("run:{}:completed", run.id), at: home::now(), kind: "completed".into(),
+                summary: summary.clone(), detail: Some(result.clone()),
+            });
+            let notice = format!(
+                    "[subagent {} \"{}\" finished]\nSummary: {summary}\n\nFull result:\n{result}",
                     run.id, run.description
-                ),
-            )?;
+                );
+            let notice_id = format!("run:{}:completed", run.id);
+            home::enqueue_run_notice(&mut run, &notice_id, &notice)?;
             Ok("delivered. You can stop now.".into())
+        }
+        "report_progress" => {
+            let id = ctx.run.as_deref().ok_or("report_progress is only for subagent runs")?;
+            let mut run = home::load_run(id).ok_or("unknown run")?;
+            home::record_progress(&mut run, arg(args, "progress")?, home::now());
+            home::save_run(&run)?;
+            Ok("progress recorded".into())
         }
         "write_node" => {
             let id = ctx.run.as_deref().ok_or("write_node is for compactor runs")?;
@@ -309,5 +362,38 @@ mod tests {
         );
         assert!(refuse_self("alpha", &sub).is_ok());
         assert!(refuse_self("beta", &main).is_ok());
+    }
+
+    #[test]
+    fn explicit_model_skips_class_picker_without_named_type() {
+        assert!(!should_pick_class(None, Some("pi:deepseek-v4-flash:low")));
+        assert!(!should_pick_class(Some("code"), None));
+        assert!(should_pick_class(None, None));
+    }
+
+    #[test]
+    fn run_ownership_is_checked_before_herdr_access() {
+        let ctx = Ctx { bot: "alpha".into(), run: None };
+        assert!(check_run_owner("alpha", &ctx).is_ok());
+        assert_eq!(
+            check_run_owner("beta", &ctx).unwrap_err().to_string(),
+            "run belongs to bot \"beta\", not \"alpha\""
+        );
+    }
+
+    #[test]
+    fn lifecycle_tool_schemas_are_optional_and_subagent_only() {
+        let names = |in_run| list(in_run).as_array().unwrap().iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let main_names = names(false);
+        assert!(!main_names.iter().any(|name| name == "report_progress"));
+        let run_tools = list(true);
+        let by_name = |name: &str| run_tools.as_array().unwrap().iter().find(|tool| tool["name"] == name).unwrap();
+        for field in ["done_when", "wall_clock_limit"] {
+            assert!(by_name("task")["inputSchema"]["properties"].get(field).is_some());
+            assert!(!by_name("task")["inputSchema"]["required"].as_array().unwrap().iter().any(|v| v == field));
+        }
+        assert!(by_name("report_result")["inputSchema"]["properties"].get("summary").is_some());
+        assert!(by_name("report_progress")["inputSchema"]["properties"].get("progress").is_some());
     }
 }

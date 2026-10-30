@@ -22,8 +22,45 @@ public protocol HerdbotCLI: Sendable {
     func focus(agent: String) async throws
     /// `herdbot send <bot> <text>` or `herdbot room send <room> <text>`: queues the text.
     func send(to recipient: Recipient, text: String) async throws
+    /// One idempotent v1 fan-out request. A retry submits only failed targets with the same ID.
+    func collaborate(requestID: String, text: String, targets: [Recipient]) async throws -> [CollaborationTargetResult]
     /// `herdbot history <target> --json`: the newest page, or the `limit` items before item `before`.
     func history(of target: Recipient, before: Int?, limit: Int) async throws -> HistoryPage
+}
+
+public struct CollaborationTargetResult: Codable, Hashable, Sendable {
+    public let target: Recipient
+    public let status: String
+    public let error: String?
+
+    public init(target: Recipient, status: String, error: String? = nil) {
+        self.target = target
+        self.status = status
+        self.error = error
+    }
+}
+
+extension Recipient: Codable {
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try c.decode(String.self, forKey: .kind)
+        let slug = try c.decode(String.self, forKey: .slug)
+        switch kind {
+        case "bot": self = .bot(slug)
+        case "room": self = .room(slug)
+        default: throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "unknown target kind")
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .bot(let slug): try c.encode("bot", forKey: .kind); try c.encode(slug, forKey: .slug)
+        case .room(let slug): try c.encode("room", forKey: .kind); try c.encode(slug, forKey: .slug)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, slug }
 }
 
 public protocol CardCLI: Sendable {
