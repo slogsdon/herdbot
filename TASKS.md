@@ -15,7 +15,7 @@ For every UI plan, record the adapted principle or why none applies, review defa
 
 ## Open tasks
 
-- [ ] Profile the 26.6-second Swift test run and investigate safe parallelization to reduce repeat-run time without making results flaky.
+- [x] Profile the Swift test run and enable safe parallel execution by default: warm serial 9.11s; warm parallel 1.53–1.66s; 155 tests passed in three parallel runs. `--no-parallel` remains available.
 
 - [ ] Add `@` mentions to the message composer so the user can flag a bot or room for collaboration; mention targets determine collaborators independently of the currently selected bot or room.
 

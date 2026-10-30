@@ -8,7 +8,7 @@ Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has 
 `focus` and (for rooms in the picker) `rooms` in `status --json` (install with `cargo install --path crates/herdbot`, then restart the daemon).
 
 ```bash
-./scripts/test.sh          # unit tests (use this, not bare `swift test`)
+./scripts/test.sh          # unit tests in parallel (use this, not bare `swift test`; pass --no-parallel to run serially)
 ./scripts/build-app.sh     # builds build/Herdbot.app, ad-hoc signed
 open build/Herdbot.app
 ```
