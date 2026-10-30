@@ -91,6 +91,16 @@ import Testing
         }
     }
 
+    @Test func provenanceStatusLabelsStayTypedAndLegacyTextIsNotInspected() {
+        let botMessage = HistoryItem(n: 0, at: 1, kind: "notice", text: "Message from beta", source: "bot_message", detail: "[message from beta]\nPlease inspect this output.")
+        #expect(botMessage.statusTitle == "Message from beta")
+        #expect(botMessage.detailDisclosureTitle == "Show message")
+
+        let legacy = HistoryItem(n: 1, at: 2, kind: "unknown", text: "[message from beta]\nPlease inspect this output.", source: "unknown", detail: "[message from beta]\nPlease inspect this output.")
+        #expect(legacy.statusTitle == "Unknown sender")
+        #expect(legacy.detailDisclosureTitle == "Show original text")
+    }
+
     @Test func globalSettingsDecodeMetadataValuesAndApplyTiming() throws {
         let settings = try settings(from: globalSettingsJSON)
         #expect(settings.map(\.key) == ["approvals.mode", "memory.max_compactors", "paths", "cua.host"])

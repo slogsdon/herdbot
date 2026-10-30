@@ -2,7 +2,7 @@
 
 A SwiftUI menu bar app for herdbot. It follows `herdbot watch --json`, shows bots, running
 subagents, cooling harnesses and blocked agents, and posts a notification when an agent becomes
-blocked; clicking it runs `herdbot focus <agent>`. ⌥Space opens a quick-entry panel that queues a message to a bot or room. A chat window (menu: Open herdbot) lists your bots and rooms and shows each conversation. Design: `docs/superpowers/specs/2026-10-21-ui-layer-design.md`.
+blocked; clicking it runs `herdbot focus <agent>`. ⌥Space opens a quick-entry panel that queues a message to a bot or room. A chat window (menu: Open herdbot) lists your bots and rooms and shows each conversation. Bot-to-bot messages and unknown legacy prompts appear as compact status rows with their content disclosed on demand; delegated lifecycle updates show concise summaries with expandable details. Design: `docs/superpowers/specs/2026-10-21-ui-layer-design.md`.
 
 Needs macOS 15+, Swift 6 (Command Line Tools is enough), and a herdbot that has `watch --json`,
 `focus` and (for rooms in the picker) `rooms` in `status --json` (install with `cargo install --path crates/herdbot`, then restart the daemon).

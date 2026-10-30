@@ -6,9 +6,9 @@ The supplied *Build Your Own Duet* PDF is an independent engineering synthesis, 
 
 | Plan | State | Depends on |
 |---|---|---|
-| [Orchestration reliability](2026-10-22-orchestration-reliability.md) ([spec](../specs/2026-10-22-orchestration-reliability-design.md)) | Tasks 1–3 implemented and automated-verified in uncommitted worktrees; live dispatch smoke passed | — |
-| [Delegated task lifecycle](2026-10-22-delegated-task-lifecycle.md) ([spec](../specs/2026-10-22-delegated-task-lifecycle-design.md)) | Tasks 1–3 implemented and automated-verified in uncommitted worktree; manual UI checks deferred by Shane (not verified) | reliability plan |
-| [Chat provenance and collaboration](2026-10-22-chat-provenance.md) ([spec](../specs/2026-10-22-chat-provenance-design.md)) | Tasks 1–3 implemented and automated-verified; live visual/accessibility checks deferred by Shane | reliability and lifecycle plans |
+| [Orchestration reliability](2026-10-22-orchestration-reliability.md) ([spec](../specs/2026-10-22-orchestration-reliability-design.md)) | Tasks 1–3 committed in `63d0198`; live dispatch smoke passed; current installed helper still needs route verification | — |
+| [Delegated task lifecycle](2026-10-22-delegated-task-lifecycle.md) ([spec](../specs/2026-10-22-delegated-task-lifecycle-design.md)) | Tasks 1–3 committed in `63d0198` and automated-verified; manual UI checks deferred by Shane | reliability plan |
+| [Chat provenance and collaboration](2026-10-22-chat-provenance.md) ([spec](../specs/2026-10-22-chat-provenance-design.md)) | Tasks 1–4 automated-verified in `feature/chat-status-rows`; live visual/accessibility checks deferred by Shane | reliability and lifecycle plans |
 
 These plans capture the resolved product decisions and remain sequenced after the active usability/settings roadmap.
 

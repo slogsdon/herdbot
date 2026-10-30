@@ -13,15 +13,14 @@ For every UI plan, record the adapted principle or why none applies, review defa
 | Menu discovery and setup visibility | Implementation tests recorded in `docs/superpowers/plans/2026-10-22-menu-discovery.md` | Deferred: live visual, keyboard, and VoiceOver review |
 | Herdr session picker | Implementation tests recorded in `docs/superpowers/plans/2026-10-22-settings-session.md` | Deferred: live visual, keyboard, VoiceOver, and focus review |
 
-## Open tasks
+## Completed
 
 - [x] Profile the Swift test run and enable safe parallel execution by default: warm serial 9.11s; warm parallel 1.53–1.66s; 155 tests passed in three parallel runs. `--no-parallel` remains available.
+- [x] Add `@` mentions to the message composer so the user can flag a bot or room for collaboration; mention targets determine collaborators independently of the currently selected bot or room. Implemented and automated-verified in `feature/chat-provenance-task1`.
+- [x] Render bot-to-bot messages and delegated subagent request/result notices as collapsed system/status entries, with details disclosed on demand. Automated-verified in `feature/chat-status-rows`; live UI checks remain deferred.
+- [x] Show delegated task start, coalesced progress, and summarized completion updates in chat history. Automated-verified by the delegated lifecycle plan; live UI checks remain deferred.
 
-- [ ] Add `@` mentions to the message composer so the user can flag a bot or room for collaboration; mention targets determine collaborators independently of the currently selected bot or room.
+## Open tasks
 
-- [ ] Render bot-to-bot messages and delegated subagent request/result notices as collapsed, clickable system/status entries (for example, “Messaged [bot]” or “Subagent finished”), with message details or completion reports shown on click instead of presenting them as user messages.
-
-- [ ] Diagnose why the Herdbot MCP `task` tool started Codex Luna sessions when Pi / DeepSeek was requested, then fix and verify harness dispatch.
-
+- [ ] Diagnose why the Herdbot MCP `task` tool started Codex Luna sessions when Pi / DeepSeek was requested, then fix and verify harness dispatch. The committed source includes routing/fallback tracking, but the installed helper is still 0.1.2; a Pi request from this session started Codex without a surfaced fallback reason.
 - [ ] Rename `ui/menubar/` to `ui/macos/` and update its package, build, release, and documentation references; keep the app's user-facing name unchanged.
-- [ ] For delegated requests, return a concise immediate acknowledgment, occasional summarized progress updates, and a summarized completion response in the chat window.

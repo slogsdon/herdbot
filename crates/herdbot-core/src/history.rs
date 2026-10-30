@@ -91,17 +91,33 @@ fn source_kind_for(source: Option<&str>) -> &'static str {
     }
 }
 
+fn bot_message_summary(text: &str) -> String {
+    text.lines()
+        .next()
+        .and_then(|line| line.strip_prefix("[message from ")?.strip_suffix(']'))
+        .filter(|sender| !sender.is_empty())
+        .map(|sender| format!("Message from {sender}"))
+        .unwrap_or_else(|| "Message from another bot".into())
+}
+
 fn sourced_item(at: i64, id: Option<&str>, source: Option<&str>, speaker: Option<String>, text: &str, state: Option<&'static str>) -> Item {
+    let source = source_name(source);
+    let (kind, text, detail) = match source {
+        "user" => ("user", text.to_owned(), None),
+        "bot_message" => ("notice", bot_message_summary(text), Some(text.to_owned())),
+        "unknown" => ("unknown", "Unknown sender".into(), Some(text.to_owned())),
+        _ => (source_kind_for(Some(source)), text.to_owned(), None),
+    };
     Item {
         n: None,
         at,
         id: id.map(str::to_owned),
-        kind: source_kind_for(source),
-        source: Some(source_name(source)),
+        kind,
+        source: Some(source),
         speaker,
-        text: text.to_owned(),
+        text,
         state,
-        detail: None,
+        detail,
     }
 }
 
@@ -218,8 +234,8 @@ pub fn room_items(slug: &str) -> (Vec<Item>, usize) {
             "you" => sourced_item(e.at, None, Some("user"), None, &e.text, None),
             "herdbot" => sourced_item(e.at, None, Some("herdbot"), None, &e.text, None),
             bot => {
-                let mut item = sourced_item(e.at, None, Some("bot_message"), Some(bot.to_owned()), &e.text, None);
-                item.kind = "bot";
+                let mut item = item(e.at, "bot", Some(bot.to_owned()), &e.text, None);
+                item.source = Some("bot_message");
                 item
             }
         })
@@ -335,6 +351,24 @@ mod tests {
         assert_eq!(source_kind_for(Some("herdbot")), "notice");
         assert_eq!(source_kind_for(Some("unknown")), "unknown");
         assert_eq!(source_kind_for(None), "unknown");
+    }
+
+    #[test]
+    fn typed_bot_message_uses_sender_summary_and_keeps_full_detail() {
+        let prompt = "[message from beta]\nPlease inspect this output.";
+        let item = sourced_item(1, Some("message-1"), Some("bot_message"), None, prompt, None);
+        assert_eq!(item.kind, "notice");
+        assert_eq!(item.text, "Message from beta");
+        assert_eq!(item.detail.as_deref(), Some(prompt));
+    }
+
+    #[test]
+    fn source_less_legacy_prompt_stays_unknown_even_with_a_sender_header() {
+        let prompt = "[message from beta]\nPlease inspect this output.";
+        let item = sourced_item(1, None, None, None, prompt, None);
+        assert_eq!(item.kind, "unknown");
+        assert_eq!(item.text, "Unknown sender");
+        assert_eq!(item.detail.as_deref(), Some(prompt));
     }
 
     #[test]

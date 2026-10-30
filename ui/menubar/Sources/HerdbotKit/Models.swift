@@ -203,6 +203,13 @@ public struct HistoryItem: Codable, Hashable, Sendable, Identifiable {
 
     public var id: String { eventID ?? n.map { "n\($0)" } ?? "p:\(state ?? ""):\(at):\(text)" }
     public var isPending: Bool { n == nil }
+    public var statusTitle: String {
+        if kind == "unknown" || source == "unknown" { return "Unknown sender" }
+        return text
+    }
+    public var detailDisclosureTitle: String {
+        source == "bot_message" ? "Show message" : "Show original text"
+    }
 }
 
 /// `herdbot history <target> --json`.

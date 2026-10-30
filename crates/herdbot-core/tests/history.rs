@@ -125,13 +125,13 @@ fn history_pages_and_appends_what_is_pending() {
     assert_eq!(beta.items.len(), 1);
     assert_eq!(beta.items[0].kind, "bot");
 
-    // Typed prompts retain their queue identity, source, and original text in history. Legacy
-    // prompts remain unknown even when their text resembles a generated bot message.
+    // Typed prompts retain their queue identity and source; legacy prompts stay unknown even
+    // when their text resembles a generated bot message.
     write(&root.join("provenance/bot.toml"), "name = \"provenance\"\n");
     write(
         &root.join("provenance/turns.jsonl"),
         concat!(
-            "{\"at\":1,\"id\":\"turn-bot\",\"prompt\":\"joined prompt\",\"reply\":\"handled\",\"messages\":[{\"id\":\"queue-bot\",\"source\":\"bot_message\",\"text\":\"[message from beta] review this\"}]}\n",
+            "{\"at\":1,\"id\":\"turn-bot\",\"prompt\":\"joined prompt\",\"reply\":\"handled\",\"messages\":[{\"id\":\"queue-bot\",\"source\":\"bot_message\",\"text\":\"[message from beta]\\nreview this\"}]}\n",
             "{\"at\":2,\"id\":\"turn-user\",\"prompt\":\"typed by you\",\"reply\":\"answer\",\"messages\":[{\"id\":\"queue-user\",\"source\":\"user\",\"text\":\"typed by you\"}]}\n",
             "{\"at\":3,\"id\":\"turn-legacy-wrapper\",\"prompt\":\"[message from alpha] old wrapper\",\"reply\":\"reply\"}\n",
             "{\"at\":4,\"id\":\"turn-legacy-plain\",\"prompt\":\"ordinary legacy prompt\",\"reply\":\"reply\"}\n",
@@ -142,21 +142,27 @@ fn history_pages_and_appends_what_is_pending() {
     assert_eq!(prompts[0].id.as_deref(), Some("queue-bot"));
     assert_eq!(prompts[0].source, Some("bot_message"));
     assert_eq!(prompts[0].kind, "notice");
-    assert_eq!(prompts[0].text, "[message from beta] review this");
+    assert_eq!(prompts[0].text, "Message from beta");
+    assert_eq!(prompts[0].detail.as_deref(), Some("[message from beta]\nreview this"));
     assert_eq!(prompts[1].id.as_deref(), Some("queue-user"));
     assert_eq!(prompts[1].source, Some("user"));
     assert_eq!(prompts[1].kind, "user");
     assert_eq!(prompts[2].source, Some("unknown"));
     assert_eq!(prompts[2].kind, "unknown");
-    assert_eq!(prompts[2].text, "[message from alpha] old wrapper");
+    assert_eq!(prompts[2].text, "Unknown sender");
+    assert_eq!(prompts[2].detail.as_deref(), Some("[message from alpha] old wrapper"));
     assert_eq!(prompts[3].source, Some("unknown"));
     assert_eq!(prompts[3].kind, "unknown");
+    assert_eq!(prompts[3].text, "Unknown sender");
+    assert_eq!(prompts[3].detail.as_deref(), Some("ordinary legacy prompt"));
 
     home::enqueue_with_id("provenance", "queue-pending", "bot_message", "queued bot text").unwrap();
     let queued = history::queued_items("provenance");
     assert_eq!(queued[0].id.as_deref(), Some("queue-pending"));
     assert_eq!(queued[0].source, Some("bot_message"));
     assert_eq!(queued[0].kind, "notice");
+    assert_eq!(queued[0].text, "Message from another bot");
+    assert_eq!(queued[0].detail.as_deref(), Some("queued bot text"));
     home::write_inflight_with_messages(
         "provenance",
         "joined inflight text",
@@ -170,7 +176,8 @@ fn history_pages_and_appends_what_is_pending() {
     let inflight = history::pending_items("provenance");
     assert_eq!(inflight[0].id.as_deref(), Some("inflight-bot"));
     assert_eq!(inflight[0].source, Some("bot_message"));
-    assert_eq!(inflight[0].text, "inflight bot text");
+    assert_eq!(inflight[0].text, "Message from another bot");
+    assert_eq!(inflight[0].detail.as_deref(), Some("inflight bot text"));
 
     // Run lifecycle entries merge with ordinary turns, retain detail, and deduplicate stable IDs.
     let run_dir = root.join(".runs");

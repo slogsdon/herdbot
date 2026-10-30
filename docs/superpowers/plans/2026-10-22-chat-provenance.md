@@ -90,3 +90,22 @@
 - [x] Document mention syntax and submit semantics in the app README.
 - [x] Document message source fields and legacy compatibility in the CLI protocol section.
 - [x] Run `git diff --check`; reviewed the worktree paths and preserved the pre-existing cumulative Task 1 and prerequisite-plan edits.
+
+### Task 4: Collapsed provenance status entries
+
+**Files:**
+- Modify: `crates/herdbot-core/src/history.rs`
+- Modify: `ui/menubar/Sources/HerdbotKit/Models.swift`
+- Modify: `ui/menubar/Sources/HerdbotMenu/MessageViews.swift`
+- Test: Rust history tests and Swift model/view-presentation tests
+
+**Constraints:** Reuse the lifecycle disclosure row. Typed `bot_message` items may use their documented sender header to form a concise summary; source-less legacy items remain `unknown` and must never be classified by inspecting their text. Keep history protocol v1 and do not alter memory extraction.
+
+**EasyUI design tracking:** Applies **Accessible & Type-Safe** through native SwiftUI `DisclosureGroup` controls with explicit labels. Compact status text is the default state; full message text is disclosed on demand. Loading and save states do not apply to persisted history; unknown legacy authors remain unknown. No custom motion is added because these historical rows do not benefit from animation. Keyboard traversal, VoiceOver, focus visibility, Reduce Motion, and visual hierarchy remain deferred for Shane's live review.
+
+- [x] Add tests for a typed bot message summary/detail pair and an unknown legacy prompt that stays neutral even when its text resembles a sender header.
+- [x] Render typed bot messages and unknown legacy prompts as compact centered status rows; show full text only through an accessible disclosure control.
+- [x] Keep delegated lifecycle start/progress/completion rows and their summaries/details unchanged.
+- [x] Run `cargo test -p herdbot-core` (33 unit tests, 2 integration tests) and `cd ui/menubar && ./scripts/test.sh` (156 tests, 17 suites); both pass.
+- [x] Build the app with `./scripts/build-app.sh`; Info.plist validation passes.
+- [x] Record that live visual, keyboard, VoiceOver, focus, and Reduce Motion checks remain deferred.

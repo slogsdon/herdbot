@@ -79,13 +79,41 @@ struct MessageRow: View {
         switch item.kind {
         case "user": bubble(alignment: .trailing, fill: AnyShapeStyle(Color.accentColor), foreground: .white)
         case "notice":
-            if item.source == "lifecycle" || item.state != nil {
+            if item.source == "bot_message" {
+                provenanceNotice
+            } else if item.source == "lifecycle" || item.state != nil {
                 lifecycleNotice
             } else {
                 Text(item.text).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
             }
+        case "unknown": provenanceNotice
         default: bubble(alignment: .leading, fill: AnyShapeStyle(.quaternary), foreground: .primary)
         }
+    }
+
+    private var provenanceNotice: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                Text(item.statusTitle)
+                if let state = item.state { Text(state) }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            if let detail = item.detail, !detail.isEmpty {
+                DisclosureGroup(item.detailDisclosureTitle) {
+                    MarkdownText(source: detail)
+                        .font(.caption)
+                        .frame(maxWidth: 520, alignment: .leading)
+                        .padding(.top, 4)
+                }
+                .font(.caption2)
+                .frame(maxWidth: 520)
+                .accessibilityLabel(item.detailDisclosureTitle)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 3)
     }
 
     private var lifecycleNotice: some View {
