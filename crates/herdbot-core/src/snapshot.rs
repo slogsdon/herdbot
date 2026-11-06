@@ -52,6 +52,7 @@ pub struct RunView {
     pub agent: String,
     pub route: String,
     pub description: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -70,7 +71,7 @@ pub struct Snapshot {
     pub daemon: &'static str,
     pub bots: Vec<BotView>,
     pub rooms: Vec<RoomView>,
-    /// Running subagent runs only.
+    /// Active and operator-blocked subagent runs.
     pub runs: Vec<RunView>,
     /// Harnesses still cooling down.
     pub cooldowns: Vec<CooldownView>,
@@ -203,13 +204,14 @@ pub fn snapshot() -> Snapshot {
     sort_runs(&mut saved_runs);
     let runs: Vec<RunView> = saved_runs
         .into_iter()
-        .filter(|run| run.status == "running")
+        .filter(|run| matches!(run.status.as_str(), "running" | "blocked"))
         .map(|run| RunView {
             id: run.id,
             bot: run.bot,
             agent: run.agent,
             route: run.route,
             description: run.description,
+            status: run.status,
         })
         .collect();
     let mut blocked: Vec<Event> = event_logs(&mut warnings)

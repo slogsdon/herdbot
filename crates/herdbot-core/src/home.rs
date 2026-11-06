@@ -215,7 +215,7 @@ pub struct Run {
     pub class: String,
     pub route: String,
     pub description: String,
-    /// running | done | failed
+    /// running | blocked | done | failed | stopped | expired
     pub status: String,
     #[serde(default)]
     pub result: Option<String>,
@@ -260,6 +260,8 @@ pub struct Run {
     /// Internal accounting checkpoints used to pause a budget during approval blocks.
     #[serde(default)]
     pub blocked_since: Option<i64>,
+    #[serde(default)]
+    pub unblocked_at: Option<i64>,
     #[serde(default)]
     pub budget_checked_at: Option<i64>,
 }

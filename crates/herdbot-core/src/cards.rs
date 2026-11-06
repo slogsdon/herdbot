@@ -26,6 +26,10 @@ pub struct Card {
     pub body: String,
     pub options: Vec<CardOption>,
     pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 pub fn card_id(agent: &str, body: &str) -> String {
@@ -115,6 +119,8 @@ mod tests {
                 },
             ],
             at: 100,
+            harness: Some("claude".into()),
+            run_id: None,
         }
     }
 
@@ -136,6 +142,16 @@ mod tests {
             assert!(value.get(key).is_some(), "missing {key}");
         }
         assert_eq!(value["options"][1]["style"], "destructive");
+        assert_eq!(value["harness"], "claude");
+        assert!(value["run_id"].is_null());
+    }
+
+    #[test]
+    fn legacy_cards_without_prompt_metadata_still_decode() {
+        let legacy = r#"{"id":"x","kind":"approval","adapter":"claude-trust","bot":"helper","agent":"helper","title":"Trust?","body":"text","options":[],"at":1}"#;
+        let card: Card = serde_json::from_str(legacy).unwrap();
+        assert_eq!(card.harness, None);
+        assert_eq!(card.run_id, None);
     }
 
     #[test]

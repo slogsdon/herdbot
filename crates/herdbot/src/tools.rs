@@ -214,6 +214,7 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             .await?;
             Ok(match run.status.as_str() {
                 "failed" => format!("run {} failed: {}", run.id, run.result.unwrap_or_default()),
+                "blocked" => format!("run {} is blocked on operator input in pane {}; review the chat card and answer in the harness", run.id, run.pane),
                 _ => match (&run.requested_route, &run.fallback_reason) {
                     (Some(requested), Some(reason)) => format!("started run {} on {} in pane {}. Requested route {} was unavailable: {}. Its result will arrive as a message.", run.id, run.route, run.pane, requested, reason),
                     _ => format!("started run {} on {} in pane {}. Its result will arrive as a message.", run.id, run.route, run.pane),
@@ -237,9 +238,10 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             let mut run = home::load_run(arg(args, "run_id")?).ok_or("unknown run id")?;
             check_run_owner(&run.bot, ctx)?;
             let _ = herdr.pane_close(&run.pane).await;
+            herdbot_core::cards::remove_card(&run.agent);
             run.pane_closed = true;
-            if run.status == "running" {
-                run.status = "failed".into();
+            if matches!(run.status.as_str(), "running" | "blocked") {
+                run.status = "stopped".into();
                 run.result = Some("stopped".into());
                 run.events.push(home::RunEvent {
                     id: format!("run:{}:stopped", run.id),
@@ -300,6 +302,9 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 .as_deref()
                 .ok_or("report_result is only for subagent runs")?;
             let mut run = home::load_run(id).ok_or("unknown run")?;
+            if !matches!(run.status.as_str(), "running" | "blocked") {
+                return Err(format!("run {} is {}, so it cannot report a result", run.id, run.status).into());
+            }
             let result = arg(args, "result")?.to_owned();
             let summary = args.get("summary").and_then(Value::as_str).map(str::to_owned)
                 .unwrap_or_else(|| home::first_line_preview(&result));

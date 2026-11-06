@@ -34,8 +34,15 @@ public struct Card: Codable, Hashable, Sendable, Identifiable {
     public let body: String
     public let options: [CardOption]
     public let at: Int
+    public let harness: String?
+    public let runID: String?
 
-    public init(id: String, kind: String, adapter: String, bot: String, agent: String, title: String, body: String, options: [CardOption], at: Int) {
+    enum CodingKeys: String, CodingKey {
+        case id, kind, adapter, bot, agent, title, body, options, at, harness
+        case runID = "run_id"
+    }
+
+    public init(id: String, kind: String, adapter: String, bot: String, agent: String, title: String, body: String, options: [CardOption], at: Int, harness: String? = nil, runID: String? = nil) {
         self.id = id
         self.kind = kind
         self.adapter = adapter
@@ -45,6 +52,8 @@ public struct Card: Codable, Hashable, Sendable, Identifiable {
         self.body = body
         self.options = options
         self.at = at
+        self.harness = harness
+        self.runID = runID
     }
 }
 

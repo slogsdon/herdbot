@@ -69,7 +69,8 @@ fn snapshot_and_watch_over_a_fixture_home() {
         "{\"at\":9,\"speaker\":\"you\",\"text\":\"hello crew\"}\n",
     );
     write(&root.join(".runs/r1.json"), &run("r1", "running"));
-    write(&root.join(".runs/r2.json"), &run("r2", "done"));
+    write(&root.join(".runs/r2.json"), &run("r2", "blocked"));
+    write(&root.join(".runs/r3.json"), &run("r3", "done"));
     write(
         &root.join(".state/cooldown/claude.json"),
         r#"{"until":4102444800,"reason":"limit"}"#,
@@ -136,8 +137,10 @@ fn snapshot_and_watch_over_a_fixture_home() {
         (1, Some(9), "hello crew")
     );
     assert!(snap.warnings.iter().any(|w| w.starts_with("room torn:")));
-    assert_eq!(snap.runs.len(), 1);
+    assert_eq!(snap.runs.len(), 2);
     assert_eq!(snap.runs[0].id, "r1");
+    assert_eq!(snap.runs[1].id, "r2");
+    assert_eq!(snap.runs[1].status, "blocked");
     assert_eq!(snap.cooldowns.len(), 1);
     assert_eq!(snap.cooldowns[0].harness, "claude");
     assert_eq!(snap.blocked.len(), 1);
@@ -174,6 +177,7 @@ fn snapshot_and_watch_over_a_fixture_home() {
         json["rooms"][0],
         serde_json::json!({"slug":"crew","name":"Crew","mode":"round_robin","paused":false,"items":1,"last_at":9,"preview":"hello crew"})
     );
+    assert_eq!(json["runs"][1]["status"], "blocked");
 
     // Watcher: first poll is the snapshot only, then quiet, then changes.
     let mut watcher = snapshot::Watcher::default();

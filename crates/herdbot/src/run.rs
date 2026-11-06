@@ -141,6 +141,7 @@ pub async fn down(herdr: &Client, slug: &str) -> Result<()> {
         let _ = herdr.workspace_close(&state.workspace_id).await;
     }
     home::clear_state(slug);
+    herdbot_core::cards::remove_card(slug);
     Ok(())
 }
 
@@ -225,11 +226,11 @@ async fn start(
     let started = herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
         .await;
-    if let Err(HerdrError::Api { code, .. }) = &started
-        && run.is_none()
-    {
+    if let Err(HerdrError::Api { code, .. }) = &started {
         let screen = tail(herdr, agent, 60).await;
-        if let Some(card) = blocked_card(launch.kind, code, &screen, slug, agent) {
+        if let Some(mut card) = blocked_card(launch.kind, code, &screen, slug, agent) {
+            card.harness = Some(route.harness.clone());
+            card.run_id = run.map(str::to_owned);
             return Err(Box::new(StartBlocked { route, card }));
         }
     }
@@ -259,36 +260,64 @@ async fn start(
         // is safe; past that, fail instead of letting the daemon harvest the splash.
         for _ in 0..2 {
             let before = tail(herdr, agent, 40).await;
-            herdr.agent_prompt(agent, &text, None).await?;
-            if took_prompt(herdr, agent, &before).await {
-                return Ok(route);
+            if let Some(card) = crate::adapters::recognize_prompt(
+                &before, &route.harness, slug, agent, run,
+            ) {
+                return Err(Box::new(StartBlocked { route, card }));
+            }
+            if let Err(error) = herdr.agent_prompt(agent, &text, None).await {
+                let screen = tail(herdr, agent, 60).await;
+                if let Some(card) = crate::adapters::recognize_prompt(&screen, &route.harness, slug, agent, run) {
+                    return Err(Box::new(StartBlocked { route, card }));
+                }
+                return Err(Box::new(error));
+            }
+            match wait_for_prompt(herdr, &route.harness, slug, agent, run, &before).await {
+                PromptWait::Accepted => return Ok(route),
+                PromptWait::Blocked(card) => return Err(Box::new(StartBlocked { route, card: *card })),
+                PromptWait::Idle => {}
             }
             eprintln!("{agent}: first prompt not picked up; sending again");
         }
-        return Err(format!("{agent} did not start a turn after two prompts").into());
+        let screen = tail(herdr, agent, 60).await;
+        let card = crate::adapters::input_timeout_card(&screen, &route.harness, slug, agent, run);
+        return Err(Box::new(StartBlocked { route, card }));
     }
     Ok(route)
 }
 
-/// Whether a prompt was picked up: the agent left `idle`, or its screen changed.
+/// Whether a prompt was picked up: the agent left `idle`, or Pi's screen changed.
 ///
 /// herdr reads pi's turn state off a "Working" spinner line, which a narrow pane truncates
 /// to the bare spinner glyph, so a pane squeezed by sibling splits stays `idle` through a
 /// whole turn. A dropped prompt leaves the screen untouched.
-fn prompt_taken(status: Option<&str>, before: &str, after: &str) -> bool {
-    !matches!(status, Some("idle") | None) || before != after
+fn prompt_taken(harness: &str, status: Option<&str>, before: &str, after: &str) -> bool {
+    !matches!(status, Some("idle") | None) || (harness == "pi" && before != after)
 }
 
-/// Whether `agent` takes the prompt within 15 s.
-async fn took_prompt(herdr: &Client, agent: &str, before: &str) -> bool {
+enum PromptWait {
+    Accepted,
+    Blocked(Box<herdbot_core::cards::Card>),
+    Idle,
+}
+
+/// Wait up to 15 seconds for accepted input or a screen that needs the operator.
+async fn wait_for_prompt(herdr: &Client, harness: &str, bot: &str, agent: &str, run_id: Option<&str>, before: &str) -> PromptWait {
     for _ in 0..15 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let status = status(herdr, agent).await;
-        if prompt_taken(status.as_deref(), before, &tail(herdr, agent, 40).await) {
-            return true;
+        let after = tail(herdr, agent, 60).await;
+        if let Some(card) = crate::adapters::recognize_prompt(&after, harness, bot, agent, run_id) {
+            return PromptWait::Blocked(Box::new(card));
+        }
+        if status.as_deref() == Some("blocked") {
+            return PromptWait::Blocked(Box::new(crate::adapters::blocked_status_card(&after, harness, bot, agent, run_id)));
+        }
+        if prompt_taken(harness, status.as_deref(), before, &after) {
+            return PromptWait::Accepted;
         }
     }
-    false
+    PromptWait::Idle
 }
 
 /// Open a pane next to `parent_agent`'s bot, start a routed agent in it, hand it the task.
@@ -381,17 +410,31 @@ pub async fn spawn(
             run.budget_checked_at = wall_clock_limit.map(|_| home::now());
         }
         Err(e) => {
-            run.status = "failed".into();
-            run.result = Some(format!("failed to start: {e}"));
-            run.events.push(home::RunEvent {
-                id: format!("run:{id}:failed"),
-                at: home::now(),
-                kind: "failed".into(),
-                summary: "Task failed to start.".into(),
-                detail: run.result.clone(),
-            });
-            let _ = herdr.pane_close(&pane).await;
-            run.pane_closed = true;
+            if let Some(blocked) = e.downcast_ref::<StartBlocked>() {
+                run.status = "blocked".into();
+                run.route = format!("{}:{}{}", blocked.route.harness, blocked.route.model, blocked.route.effort.as_ref().map(|effort| format!(":{effort}")).unwrap_or_default());
+                run.notified_blocked = true;
+                run.blocked_since = Some(home::now());
+                run.budget_checked_at = wall_clock_limit.map(|_| home::now());
+                let mut card = blocked.card.clone();
+                card.harness = Some(blocked.route.harness.clone());
+                card.run_id = Some(run.id.clone());
+                run.events.push(home::RunEvent {
+                    id: format!("run:{}:blocked", run.id), at: home::now(), kind: "blocked".into(),
+                    summary: card.title.clone(), detail: Some(card.body.clone()),
+                });
+                herdbot_core::cards::write_card(&card)?;
+            } else {
+                run.status = "failed".into();
+                run.result = Some(format!("failed to start: {e}"));
+                run.events.push(home::RunEvent {
+                    id: format!("run:{id}:failed"), at: home::now(), kind: "failed".into(),
+                    summary: "Task failed to start.".into(),
+                    detail: run.result.clone(),
+                });
+                let _ = herdr.pane_close(&pane).await;
+                run.pane_closed = true;
+            }
         }
     }
     home::save_run(&run)?;
@@ -458,9 +501,11 @@ fn blocked_card(
     bot: &str,
     agent: &str,
 ) -> Option<herdbot_core::cards::Card> {
-    (harness == "claude" && error_code == "agent_blocked")
-        .then(|| crate::adapters::recognize(screen, bot, agent))
-        .flatten()
+    if !error_code.contains("blocked") && !error_code.contains("approval") {
+        return None;
+    }
+    let dialog = crate::adapters::recognize_prompt(screen, harness, bot, agent, None);
+    Some(dialog.unwrap_or_else(|| crate::adapters::blocked_status_card(screen, harness, bot, agent, None)))
 }
 
 #[cfg(test)]
@@ -482,23 +527,18 @@ mod tests {
     }
 
     #[test]
-    fn a_blocked_claude_start_with_a_matching_pane_is_a_card_otherwise_an_error() {
+    fn blocked_start_errors_create_cards_only_for_blocked_conditions() {
         let trust = include_str!("../fixtures/panes/claude-trust.txt");
         assert!(
             super::blocked_card("claude", "agent_blocked", trust, "helper", "helper").is_some()
         );
         assert!(super::blocked_card("claude", "timeout", trust, "helper", "helper").is_none());
-        assert!(super::blocked_card("codex", "agent_blocked", trust, "helper", "helper").is_none());
-        assert!(
-            super::blocked_card(
-                "claude",
-                "agent_blocked",
-                "some other prompt",
-                "helper",
-                "helper"
-            )
-            .is_none()
-        );
+        let other_harness = super::blocked_card("codex", "agent_blocked", trust, "helper", "helper").unwrap();
+        assert_eq!(other_harness.kind, "operator_prompt");
+        let generic = super::blocked_card(
+            "claude", "agent_blocked", "some other prompt", "helper", "helper",
+        ).unwrap();
+        assert_eq!(generic.kind, "operator_prompt");
     }
 
     #[test]
@@ -510,18 +550,20 @@ mod tests {
 
     #[test]
     fn prompt_taken_when_status_leaves_idle() {
-        assert!(prompt_taken(Some("working"), "screen", "screen"));
+        assert!(prompt_taken("claude", Some("working"), "screen", "screen"));
     }
 
     #[test]
     fn prompt_taken_when_idle_status_hides_a_changed_screen() {
         // narrow pane: herdr never sees the "Working" spinner, but the turn rewrites the screen
-        assert!(prompt_taken(Some("idle"), "ready", "ready\nCall list_bots"));
+        assert!(prompt_taken("pi", Some("idle"), "ready", "ready\nCall list_bots"));
+        assert!(!prompt_taken("claude", Some("idle"), "ready", "ready\nCall list_bots"));
+        assert!(!prompt_taken("codex", None, "ready", "ready\nCall list_bots"));
     }
 
     #[test]
     fn prompt_dropped_when_idle_and_screen_unchanged() {
-        assert!(!prompt_taken(Some("idle"), "splash", "splash"));
-        assert!(!prompt_taken(None, "splash", "splash"));
+        assert!(!prompt_taken("pi", Some("idle"), "splash", "splash"));
+        assert!(!prompt_taken("codex", None, "splash", "splash"));
     }
 }

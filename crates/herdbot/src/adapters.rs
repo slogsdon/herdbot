@@ -47,7 +47,77 @@ pub fn recognize(tail: &str, bot: &str, agent: &str) -> Option<Card> {
             },
         ],
         at: home::now(),
+        harness: Some("claude".into()),
+        run_id: None,
     })
+}
+
+/// Recognize a harness prompt for display. Only the Claude trust adapter has answer keys;
+/// other dialogs are operator-only cards and must be handled in the pane.
+pub fn recognize_prompt(tail: &str, harness: &str, bot: &str, agent: &str, run_id: Option<&str>) -> Option<Card> {
+    if harness == "claude" && let Some(mut card) = recognize(tail, bot, agent) {
+        card.harness = Some(harness.to_owned());
+        card.run_id = run_id.map(str::to_owned);
+        return Some(card);
+    }
+    let lower = tail.to_lowercase();
+    let codex_hooks = lower.contains("hooks need review")
+        && (lower.contains("trust all") || lower.contains("review hooks"));
+    let permission = lower.contains("permission required")
+        || lower.contains("approval required")
+        || lower.contains("waiting for your approval")
+        || lower.contains("permissionrequest");
+    if !(codex_hooks || permission) || tail.trim().is_empty() {
+        return None;
+    }
+    let body = tail.lines().rev().take(30).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+    let choices = visible_choices(&body);
+    Some(Card {
+        id: card_id(agent, &body), kind: "operator_prompt".into(), adapter: "display-only".into(),
+        bot: bot.to_owned(), agent: agent.to_owned(),
+        title: if codex_hooks { "Codex hooks need review" } else { "Harness is waiting for input" }.into(),
+        body, options: choices, at: home::now(),
+        harness: Some(harness.to_owned()), run_id: run_id.map(str::to_owned),
+    })
+}
+
+fn visible_choices(body: &str) -> Vec<CardOption> {
+    let mut choices: Vec<String> = body.lines().filter_map(|line| {
+        let text = line.trim().trim_start_matches(['›', '>', '•', ' ']).trim();
+        let label = text.strip_prefix(|c: char| c.is_ascii_digit())
+            .and_then(|rest| rest.strip_prefix('.').or_else(|| rest.strip_prefix(')')))
+            .map(str::trim)
+            .filter(|label| !label.is_empty())?;
+        Some(label.to_owned())
+    }).collect();
+    choices.dedup();
+    let choices: Vec<CardOption> = choices.into_iter().enumerate().map(|(i, label)| CardOption {
+        id: format!("choice-{i}"), label, style: "default".into(),
+    }).collect();
+    choices
+}
+
+pub fn input_timeout_card(tail: &str, harness: &str, bot: &str, agent: &str, run_id: Option<&str>) -> Card {
+    let body = if tail.trim().is_empty() {
+        "Herdbot sent the task prompt twice, but the harness stayed idle and showed no accepted input.".to_owned()
+    } else {
+        format!("Herdbot sent the task prompt twice, but the harness stayed idle. Inspect the pane before continuing.\n\n{tail}")
+    };
+    Card {
+        id: card_id(agent, &body), kind: "operator_prompt".into(), adapter: "display-only".into(),
+        bot: bot.to_owned(), agent: agent.to_owned(), title: "Task prompt was not accepted".into(),
+        body, options: Vec::new(), at: home::now(), harness: Some(harness.to_owned()), run_id: run_id.map(str::to_owned),
+    }
+}
+
+pub fn blocked_status_card(tail: &str, harness: &str, bot: &str, agent: &str, run_id: Option<&str>) -> Card {
+    let body = if tail.trim().is_empty() { "The harness is blocked and needs operator input.".to_owned() } else { tail.to_owned() };
+    let options = visible_choices(&body);
+    Card {
+        id: card_id(agent, &body), kind: "operator_prompt".into(), adapter: "display-only".into(),
+        bot: bot.to_owned(), agent: agent.to_owned(), title: "Harness is waiting for input".into(),
+        body, options, at: home::now(), harness: Some(harness.to_owned()), run_id: run_id.map(str::to_owned),
+    }
 }
 
 pub fn keys(adapter: &str, option: &str) -> Option<&'static [&'static str]> {
@@ -130,6 +200,24 @@ mod tests {
         );
         assert!(recognize("Is this a project you created or one you trust?", "b", "a").is_none());
         assert!(recognize("   Yes, I trust this folder", "b", "a").is_none());
+    }
+
+    #[test]
+    fn codex_hooks_review_is_a_display_only_card_with_run_context() {
+        let screen = "Hooks\n4 hooks need review before they can run.\n1. Review hooks\n2. Trust all and continue\n3. Continue without trusting\n";
+        let card = recognize_prompt(screen, "codex", "alpha", "alpha-r1", Some("r1")).unwrap();
+        assert_eq!(card.kind, "operator_prompt");
+        assert_eq!(card.harness.as_deref(), Some("codex"));
+        assert_eq!(card.run_id.as_deref(), Some("r1"));
+        assert_eq!(card.options.len(), 3);
+        assert!(keys(&card.adapter, &card.options[1].id).is_none());
+    }
+
+    #[test]
+    fn unknown_permission_prompts_are_display_only() {
+        let card = recognize_prompt("Permission required\nAllow access to the workspace?\n1) Allow\n2) Deny", "pi", "alpha", "alpha-r2", Some("r2")).unwrap();
+        assert_eq!(card.kind, "operator_prompt");
+        assert!(keys(&card.adapter, "choice").is_none());
     }
 
     #[test]

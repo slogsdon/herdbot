@@ -154,7 +154,7 @@ pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
     let text = || event.text.clone().unwrap_or_default();
     let reason = || event.reason.clone().unwrap_or_default();
     match (run, event.kind.as_str()) {
-        (Some(r), _) if r.pane_closed || r.status != "running" => Action::Ignore,
+        (Some(r), _) if r.pane_closed || !matches!(r.status.as_str(), "running" | "blocked") => Action::Ignore,
         (Some(r), _) if r.route.is_empty() => Action::Defer,
         // A compactor answers many jobs in one run; the daemon's memory tick ends it.
         (Some(r), "turn_end") if r.class == "compact" => Action::Ignore,
@@ -443,6 +443,8 @@ mod tests {
             decide(&event("turn_end"), Some(&running()), false),
             Action::FinishRun("reply".into())
         );
+        let blocked = home::Run { status: "blocked".into(), ..running() };
+        assert_eq!(decide(&event("turn_end"), Some(&blocked), false), Action::FinishRun("reply".into()));
         assert_eq!(
             decide(&event("blocked"), Some(&running()), false),
             Action::BlockRun("Bash: ls".into())

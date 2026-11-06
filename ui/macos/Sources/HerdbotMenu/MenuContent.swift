@@ -46,9 +46,9 @@ struct MenuContent: View {
                 }
             }
             if !snapshot.runs.isEmpty {
-                Section("Running") {
+                Section("Subagents") {
                     ForEach(snapshot.runs, id: \.id) { run in
-                        Button("\(run.bot): \(run.description) (\(run.route))") { focus(run.agent) }
+                        Button("\(run.status == "blocked" ? "⚠ " : "")\(run.bot): \(run.description) (\(run.route))") { focus(run.agent) }
                     }
                 }
             }

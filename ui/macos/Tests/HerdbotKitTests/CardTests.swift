@@ -16,6 +16,20 @@ func card(id: String = "c1", bot: String = "helper", kind: String = "approval", 
         #expect(value.options.map(\.style) == [.standard, .destructive])
     }
 
+    @Test func operatorPromptCardShowsOptionalHarnessAndRun() throws {
+        let json = #"{"id":"x","kind":"operator_prompt","adapter":"display-only","bot":"alpha","agent":"alpha-r1","title":"Hooks need review","body":"dialog","options":[{"id":"choice-0","label":"Review hooks","style":"default"}],"at":1,"harness":"codex","run_id":"r1"}"#
+        let value = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
+        #expect(value.harness == "codex")
+        #expect(value.runID == "r1")
+        #expect(value.options.map(\.label) == ["Review hooks"])
+    }
+
+    @Test func oldCardsDecodeWithoutHarnessOrRun() throws {
+        let value = try JSONDecoder().decode(Card.self, from: Data(cardJSON.utf8))
+        #expect(value.harness == nil)
+        #expect(value.runID == nil)
+    }
+
     @Test func unknownKindStyleAndFieldsDoNotFail() throws {
         let json = #"{"id":"x","kind":"poll","adapter":"a","bot":"b","agent":"b","title":"t","body":"","options":[{"id":"o","label":"l","style":"fancy","extra":1}],"at":1,"future":true}"#
         let value = try JSONDecoder().decode(Card.self, from: Data(json.utf8))

@@ -61,10 +61,22 @@ struct GenericCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(card.title).font(.headline)
+            Text([card.harness, card.runID.map { "run \($0)" }, card.bot].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary)
             if !card.body.isEmpty { Text(card.body).font(.callout).textSelection(.enabled) }
+            if !card.options.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Choices shown by the harness").font(.caption).foregroundStyle(.secondary)
+                    ForEach(card.options) { option in
+                        Text("• \(option.label)").font(.callout)
+                    }
+                }
+            }
             Button("Jump to pane") { Task { try? await cli?.focus(agent: card.agent) } }.controlSize(.small)
         }
         .padding(12)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Operator input required from \(card.harness ?? "the harness") for \(card.bot)")
     }
 }

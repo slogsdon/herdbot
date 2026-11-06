@@ -140,18 +140,33 @@ fn claim_batch(path: &std::path::Path) -> Result<std::path::PathBuf> {
 enum Prune {
     Keep,
     Remove,
-    Replace(herdbot_core::cards::Card),
+    Replace(Box<herdbot_core::cards::Card>),
 }
 
 fn prune_decision(card: &herdbot_core::cards::Card, status: Option<&str>, screen: &str) -> Prune {
-    if status != Some("blocked") {
+    if !matches!(status, Some("idle" | "blocked")) {
         return Prune::Remove;
     }
-    match crate::adapters::recognize(screen, &card.bot, &card.agent) {
+    if card.run_id.as_deref().is_some_and(|id| {
+        home::load_run(id).is_none_or(|run| run.status != "blocked")
+    }) {
+        return Prune::Remove;
+    }
+    if card.run_id.is_some() {
+        return Prune::Keep;
+    }
+    if card.title == "Task prompt was not accepted" && matches!(status, Some("idle" | "blocked")) {
+        return Prune::Keep;
+    }
+    match crate::adapters::recognize_prompt(screen, card.harness.as_deref().unwrap_or_default(), &card.bot, &card.agent, card.run_id.as_deref()) {
         None => Prune::Remove,
         Some(current) if current.id == card.id => Prune::Keep,
-        Some(current) => Prune::Replace(current),
+        Some(current) => Prune::Replace(Box::new(current)),
     }
+}
+
+fn card_still_matches_tail(card: &herdbot_core::cards::Card, screen: &str) -> bool {
+    !screen.trim().is_empty() && (card.body == screen || card.body.ends_with(screen))
 }
 
 async fn prune_cards(herdr: &Client) -> Result<()> {
@@ -386,16 +401,18 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                     let mut r = run.expect("decide only blocks known runs");
                     let tail = run::tail(herdr, &r.agent, 60).await;
                     if !requeue_if_cooled(herdr, &mut r, &tail).await? {
-                        let notice = format!(
-                                "[subagent {} \"{}\" is blocked]\nIt is waiting for an approval in herdr pane {} ({reason}). Shane must answer it there.",
-                                r.id, r.description, r.pane
-                            );
                         let notice_id = format!("run:{}:blocked", r.id);
-                        home::enqueue_run_notice(&mut r, &notice_id, &notice)?;
+                        let harness = r.route.split(':').next().unwrap_or_default();
+                        let card = crate::adapters::recognize_prompt(&tail, harness, &r.bot, &r.agent, Some(&r.id))
+                            .unwrap_or_else(|| crate::adapters::blocked_status_card(&tail, harness, &r.bot, &r.agent, Some(&r.id)));
+                        herdbot_core::cards::write_card(&card)?;
+                        update_active_budget(&mut r, true, event.at);
+                        r.status = "blocked".into();
                         if !r.events.iter().any(|event| event.id == notice_id) {
                             r.events.push(home::RunEvent {
                                 id: notice_id.clone(), at: event.at, kind: "blocked".into(),
-                                summary: "Task is blocked on approval.".into(), detail: Some(reason.clone()),
+                                summary: "Task is blocked on an operator prompt.".into(),
+                                detail: Some(if tail.trim().is_empty() { reason.clone() } else { tail.clone() }),
                             });
                         }
                         r.notified_blocked = true;
@@ -460,12 +477,63 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
             continue;
         }
         let status = run::status(herdr, &r.agent).await;
+        if !r.route.is_empty() && (r.status == "blocked" || matches!(status.as_deref(), Some("blocked" | "idle"))) {
+            let screen = run::tail(herdr, &r.agent, 60).await;
+            if status.as_deref() == Some("blocked") && requeue_if_cooled(herdr, &mut r, &screen).await? {
+                home::save_run(&r)?;
+                continue;
+            }
+            if matches!(status.as_deref(), Some("blocked" | "idle"))
+                && let Some(mut card) = crate::adapters::recognize_prompt(
+                    &screen, r.route.split(':').next().unwrap_or_default(), &r.bot, &r.agent, Some(&r.id),
+                )
+            {
+                card.run_id = Some(r.id.clone());
+                card.harness = Some(r.route.split(':').next().unwrap_or_default().to_owned());
+                if r.status != "blocked" || !r.events.iter().any(|event| event.id == format!("run:{}:blocked", r.id)) {
+                    update_active_budget(&mut r, true, home::now());
+                    let notice_id = format!("run:{}:blocked", r.id);
+                    r.status = "blocked".into();
+                    r.notified_blocked = true;
+                    r.events.push(home::RunEvent { id: notice_id, at: home::now(), kind: "blocked".into(), summary: card.title.clone(), detail: Some(card.body.clone()) });
+                }
+                herdbot_core::cards::write_card(&card)?;
+                home::save_run(&r)?;
+                continue;
+            } else if status.as_deref() == Some("blocked") {
+                let harness = r.route.split(':').next().unwrap_or_default();
+                let card = crate::adapters::blocked_status_card(&screen, harness, &r.bot, &r.agent, Some(&r.id));
+                let notice_id = format!("run:{}:blocked", r.id);
+                update_active_budget(&mut r, true, home::now());
+                r.status = "blocked".into();
+                r.notified_blocked = true;
+                if !r.events.iter().any(|event| event.id == notice_id) {
+                    r.events.push(home::RunEvent { id: notice_id, at: home::now(), kind: "blocked".into(), summary: card.title.clone(), detail: Some(card.body.clone()) });
+                }
+                herdbot_core::cards::write_card(&card)?;
+                home::save_run(&r)?;
+                continue;
+            } else if r.status == "blocked" {
+                let existing = herdbot_core::cards::read_card(&r.agent);
+                if status.as_deref() == Some("idle") && existing.as_ref().is_some_and(|card| card_still_matches_tail(card, &screen)) {
+                    update_active_budget(&mut r, true, home::now());
+                    home::save_run(&r)?;
+                    continue;
+                }
+                r.status = "running".into();
+                r.notified_blocked = false;
+                r.blocked_since = None;
+                r.unblocked_at = Some(home::now());
+                herdbot_core::cards::remove_card(&r.agent);
+                home::save_run(&r)?;
+            }
+        }
         // `spawn` records the route once the agent has taken its task. Until then an idle
         // agent is still starting (agent_start alone can take 60 s), not finished.
         let settled =
             matches!(status.as_deref(), Some("idle") | Some("done")) && !r.route.is_empty();
         let now = home::now();
-        if r.status == "running" && r.wall_clock_limit.is_some() && !r.route.is_empty() {
+        if matches!(r.status.as_str(), "running" | "blocked") && r.wall_clock_limit.is_some() && !r.route.is_empty() {
             if update_active_budget(&mut r, status.as_deref() == Some("blocked"), now) {
                 r.status = "expired".into();
                 r.result = Some("explicit active-time limit reached".into());
@@ -513,20 +581,20 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                 home::enqueue_run_notice(&mut r, &notice_id, &notice)?;
                 r.pane_closed = true;
             }
-            ("running", Some("blocked")) if !r.notified_blocked && !r.route.is_empty() => {
-                // claude's limit screen offers choices, so a quota hit can show up as blocked.
+            ("running" | "blocked", Some("blocked")) if !r.notified_blocked && !r.route.is_empty() => {
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if !requeue_if_cooled(herdr, &mut r, &text).await? {
-                    let notice = format!(
-                            "[subagent {} \"{}\" is blocked]\nIt is waiting for an approval in herdr pane {}. Shane must answer it there.",
-                            r.id, r.description, r.pane
-                        );
                     let notice_id = format!("run:{}:blocked", r.id);
-                    home::enqueue_run_notice(&mut r, &notice_id, &notice)?;
+                    let harness = r.route.split(':').next().unwrap_or_default();
+                    let card = crate::adapters::recognize_prompt(&text, harness, &r.bot, &r.agent, Some(&r.id))
+                        .unwrap_or_else(|| crate::adapters::blocked_status_card(&text, harness, &r.bot, &r.agent, Some(&r.id)));
+                    herdbot_core::cards::write_card(&card)?;
+                    update_active_budget(&mut r, true, now);
+                    r.status = "blocked".into();
                     if !r.events.iter().any(|event| event.id == notice_id) {
                         r.events.push(home::RunEvent {
                             id: notice_id.clone(), at: now, kind: "blocked".into(),
-                            summary: "Task is blocked on approval.".into(), detail: Some(text.clone()),
+                            summary: "Task is blocked on an operator prompt.".into(), detail: Some(text.clone()),
                         });
                     }
                     r.notified_blocked = true;
@@ -536,7 +604,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                 if settled
                     && grace_over
                     && r.class != "compact"
-                    && now - r.started_at > HARVEST_AFTER =>
+                    && now - r.unblocked_at.unwrap_or(r.started_at) > HARVEST_AFTER =>
             {
                 let text = run::tail(herdr, &r.agent, 60).await;
                 if requeue_if_cooled(herdr, &mut r, &text).await? {
@@ -544,19 +612,12 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
                     continue;
                 }
                 // Finished its turn without calling report_result: hand back what it printed.
-                r.status = "done".into();
-                r.result = Some(text.clone());
-                r.result_source = "tail".into();
-                r.summary = Some(home::first_line_preview(&text));
-                r.events.push(home::RunEvent {
-                    id: format!("run:{}:completed", r.id), at: now, kind: "completed".into(),
-                    summary: r.summary.clone().unwrap(), detail: Some(text.clone()),
-                });
+                apply_tail_fallback(&mut r, &text, now);
                 let notice = format!(
-                        "[subagent {} \"{}\" finished without report_result]\nSummary: {}\n\nFull result:\n{text}",
+                        "[subagent {} \"{}\" failed: no report_result]\nSummary: {}\n\nCaptured pane output:\n{text}",
                         r.id, r.description, r.summary.as_deref().unwrap_or_default()
                     );
-                let notice_id = format!("run:{}:completed", r.id);
+                let notice_id = format!("run:{}:failed", r.id);
                 home::enqueue_run_notice(&mut r, &notice_id, &notice)?;
             }
             ("done" | "failed", _) if settled || status.is_none() => {
@@ -570,11 +631,32 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
     Ok(())
 }
 
+fn apply_tail_fallback(run: &mut Run, text: &str, now: i64) {
+    run.status = "failed".into();
+    run.result = Some(text.to_owned());
+    run.result_source = "tail".into();
+    run.summary = Some(home::first_line_preview(text));
+    let id = format!("run:{}:failed", run.id);
+    if !run.events.iter().any(|event| event.id == id) {
+        run.events.push(home::RunEvent {
+            id, at: now, kind: "failed".into(),
+            summary: "Task ended without report_result; review the captured pane output.".into(),
+            detail: Some(text.to_owned()),
+        });
+    }
+}
+
 /// Advance active-time accounting; blocked intervals are excluded and never consume the card.
 fn update_active_budget(run: &mut home::Run, blocked: bool, now: i64) -> bool {
     let Some(limit) = run.wall_clock_limit else { return false };
     if blocked {
-        run.blocked_since.get_or_insert(now);
+        if run.blocked_since.is_none() {
+            if let Some(previous) = run.budget_checked_at {
+                let elapsed = now.saturating_sub(previous).max(0) as u64;
+                run.active_seconds = Some(run.active_seconds.unwrap_or_default().saturating_add(elapsed));
+            }
+            run.blocked_since = Some(now);
+        }
         run.budget_checked_at = Some(now);
         return false;
     }
@@ -772,11 +854,11 @@ fn fire_schedules(last_fired: &mut HashMap<String, i64>, started: i64) -> Result
 mod tests {
 
     #[test]
-    fn prune_keeps_a_card_only_while_the_same_prompt_is_on_a_blocked_agent() {
+    fn prune_keeps_a_card_while_the_same_prompt_is_visible() {
         let trust = include_str!("../fixtures/panes/claude-trust.txt");
         let card = crate::adapters::recognize(trust, "helper", "helper").unwrap();
         assert_eq!(prune_decision(&card, Some("blocked"), trust), Prune::Keep);
-        assert_eq!(prune_decision(&card, Some("idle"), trust), Prune::Remove);
+        assert_eq!(prune_decision(&card, Some("idle"), trust), Prune::Keep);
         assert_eq!(prune_decision(&card, None, trust), Prune::Remove);
         assert_eq!(
             prune_decision(&card, Some("blocked"), "gone"),
@@ -786,6 +868,24 @@ mod tests {
         assert!(
             matches!(prune_decision(&card, Some("blocked"), &moved), Prune::Replace(c) if c.id != card.id)
         );
+    }
+
+    #[test]
+    fn tail_fallback_preserves_output_but_never_marks_success() {
+        let mut run = home::Run { id: "r1".into(), status: "running".into(), ..Default::default() };
+        apply_tail_fallback(&mut run, "partial output\nmore", 42);
+        assert_eq!(run.status, "failed");
+        assert_eq!(run.result_source, "tail");
+        assert_eq!(run.result.as_deref(), Some("partial output\nmore"));
+        assert_eq!(run.events[0].kind, "failed");
+        assert_eq!(run.events[0].detail.as_deref(), Some("partial output\nmore"));
+    }
+
+    #[test]
+    fn an_unrecognized_operator_prompt_stays_blocked_until_its_tail_changes() {
+        let card = crate::adapters::blocked_status_card("permission details", "pi", "alpha", "alpha-r1", Some("r1"));
+        assert!(card_still_matches_tail(&card, "permission details"));
+        assert!(!card_still_matches_tail(&card, "task output"));
     }
     #[test]
     fn liveness_probes_never_fill_the_lock_backlog() {
@@ -908,12 +1008,13 @@ mod tests {
         assert_eq!(run.active_seconds, Some(6));
         assert!(!update_active_budget(&mut run, true, 107));
         assert_eq!(run.blocked_since, Some(107));
+        assert_eq!(run.active_seconds, Some(7));
         assert!(!update_active_budget(&mut run, true, 1000));
-        assert_eq!(run.active_seconds, Some(6));
+        assert_eq!(run.active_seconds, Some(7));
         assert!(!update_active_budget(&mut run, false, 1001));
-        assert_eq!(run.active_seconds, Some(6));
+        assert_eq!(run.active_seconds, Some(7));
         assert!(update_active_budget(&mut run, false, 1005));
-        assert_eq!(run.active_seconds, Some(10));
+        assert_eq!(run.active_seconds, Some(11));
     }
 
     #[test]

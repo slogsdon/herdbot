@@ -17,6 +17,13 @@ import Testing
         #expect(snap.blocked.first?.text == nil)
     }
 
+    @Test func blockedRunStatusIsOptionalAndVisible() throws {
+        let json = #"{"v":1,"type":"snapshot","snapshot":{"v":1,"at":1,"daemon":"up","bots":[],"rooms":[],"runs":[{"id":"r1","bot":"alpha","agent":"alpha-r1","route":"codex:gpt","description":"inspect","status":"blocked"}],"cooldowns":[],"blocked":[],"warnings":[]}}"#
+        let run = try #require(try StreamParser.parse(json)?.snapshot?.runs.first)
+        #expect(run.status == "blocked")
+        #expect(try #require(try StreamParser.parse(snapshotLine)?.snapshot?.runs.first).status == nil)
+    }
+
     @Test func aSnapshotFromAnOlderHerdbotHasNoRooms() throws {
         let old = """
         {"v":1,"type":"snapshot","snapshot":{"v":1,"at":1,"daemon":"up","bots":[],"runs":[],"cooldowns":[],"blocked":[],"warnings":[]}}

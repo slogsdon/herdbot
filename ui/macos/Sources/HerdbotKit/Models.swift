@@ -75,6 +75,16 @@ public struct RunView: Codable, Hashable, Sendable {
     public let agent: String
     public let route: String
     public let description: String
+    public let status: String?
+
+    public init(id: String, bot: String, agent: String, route: String, description: String, status: String? = nil) {
+        self.id = id
+        self.bot = bot
+        self.agent = agent
+        self.route = route
+        self.description = description
+        self.status = status
+    }
 }
 
 public struct CooldownView: Codable, Hashable, Sendable {
