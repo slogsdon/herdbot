@@ -198,7 +198,7 @@ func turns(_ count: Int, from start: Int = 0) -> [HistoryItem] {
         #expect(Set(entries.map(\.id)).count == entries.count)
     }
 
-    @Test func lifecycleTimelineUsesStableEventIDsAndGenericNotificationCopy() {
+    @Test func lifecycleTimelineUsesStableEventIDsAndGenericFallbackCopy() {
         let item = HistoryItem(n: nil, at: 100, kind: "notice", text: "done", state: "completed", eventID: "run-7-completed", source: "lifecycle", detail: "full private result")
         let entries = Timeline.entries([item])
         #expect(entries.compactMap { entry -> String? in

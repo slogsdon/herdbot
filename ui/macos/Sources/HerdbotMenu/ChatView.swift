@@ -62,15 +62,22 @@ struct ChatView: View {
     }
 
     @ViewBuilder private func banner(_ selection: Recipient) -> some View {
-        if case .bot(let slug) = selection, let blocked = menu.snapshot?.blocked.first(where: { $0.agent == slug }) {
-            HStack {
-                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
-                Text("Waiting on you: \(blocked.reason ?? "needs your input")").lineLimit(2)
-                Spacer()
-                Button("Jump to pane") { Task { try? await cli?.focus(agent: slug) } }.controlSize(.small)
+        if case .bot(let slug) = selection {
+            let blocked = chat.blockedEvents(for: slug)
+            if !blocked.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(blocked, id: \.self) { event in
+                        HStack {
+                            Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                            Text("Waiting on you: \(NotificationCopy.detail(for: event) ?? "needs your input")").lineLimit(2)
+                            Spacer()
+                            Button("Jump to pane") { Task { try? await cli?.focus(agent: event.agent) } }.controlSize(.small)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.orange.opacity(0.15))
             }
-            .padding(10)
-            .background(.orange.opacity(0.15))
         }
     }
 

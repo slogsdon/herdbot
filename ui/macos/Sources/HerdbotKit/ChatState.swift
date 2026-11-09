@@ -165,11 +165,22 @@ public final class ChatState {
     }
 
     /// The bot a blocked event's agent belongs to: a bot's main agent is its slug, a subagent's
-    /// agent maps to the run's bot. nil for an agent herdbot doesn't know.
+    /// agent maps to the run's bot. A settled run is gone from the snapshot, but its agent keeps the
+    /// "<bot>-<run id>" name, so the longest bot slug it starts with names its bot. nil for an agent
+    /// herdbot doesn't know.
     public func bot(forAgent agent: String) -> Recipient? {
         guard let snapshot = menu.snapshot else { return nil }
         if snapshot.bots.contains(where: { $0.slug == agent }) { return .bot(agent) }
-        return snapshot.runs.first { $0.agent == agent }.map { .bot($0.bot) }
+        if let run = snapshot.runs.first(where: { $0.agent == agent }) { return .bot(run.bot) }
+        let slug = snapshot.bots.map(\.slug)
+            .filter { agent.hasPrefix("\($0)-") }
+            .max { $0.count < $1.count }
+        return slug.map { .bot($0) }
+    }
+
+    /// The snapshot's blocked events that belong to a bot: its main agent and its subagents.
+    public func blockedEvents(for slug: String) -> [Event] {
+        (menu.snapshot?.blocked ?? []).filter { bot(forAgent: $0.agent) == .bot(slug) }
     }
 
     /// Persisted items oldest first, then pending ones.

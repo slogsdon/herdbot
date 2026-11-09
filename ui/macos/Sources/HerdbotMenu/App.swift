@@ -50,10 +50,15 @@ struct HerdbotMenuApp: App {
         self.answers = answers
         unread = UnreadTracker(menu: state)
         let opener = self.opener
+        // Resolved while the run is still in the snapshot, so a click still opens the right chat later.
+        notifier.botForAgent = { agent in
+            guard case .bot(let slug)? = chat.bot(forAgent: agent) else { return nil }
+            return slug
+        }
+        notifier.botName = { slug in state.snapshot?.botName(slug) ?? slug }
         // A blocked notification opens that bot's chat; an agent we can't place still focuses its pane.
-        notifier.openChat = { agent in
-            guard let bot = chat.bot(forAgent: agent) else { return false }
-            Task { await chat.select(bot) }
+        notifier.openChat = { slug in
+            Task { await chat.select(.bot(slug)) }
             NSApp.activate(ignoringOtherApps: true)
             opener.open()
             return true

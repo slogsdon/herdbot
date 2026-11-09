@@ -65,8 +65,9 @@ home: it would replace the running daemon.
 4. Block a real agent so the click has somewhere to go:
    `echo '{"at":1,"agent":"herdbot-dev","kind":"blocked","reason":"approval: demo","harness":"claude"}' >> $HB/.state/events/herdbot-dev.jsonl`
    Expect within ~2 s: the icon shows `⚠ 1`, the menu lists "herdbot-dev: approval: demo", and a
-   notification "herdbot-dev is waiting" appears.
-5. Click the notification: herdr focuses the herdbot-dev pane.
+   notification body "approval: demo" appears (no bot name: this throwaway home has no herdbot-dev bot).
+5. Click the notification: herdr focuses the herdbot-dev pane, because herdbot knows no bot to open a
+   chat for here. With a real home it opens that bot's chat instead, showing what it is stuck on.
 6. Clear it: append `{"at":2,"agent":"herdbot-dev","kind":"turn_end","harness":"claude"}` to the same file; the icon returns to idle.
 7. Quit from the menu; `rm -r $HB`.
 
