@@ -224,6 +224,7 @@ struct ChatWindow: View {
     let cli: ProcessCLI?
     let answers: CardAnswers
     let settings: SettingsState
+    let setup: SetupState
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -232,7 +233,7 @@ struct ChatWindow: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             if settings.isPresented {
-                SettingsView(state: settings, menu: menu)
+                SettingsView(state: settings, menu: menu, setup: setup)
             } else {
                 ChatView(menu: menu, chat: chat, cli: cli, answers: answers)
             }

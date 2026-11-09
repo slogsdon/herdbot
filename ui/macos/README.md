@@ -149,6 +149,19 @@ per save (`config set paths FROM=TO`) and **Reset all entries** unsets the key; 
 in the CLI contract yet, so there is no delete button. herdr session settings wait for the named-session
 spike and its CLI contract.
 
+### Setup and daemon (Global scope)
+
+The top of the Global form has a **Setup and daemon** section. **Run setup again** opens the setup window.
+**Disable daemon** runs `herdbot service disable` and **Enable daemon** runs `herdbot service enable`; the
+launchd plist and the CLI link stay, and the launchd override keeps the job off across logins, so enable
+loads the same service again. The state comes from the doctor's service check plus `herdbot service status`,
+and the form re-reads it when it opens and on each minute of the app's background refresh. A disabled
+daemon is not counted as setup trouble, so it does not turn the menu icon into a warning or reopen the
+setup window. **Uninstall…** runs `herdbot uninstall` after a confirmation and keeps bots and memory.
+**Delete bot data…** runs `herdbot uninstall --purge` only after you type the herdbot home path exactly; the
+app passes that path on the CLI's stdin, and the CLI checks it again. Each action shows the CLI's output on
+success and its error on failure, then re-reads the real state.
+
 ### Manual check (for Shane, not the agent)
 
 Needs a herdbot with `config list|get|set|unset --json` and a home you can throw away
@@ -168,6 +181,29 @@ Needs a herdbot with `config list|get|set|unset --json` and a home you can throw
 6. `paths`: expect the current entries listed. Add `/srv/app=/Users/me/app` and expect both entries, the
    entry field empty, and the `[paths]` section in `herdbot.toml` updated in place. **Reset all entries**
    empties the list and removes the key.
+
+### Manual check: setup and daemon lifecycle (for Shane, not the agent)
+
+These touch the real launchd service, so do them on a Mac where you can put it back. Use a herdbot that
+has `service disable|enable`:
+
+1. Settings, Global scope: the **Setup and daemon** section says the daemon is loaded and shows
+   **Disable daemon**. Click it: the section says the daemon is disabled, the button becomes
+   **Enable daemon**, and the menu bar icon does not turn into a warning. `herdbot service status` says
+   `installed but not running` and the plist is still in `~/Library/LaunchAgents`.
+2. Log out and back in: the daemon stays off (the launchd override persists). Click **Enable daemon**:
+   the section says loaded and `herdbot service status` shows `state = running`.
+3. Click **Run setup again** while the daemon is disabled: setup starts it again and the section updates
+   after the next refresh.
+4. **Uninstall…**: the confirmation says the launchd service and the CLI link go but bots and memory stay.
+   Cancel once (nothing changes), then accept, and expect the CLI's output with `kept <home>` and the
+   section saying no service is installed.
+5. **Delete bot data…**: the sheet's **Delete data** stays disabled until the typed path matches the home
+   exactly; a wrong path shows the CLI's refusal and deletes nothing. Only try a throwaway home
+   (`HERDBOT_HOME=$(mktemp -d)`), and check the folder is gone after typing its path.
+6. Make a command fail (`chmod a-w ~/Library/LaunchAgents`, or kill launchd's job with
+   `launchctl bootout gui/$(id -u)/dev.herdbot.daemon` before clicking): the error appears in the section
+   and no success text is shown. Put permissions back and reinstall with `herdbot setup --only service`.
 
 ## Cards
 

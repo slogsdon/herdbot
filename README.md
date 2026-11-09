@@ -88,8 +88,9 @@ herdbot room new | send | list | up    group conversations between bots and you
 herdbot task <bot> <class> <prompt…>   start a subagent from the shell
 herdbot route <class> [--bot BOT]      which harness:model a task class resolves to
 herdbot import-grok                    import the Grok Bot roster once
-herdbot service install                install the launchd service manually
-herdbot service status | uninstall
+herdbot service install                install and load the launchd service
+herdbot service disable | enable       stop or start it; keep the plist and CLI link
+herdbot service status | uninstall     inspect or remove the service
 ```
 
 Set `HERDBOT_HOME` to keep bots somewhere other than `~/Bots`. `HERDBOT_LINK_DIR` is a test hook for choosing the CLI-link directory.
@@ -148,7 +149,7 @@ A bot's `cwd` defaults to its own folder. You can point it at a repo instead, fo
 
 **Run from an installed binary.** Every MCP config and pane records the path of the running `herdbot`. If the daemon ran from `target/debug`, a bot that rebuilds herdbot would swap the binary out from under its own subagents. That's why `service install` refuses to run from `target/`. After a `cargo install`, restart the daemon onto the new binary with `launchctl kickstart -k gui/$(id -u)/dev.herdbot.daemon`.
 
-**The service.** `herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it. The plist records the binary path as invoked, without resolving symlinks. The daemon starts at login and restarts 10 s after any exit, which includes the times herdr isn't running yet. launchd and the menu bar app start with a bare `PATH`, so the plist records the process `PATH` plus the interactive login shell's `PATH` (zsh or bash, cached for 10 minutes in `.state/shell-path.json`) and the usual install directories, along with `HERDBOT_HOME` and `HERDR_SOCKET`. The effective `PATH` is the same whether setup runs in a terminal or from the app. Setup waits up to 15 seconds for the daemon to answer. `herdbot doctor` flags a daemon older than the binary on disk; restart it with `herdbot setup --only restart-daemon`.
+**The service.** `herdbot service install` writes `~/Library/LaunchAgents/dev.herdbot.daemon.plist` and loads it. `herdbot service disable` stops the daemon and records a launchd override, so it stays off across logins; the plist and CLI link stay, so `herdbot service enable` loads the same installation again, and `herdbot service status` says `installed but not running` meanwhile. `herdbot setup --only restart-daemon` loads a disabled service again before restarting it. `herdbot service uninstall` removes the launchd job and plist; it does not delete bot or memory data. The plist records the binary path as invoked, without resolving symlinks. The daemon starts at login and restarts 10 s after any exit, which includes the times herdr isn't running yet. launchd and the menu bar app start with a bare `PATH`, so the plist records the process `PATH` plus the interactive login shell's `PATH` (zsh or bash, cached for 10 minutes in `.state/shell-path.json`) and the usual install directories, along with `HERDBOT_HOME` and `HERDR_SOCKET`. The effective `PATH` is the same whether setup runs in a terminal or from the app. Setup waits up to 15 seconds for the daemon to answer. `herdbot doctor` flags a daemon older than the binary on disk; restart it with `herdbot setup --only restart-daemon`.
 
 ### Settings
 

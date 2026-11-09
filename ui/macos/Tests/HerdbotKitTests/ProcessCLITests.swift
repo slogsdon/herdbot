@@ -213,4 +213,47 @@ printf '%s\\n' '\(response)'
             #expect(error.localizedDescription.contains("update herdbot or this app"))
         }
     }
+
+    @Test func serviceDisableAndEnableRunTheirSubcommands() async throws {
+        let disable = try fakeHerdbot(#"[ "$*" = "service disable" ] || exit 2; echo 'disabled the daemon; the service stays installed, so enable starts it again'"#)
+        #expect(try await ProcessCLI(binary: disable).setService(enabled: false).contains("disabled"))
+        let enable = try fakeHerdbot(#"[ "$*" = "service enable" ] || exit 2; echo 'enabled the daemon'"#)
+        #expect(try await ProcessCLI(binary: enable).setService(enabled: true).contains("enabled"))
+        let status = try fakeHerdbot(#"[ "$*" = "service status" ] || exit 2; echo 'state = running'"#)
+        #expect(try await ProcessCLI(binary: status).serviceStatus().contains("state = running"))
+    }
+
+    @Test func serviceFailuresStayVisible() async throws {
+        let bad = try fakeHerdbot("echo 'Boot-out failed: 5' >&2; exit 1")
+        await #expect(throws: CLIError.failed("Boot-out failed: 5")) {
+            _ = try await ProcessCLI(binary: bad).setService(enabled: false)
+        }
+    }
+
+    @Test func uninstallWithoutPurgeKeepsTheDataAndSendsNoPath() async throws {
+        let script = try fakeHerdbot(#"[ "$*" = "uninstall" ] || exit 2; echo 'kept /Users/x/Bots'"#)
+        #expect(try await ProcessCLI(binary: script).uninstall(purge: false, confirmedPath: nil).contains("kept"))
+    }
+
+    @Test func purgeSendsTheTypedPathOnStdin() async throws {
+        let script = try fakeHerdbot(#"[ "$*" = "uninstall --purge" ] || exit 2; read -r line; [ "$line" = "/tmp/bots" ] || { echo 'stdin mismatch' >&2; exit 1; }; echo 'removed /tmp/bots'"#)
+        #expect(try await ProcessCLI(binary: script).uninstall(purge: true, confirmedPath: "/tmp/bots").contains("removed"))
+    }
+
+    @Test func purgeWithoutAConfirmedPathNeverRunsTheCLI() async throws {
+        let script = try fakeHerdbot("echo 'ran' > \"$HERDBOT_MARK\"; exit 0")
+        let mark = FileManager.default.temporaryDirectory.appendingPathComponent("hk-\(UUID().uuidString).mark")
+        let cli = ProcessCLI(binary: script, environment: ["HERDBOT_MARK": mark.path])
+        await #expect(throws: CLIError.failed("purge needs the typed data path")) {
+            _ = try await cli.uninstall(purge: true, confirmedPath: nil)
+        }
+        #expect(!FileManager.default.fileExists(atPath: mark.path))
+    }
+
+    @Test func aPurgePathThatDoesNotMatchSurfacesTheCLIError() async throws {
+        let script = try fakeHerdbot("read -r line; echo 'path did not match; nothing deleted' >&2; exit 1")
+        await #expect(throws: CLIError.failed("path did not match; nothing deleted")) {
+            _ = try await ProcessCLI(binary: script).uninstall(purge: true, confirmedPath: "/nope")
+        }
+    }
 }

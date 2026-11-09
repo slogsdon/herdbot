@@ -50,13 +50,24 @@ func fakeHerdbot(_ body: String) throws -> URL {
     return script
 }
 
+/// One `uninstall` call as the fake saw it.
+struct FakeUninstall: Equatable {
+    let purge: Bool
+    let confirmedPath: String?
+}
+
 /// Answers `doctor` from a queue of reports (the last one repeats) and records the fixes asked for.
+/// The lifecycle half answers `service status` from `serviceStatusText` and records each call.
 final class FakeSetupCLI: SetupCLI, @unchecked Sendable {
     nonisolated(unsafe) var reports: [DoctorReport]
     nonisolated(unsafe) var fixes: [String?] = []
     nonisolated(unsafe) var failure: String?
     nonisolated(unsafe) var doctorFailure: String?
     nonisolated(unsafe) var output = "ok"
+    nonisolated(unsafe) var serviceStatusText = "state = running"
+    nonisolated(unsafe) var serviceCalls: [Bool] = []
+    nonisolated(unsafe) var uninstalls: [FakeUninstall] = []
+    nonisolated(unsafe) var lifecycleFailure: String?
     init(_ reports: [DoctorReport]) { self.reports = reports }
     func doctor() async throws -> DoctorReport {
         if let doctorFailure { throw CLIError.failed(doctorFailure) }
@@ -67,11 +78,26 @@ final class FakeSetupCLI: SetupCLI, @unchecked Sendable {
         if let failure { throw CLIError.failed(failure) }
         return output
     }
+    func serviceStatus() async throws -> String { serviceStatusText }
+    func setService(enabled: Bool) async throws -> String {
+        serviceCalls.append(enabled)
+        if let lifecycleFailure { throw CLIError.failed(lifecycleFailure) }
+        return enabled
+            ? "enabled the daemon"
+            : "disabled the daemon; the service stays installed, so enable starts it again"
+    }
+    func uninstall(purge: Bool, confirmedPath: String?) async throws -> String {
+        uninstalls.append(FakeUninstall(purge: purge, confirmedPath: confirmedPath))
+        if let lifecycleFailure { throw CLIError.failed(lifecycleFailure) }
+        return purge ? "removed \(confirmedPath ?? "")" : "kept /Users/x/Bots (bots and memory); --purge removes it"
+    }
 }
 
 func report(_ checks: DoctorCheck...) -> DoctorReport { DoctorReport(version: "0.1.0", checks: checks) }
 let okCheck = DoctorCheck(id: "herdr", status: .ok, message: "herdr 0.9.1")
 let failService = DoctorCheck(id: "service", status: .fail, message: "not installed", fix: "service")
+let okService = DoctorCheck(id: "service", status: .ok, message: "installed")
+let homeCheck = DoctorCheck(id: "home", status: .ok, message: "/Users/x/Bots")
 let warnLink = DoctorCheck(id: "cli-link", status: .warn, message: "no herdbot on PATH", fix: "cli-link")
 let failHarnesses = DoctorCheck(id: "harnesses", status: .fail, message: "none of claude, codex, cursor-agent, pi is on PATH")
 

@@ -6,6 +6,7 @@ import SwiftUI
 struct SettingsView: View {
     let state: SettingsState
     let menu: MenuState
+    let setup: SetupState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +24,10 @@ struct SettingsView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
+                    if state.scope == .global {
+                        LifecycleSection(setup: setup)
+                        Divider()
+                    }
                     ForEach(state.settings) { setting in
                         SettingRow(state: state, setting: setting)
                     }

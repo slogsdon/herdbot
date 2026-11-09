@@ -245,6 +245,22 @@ extension ProcessCLI: SetupCLI {
         if let fix { arguments += ["--only", fix] }
         return String(decoding: try await output(arguments), as: UTF8.self)
     }
+
+    public func serviceStatus() async throws -> String {
+        String(decoding: try await output(["service", "status"]), as: UTF8.self)
+    }
+
+    public func setService(enabled: Bool) async throws -> String {
+        String(decoding: try await output(["service", enabled ? "enable" : "disable"]), as: UTF8.self)
+    }
+
+    /// Purge never runs without the typed path: the CLI checks it against the data root again.
+    public func uninstall(purge: Bool, confirmedPath: String?) async throws -> String {
+        guard !purge || confirmedPath != nil else { throw CLIError.failed("purge needs the typed data path") }
+        let input = purge ? Data(((confirmedPath ?? "") + "\n").utf8) : nil
+        let arguments = purge ? ["uninstall", "--purge"] : ["uninstall"]
+        return String(decoding: try await output(arguments, input: input), as: UTF8.self)
+    }
 }
 
 extension ProcessCLI: CardCLI {

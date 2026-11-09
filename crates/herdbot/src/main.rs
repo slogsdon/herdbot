@@ -30,7 +30,7 @@ const USAGE: &str = "usage:
   herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
   herdbot uninstall [--purge]            remove the service and the herdbot link; --purge also deletes the home
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
-  herdbot service install|uninstall|status   run the daemon as a launchd agent (from ~/.cargo/bin)
+  herdbot service install|disable|enable|uninstall|status   control the launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
   herdbot new <name> [--cwd DIR] [--class CLASS]
   herdbot list | runs
@@ -117,6 +117,8 @@ async fn cli() -> Result<()> {
         "service" => {
             let out = match args.first().map(String::as_str) {
                 Some("install") => service::install()?,
+                Some("disable") => service::disable()?,
+                Some("enable") => service::enable()?,
                 Some("uninstall") => service::uninstall()?,
                 Some("status") => service::status()?,
                 _ => return Err(USAGE.into()),

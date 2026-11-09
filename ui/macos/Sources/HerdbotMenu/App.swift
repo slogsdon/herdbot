@@ -63,7 +63,7 @@ struct HerdbotMenuApp: App {
     var body: some Scene {
         // Opened from the menu, not at launch.
         Window("herdbot", id: "chat") {
-            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers, settings: settings)
+            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers, settings: settings, setup: setup)
         }
         .commands {
             CommandGroup(replacing: .appTermination) {
@@ -97,6 +97,7 @@ struct HerdbotMenuApp: App {
     private func autoOpenSetup() {
         Task {
             await setup.refresh()
+            await setup.refreshDaemon()
             if setup.shouldAutoOpen(dismissedVersion: UserDefaults.standard.string(forKey: "setupDismissedVersion")) {
                 opener.openSetup()
             }

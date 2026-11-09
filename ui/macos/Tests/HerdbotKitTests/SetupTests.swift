@@ -180,6 +180,20 @@ let doctorJSON = """
         #expect(!warning.shouldAutoOpen(dismissedVersion: nil))
     }
 
+    @Test func intentionallyDisabledDaemonDoesNotTriggerSetupAttention() async {
+        let disabledDaemon = DoctorCheck(id: "daemon", status: .fail, message: "the daemon is not running", fix: "restart-daemon")
+        let cli = FakeSetupCLI([report(okCheck, okService, disabledDaemon)])
+        cli.serviceStatusText = "installed but not running"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.refreshDaemon()
+        #expect(state.daemon == .disabled)
+        #expect(state.checks.first(where: { $0.id == "daemon" })?.status == .ok)
+        #expect(!state.needsAttention)
+        #expect(!state.showsSetupInMenu)
+        #expect(!state.shouldAutoOpen(dismissedVersion: nil))
+    }
+
     @Test func theLoginItemJoinsTheChecksAndRegisters() async {
         var status = LoginItemStatus.notRegistered
         var registered = 0
@@ -206,5 +220,145 @@ let doctorJSON = """
             #expect(!fixLabel(fix).isEmpty)
         }
         #expect(fixLabel("restart-daemon") == "Restart daemon")
+    }
+}
+
+@MainActor
+@Suite struct Lifecycle {
+    @Test func daemonStateComesFromTheServiceCheckAndLaunchdStatus() async {
+        let cli = FakeSetupCLI([report(okCheck, okService)])
+        let state = SetupState(cli: cli)
+        #expect(state.daemon == .unknown)
+        await state.refresh()
+        await state.refreshDaemon()
+        #expect(state.daemon == .enabled)
+        cli.serviceStatusText = "installed but not running"
+        await state.refreshDaemon()
+        #expect(state.daemon == .disabled)
+        let missing = SetupState(cli: FakeSetupCLI([report(okCheck, failService)]))
+        await missing.refresh()
+        await missing.refreshDaemon()
+        #expect(missing.daemon == .notInstalled)
+    }
+
+    @Test func disableRunsTheCommandThenShowsTheRealState() async {
+        let cli = FakeSetupCLI([report(okCheck, okService)])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.refreshDaemon()
+        cli.serviceStatusText = "installed but not running"
+        await state.setDaemon(enabled: false)
+        #expect(cli.serviceCalls == [false])
+        #expect(state.daemon == .disabled)
+        #expect(state.lifecycleResult == "disabled the daemon; the service stays installed, so enable starts it again")
+        #expect(state.lifecycleError == nil)
+        #expect(state.pending == nil)
+    }
+
+    @Test func enableRunsTheEnableCommand() async {
+        let cli = FakeSetupCLI([report(okCheck, okService)])
+        cli.serviceStatusText = "installed but not running"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.refreshDaemon()
+        cli.serviceStatusText = "state = running"
+        await state.setDaemon(enabled: true)
+        #expect(cli.serviceCalls == [true])
+        #expect(state.daemon == .enabled)
+    }
+
+    @Test func aFailedDaemonChangeSurfacesTheErrorWithoutFalseSuccess() async {
+        let cli = FakeSetupCLI([report(okCheck, okService)])
+        cli.lifecycleFailure = "Boot-out failed: 5: Input/output error"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.refreshDaemon()
+        await state.setDaemon(enabled: false)
+        #expect(state.lifecycleError == "service disable: Boot-out failed: 5: Input/output error")
+        #expect(state.lifecycleResult == nil)
+        #expect(state.daemon == .enabled)
+    }
+
+    @Test func uninstallKeepsBotDataByDefault() async {
+        let cli = FakeSetupCLI([report(okCheck, okService, homeCheck)])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.uninstall(purge: false)
+        #expect(cli.uninstalls == [FakeUninstall(purge: false, confirmedPath: nil)])
+        #expect(state.lifecycleResult?.contains("kept") == true)
+        #expect(state.lifecycleError == nil)
+    }
+
+    @Test func purgeNeedsTheTypedDataPath() async {
+        let cli = FakeSetupCLI([report(okCheck, okService, homeCheck)])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        #expect(state.dataRoot == "/Users/x/Bots")
+        state.purgeDraft = "/Users/x/Bot"
+        #expect(!state.purgeMatches)
+        state.purgeDraft = "  /Users/x/Bots\n"
+        #expect(state.purgeMatches)
+        state.prompt = .purge
+        #expect(state.prompt == .purge)
+        await state.uninstall(purge: true, confirmation: "/Users/x/Bot")
+        #expect(cli.uninstalls.isEmpty)
+        #expect(state.lifecycleError == "Type /Users/x/Bots exactly to delete bot data.")
+        await state.uninstall(purge: true, confirmation: "  /Users/x/Bots\n")
+        #expect(cli.uninstalls == [FakeUninstall(purge: true, confirmedPath: "/Users/x/Bots")])
+        #expect(state.lifecycleError == nil)
+    }
+
+    @Test func purgeIsRefusedWhenTheDataPathIsUnknown() async {
+        let cli = FakeSetupCLI([report(okCheck, okService)])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        #expect(state.dataRoot == nil)
+        await state.uninstall(purge: true, confirmation: "")
+        #expect(cli.uninstalls.isEmpty)
+        #expect(state.lifecycleError != nil)
+    }
+
+    @Test func uninstallRefreshesTheDoctorAndDaemon() async {
+        let cli = FakeSetupCLI([report(okCheck, okService, homeCheck), report(okCheck, failService, homeCheck)])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.uninstall(purge: false)
+        #expect(state.worst == .fail)
+        #expect(state.daemon == .notInstalled)
+    }
+
+    @Test func setupAfterUninstallRefreshesDaemonWithoutLeavingSettings() async {
+        let cli = FakeSetupCLI([
+            report(okCheck, okService, homeCheck),
+            report(okCheck, failService, homeCheck),
+            report(okCheck, okService, homeCheck),
+        ])
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.refreshDaemon()
+        await state.uninstall(purge: false)
+        #expect(state.daemon == .notInstalled)
+
+        cli.serviceStatusText = "state = running"
+        await state.fixAll()
+        #expect(state.daemon == .enabled)
+    }
+
+    @Test func aFailedUninstallSurfacesTheErrorWithoutFalseSuccess() async {
+        let cli = FakeSetupCLI([report(okCheck, okService, homeCheck)])
+        cli.lifecycleFailure = "path did not match; nothing deleted"
+        let state = SetupState(cli: cli)
+        await state.refresh()
+        await state.uninstall(purge: true, confirmation: "/Users/x/Bots")
+        #expect(state.lifecycleError == "uninstall: path did not match; nothing deleted")
+        #expect(state.lifecycleResult == nil)
+        #expect(state.checks.map(\.id).contains("home"))
+    }
+
+    @Test func aMissingCLIIsAnErrorForLifecycleActions() async {
+        let state = SetupState(cli: nil)
+        await state.setDaemon(enabled: false)
+        #expect(state.lifecycleError == CLIError.notFound.localizedDescription)
+        #expect(state.pending == nil)
     }
 }

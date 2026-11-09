@@ -51,6 +51,13 @@ public struct DoctorReport: Codable, Hashable, Sendable {
 public protocol SetupCLI: Sendable {
     func doctor() async throws -> DoctorReport
     func setup(fix: String?) async throws -> String
+    /// Raw `herdbot service status` text: `state = …` lines when launchd has the job loaded.
+    func serviceStatus() async throws -> String
+    /// `herdbot service disable|enable`. Disable keeps the installed plist and records a launchd
+    /// override, so enable loads the same install again.
+    func setService(enabled: Bool) async throws -> String
+    /// `herdbot uninstall`, or `--purge` with the typed data path (the CLI reads it from stdin).
+    func uninstall(purge: Bool, confirmedPath: String?) async throws -> String
 }
 
 public enum LoginItemStatus: Sendable { case enabled, notRegistered, requiresApproval, unavailable }
