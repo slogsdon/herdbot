@@ -167,9 +167,9 @@ pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
         (Some(r), _) if r.pane_closed || !matches!(r.status.as_str(), "running" | "blocked") => Action::Ignore,
         (Some(r), _) if r.route.is_empty() => Action::Defer,
         (Some(_), "turn_error") => Action::FailRun(if reason().trim().is_empty() { "Worker reported an unspecified error.".into() } else { reason() }),
-        (Some(_), "turn_end") if text().trim().is_empty() => Action::FailRun("Worker ended its turn without a final assistant reply.".into()),
-        // A compactor answers many jobs in one run; the daemon's memory tick ends it.
+        // A compactor's tool-only turn can have no text; its memory tick owns run completion.
         (Some(r), "turn_end") if r.class == "compact" => Action::Ignore,
+        (Some(_), "turn_end") if text().trim().is_empty() => Action::FailRun("Worker ended its turn without a final assistant reply.".into()),
         (Some(_), "turn_end") => Action::FinishRun(text()),
         (Some(r), "blocked") if !r.notified_blocked => Action::BlockRun(reason()),
         (Some(_), _) => Action::Ignore,
@@ -434,6 +434,13 @@ mod tests {
             empty.text = Some(text.into());
             assert_eq!(decide(&empty, Some(&running()), false), Action::FailRun("Worker ended its turn without a final assistant reply.".into()));
         }
+    }
+
+    #[test]
+    fn empty_compactor_turn_does_not_end_its_multi_job_run() {
+        let mut empty = event("turn_end");
+        empty.text = Some("  \n".into());
+        assert_eq!(decide(&empty, Some(&home::Run { class: "compact".into(), ..running() }), false), Action::Ignore);
     }
 
     #[test]
