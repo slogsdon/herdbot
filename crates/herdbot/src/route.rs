@@ -493,7 +493,14 @@ pub fn launch(
             // herdbot-pi.ts registers `herdbot mcp` with bot/run from the pane env.
             Launch {
                 kind: "pi",
-                args: pi_args(provider, &route.model, effort, pi_extension()?, prompt_file),
+                args: pi_args(
+                    provider,
+                    &route.model,
+                    effort,
+                    pi_extension()?,
+                    prompt_file,
+                    &home::home_dir(),
+                ),
                 preamble_prompt: None,
             }
         }
@@ -578,6 +585,7 @@ fn pi_args(
     effort: Option<String>,
     extension: String,
     prompt_file: String,
+    user_home: &std::path::Path,
 ) -> Vec<String> {
     let mut args: Vec<String> = [
         "--no-extensions",
@@ -590,6 +598,10 @@ fn pi_args(
     .map(str::to_owned)
     .to_vec();
     args.push(extension);
+    let herdr_extension = user_home.join(".pi/agent/extensions/herdr-agent-state.ts");
+    if herdr_extension.is_file() {
+        args.extend(["-e".into(), herdr_extension.to_string_lossy().into_owned()]);
+    }
     args.extend([
         "--provider".into(),
         provider.to_owned(),
@@ -725,6 +737,7 @@ mod tests {
             Some("medium".into()),
             "/h/.state/herdbot-pi.ts".into(),
             "/h/.state/launch/a.md".into(),
+            std::path::Path::new("/h"),
         );
         assert_eq!(
             args,
@@ -747,6 +760,41 @@ mod tests {
             ]
         );
         assert!(!args.iter().any(|a| a == "--mcp-config"));
+    }
+
+    #[test]
+    fn pi_loads_only_installed_herdr_state_extension() {
+        let user_home =
+            std::env::temp_dir().join(format!("herdbot-pi-state-{}", std::process::id()));
+        let extension = user_home.join(".pi/agent/extensions/herdr-agent-state.ts");
+        std::fs::create_dir_all(extension.parent().unwrap()).unwrap();
+        let args = || {
+            pi_args(
+                "opencode-go",
+                "kimi-k2.7-code",
+                None,
+                "herdbot-pi.ts".into(),
+                "prompt.md".into(),
+                &user_home,
+            )
+        };
+        let absent = args();
+        assert!(absent.contains(&"--no-extensions".to_owned()));
+        assert!(!absent.iter().any(|arg| arg == &extension.to_string_lossy()));
+        std::fs::write(&extension, "// installed by herdr").unwrap();
+        let installed = args();
+        std::fs::remove_file(&extension).unwrap();
+        std::fs::create_dir(&extension).unwrap();
+        let directory = args();
+        std::fs::remove_dir_all(&user_home).unwrap();
+        assert!(
+            installed
+                .windows(2)
+                .any(|pair| pair == ["-e", extension.to_str().unwrap()])
+        );
+        assert!(installed.contains(&"--no-extensions".to_owned()));
+        assert_eq!(installed.len(), absent.len() + 2);
+        assert_eq!(directory, absent);
     }
 
     #[test]

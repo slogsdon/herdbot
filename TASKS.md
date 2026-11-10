@@ -1,5 +1,9 @@
 # Open tasks
 
+## Pi herdr lifecycle status (2026-11-10)
+
+- [x] Keep `--no-extensions` and explicitly load `~/.pi/agent/extensions/herdr-agent-state.ts` only when installed. Args regression failed first on the missing extension pair, then passed; missing paths and directories are skipped. README updated. Workspace build, 231 tests, clippy with warnings denied, and `git diff --check` passed. Live worktree-binary launch in isolated `HERDBOT_HOME`: Pi `deepseek-v4.1-flash:low`, disposable pane `w4P:p1`, 25-column layout; during the model wait, `agent_status` and `agent explain` reported `working` with `full_lifecycle_hook_authority`, bypassing screen detection. Evidence: `/tmp/cvvdxd-live.json`; check logs `/tmp/cvvdxd-{red,green,build,tests,clippy}.log`. Disposable workspace, panes, home and Pi session files removed; agent/workspace absence verified. No commit, installed-app/daemon changes, or changes to existing sessions/panes.
+
 ## Codex resume lock modal (2026-11-09)
 
 - [x] Recognize the exact conversation-open modal as an operator card; retry resumed Codex launches with `r` at most three times, preserve blocked/unaccepted queue batches for redelivery, and share startup acceptance/retry checks with queue delivery. Exact modal regression failed first; disabling retries and modal recognition also made the recovery and queue regressions fail. Socket tests cover retry exhaustion/release, main-agent queue preservation and redelivery, idle resend, and fast hook completion. Workspace build, 225 tests, clippy with warnings denied, and `git diff --check` pass. README updated; no commit or live activation.
