@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status (2026-11-09):** Historical spike salvaged; installed 0.9.1 discovery contract reverified read-only. Viable with a per-home socket ownership guard. Interactive lifecycle checks remain manual, and historical creation/cleanup is not current proof.
+
 **Goal:** Determine whether herdbot can safely offer an optional named herdr session without moving existing bot workspaces.
 
 **Architecture:** Read-only inspection and disposable-session experiments establish session creation, socket resolution, and client attachment behavior. The default session remains in use; this spike does not change production configuration.
@@ -31,10 +33,10 @@
 
 **Interfaces:** Report the supported CLI/API sequence, socket discovery contract, daemon launch behavior, workspace compatibility, and recommendation for a future setting.
 
-- [ ] Inspect `herdr session list|attach|stop|delete` help and available JSON output.
-- [ ] Create and attach to a disposable named session; record whether creation starts a server or UI.
-- [ ] Verify socket resolution from supported output and confirm `herdr-client` connection feasibility.
-- [ ] Observe an existing default-session workspace while the disposable session runs; do not move or modify it.
-- [ ] Stop/delete only the disposable session and verify it is gone.
-- [ ] Review results against the Settings spec; propose a separate design if a setting remains viable.
-- [ ] No product implementation or commit in this spike.
+- [x] Inspect `herdr session list|attach|stop|delete` help and available JSON output.
+- [x] Historical: create disposable session via non-TTY attach; server starts, terminal attach fails. Visible TUI attach remains manual.
+- [x] Verify socket resolution from supported output and confirm `herdr-client` connection feasibility.
+- [x] Historical: observe default workspace while disposable session runs; not repeated during read-only recheck.
+- [x] Historical: stop/delete only the disposable fixture and verify absence; not repeated during recheck.
+- [x] Review results against the Settings spec; propose a separate design if a setting remains viable.
+- [x] No product implementation or commit in this spike.
