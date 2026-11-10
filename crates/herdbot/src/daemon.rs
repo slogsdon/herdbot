@@ -1042,13 +1042,14 @@ mod tests {
             loop {
                 match UnixStream::connect(path) {
                     Ok(_) => return Ok(()),
-                    Err(e) => {
+                    Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
                         if started.elapsed() >= deadline {
                             return Err(format!("refused {refused} times in {deadline:?}: {e}"));
                         }
                         refused += 1;
                         std::thread::sleep(Duration::from_millis(1));
                     }
+                    Err(e) => return Err(format!("connect failed: {e}")),
                 }
             }
         }
