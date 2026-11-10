@@ -53,6 +53,20 @@ herdbot send helper "What can you do?"
 
 `herdbot setup` checks herdr and the harness CLIs, creates `~/Bots` and a commented `herdbot.toml`, links the CLI, installs the launchd service and offers a starter bot. The daemon delivers messages, so `send` needs it. The bot's workspace opens in herdr the first time a message arrives.
 
+### Restored main agents
+
+Herdbot records the main agent's herdr terminal ID at launch. `herdbot up`, daemon
+startup polling, and message delivery check that identity. An idle/done agent with a
+missing or different ID is replaced in a fresh pane with Herdbot's normal environment,
+MCP configuration and hooks. Working, blocked and unknown agents wait until idle/done.
+The daemon logs one `recovery <bot>` line for each completed recovery.
+
+When herdr reports a harness session, recovery retains the recorded route when available
+and adds `resume <id>` for Codex, `--resume <id>` for Claude, or `--session <path>` for Pi.
+A missing session, unsupported harness, or route fallback to a different harness starts a
+fresh conversation. Launch instruction turns that request READY remain excluded from
+chat history. Existing state without a terminal ID is migrated through the same recovery.
+
 ## Releasing
 
 For a signed release, install the `x86_64-apple-darwin` Rust target, have a Developer ID Application

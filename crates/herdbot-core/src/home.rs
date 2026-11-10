@@ -186,6 +186,9 @@ pub fn cwd(slug: &str, bot: &Bot) -> String {
 pub struct BotState {
     pub workspace_id: String,
     pub root_pane: String,
+    /// Terminal process identity returned by herdr at launch; absent in legacy state.
+    #[serde(default)]
+    pub terminal_id: Option<String>,
     pub agent: String,
     /// Route the main agent was started on ("harness:model[:effort]").
     #[serde(default)]

@@ -237,6 +237,16 @@ async fn flush_queues(
         {
             continue;
         }
+        if home::load_state(&agent).is_some() {
+            let before = home::load_state(&agent).and_then(|state| state.terminal_id);
+            if let Err(error) = run::up(herdr, &agent).await {
+                eprintln!("{agent}: {error}");
+                continue;
+            }
+            if before != home::load_state(&agent).and_then(|state| state.terminal_id) {
+                continue;
+            }
+        }
         let status = match run::status(herdr, &agent).await {
             Some(s) => s,
             None if home::load_state(&agent).is_some() || home::list_bots().contains(&agent) => {
@@ -776,6 +786,12 @@ async fn watch_bots(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
         let Some(state) = home::load_state(&slug) else {
             continue;
         };
+        // Runs on the first daemon tick too, even with no queued messages.
+        if let Err(error) = run::up(herdr, &slug).await {
+            eprintln!("{slug}: {error}");
+            continue;
+        }
+        let state = home::load_state(&slug).unwrap_or(state);
         let Some(status) = run::status(herdr, &state.agent).await else {
             mains.status.remove(&slug);
             continue;

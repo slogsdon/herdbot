@@ -16,27 +16,78 @@ fn marks_launch_ready(has_preamble: bool, is_main_agent: bool) -> bool {
     has_preamble && is_main_agent
 }
 
-async fn agent_alive(herdr: &Client, name: &str) -> bool {
-    herdr.agent_get(name).await.is_ok()
+#[derive(Debug, PartialEq, Eq)]
+enum LaunchIdentity {
+    Keep,
+    Recover,
+    Defer,
+}
+
+fn launch_identity(
+    recorded: Option<&str>,
+    current: Option<&str>,
+    status: Option<&str>,
+) -> LaunchIdentity {
+    if current.is_some() && recorded == current {
+        return LaunchIdentity::Keep;
+    }
+    if current.is_some() && matches!(status, Some("idle" | "done")) {
+        LaunchIdentity::Recover
+    } else {
+        LaunchIdentity::Defer
+    }
+}
+
+fn resume_args(harness: &str, session: Option<(&str, &str)>) -> Vec<String> {
+    let Some((kind, value)) = session.filter(|(kind, value)| *kind == harness && !value.is_empty())
+    else {
+        return Vec::new();
+    };
+    let flag = match kind {
+        "codex" => "resume",
+        "claude" => "--resume",
+        "pi" => "--session",
+        _ => return Vec::new(),
+    };
+    vec![flag.into(), value.into()]
 }
 
 /// Make sure the bot has a workspace with its main agent running; return its ids.
 pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
     let bot = home::load_bot(slug)?;
     if let Some(state) = home::load_state(slug) {
-        let workspace_alive = herdr
-            .call(
-                "workspace.get",
-                json!({ "workspace_id": state.workspace_id }),
-            )
-            .await
-            .is_ok();
-        if workspace_alive && agent_alive(herdr, &state.agent).await {
-            return Ok(state);
-        }
+        let workspace_alive = match herdr.call(
+            "workspace.get",
+            json!({ "workspace_id": state.workspace_id }),
+        ).await {
+            Ok(_) => true,
+            Err(HerdrError::Api { code, .. }) if code == "workspace_not_found" => false,
+            Err(error) => return Err(error.into()),
+        };
         if workspace_alive {
-            // Agent exited; restart it in a fresh pane of the same workspace.
-            return restart(herdr, slug, state).await;
+            let found = match herdr.agent_get(&state.agent).await {
+                Ok(found) => found,
+                Err(HerdrError::Api { code, .. }) if code == "agent_not_found" => {
+                    return restart(herdr, slug, state).await;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let agent = &found["agent"];
+            match launch_identity(
+                state.terminal_id.as_deref(),
+                agent["terminal_id"].as_str(),
+                agent["agent_status"].as_str(),
+            ) {
+                LaunchIdentity::Keep | LaunchIdentity::Defer => return Ok(state),
+                LaunchIdentity::Recover => {
+                    let old_terminal = state.terminal_id.clone();
+                    let recovered = restart_with_session(herdr, slug, state, Some(agent)).await?;
+                    if recovered.terminal_id != old_terminal {
+                        println!("recovery {slug}: restored terminal {} (recorded {:?}); relaunched with herdbot wiring", agent["terminal_id"], old_terminal);
+                    }
+                    return Ok(recovered);
+                }
+            }
         }
         home::clear_state(slug);
     }
@@ -54,6 +105,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
             .ok_or("workspace.create: no pane")?
             .to_owned(),
         agent: main_agent(slug),
+        terminal_id: None,
         route: String::new(),
     };
     home::save_state(slug, &state)?;
@@ -67,6 +119,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
         None,
         None,
         None,
+        None,
     )
     .await;
     state.route = match started {
@@ -84,6 +137,7 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
             }
         }
     };
+    state.terminal_id = home::load_state(slug).and_then(|saved| saved.terminal_id);
     home::save_state(slug, &state)?;
     Ok(state)
 }
@@ -92,15 +146,45 @@ pub async fn up(herdr: &Client, slug: &str) -> Result<BotState> {
 /// workspace, so a harness that is cooling down gets skipped. Routing happens before
 /// anything is touched: with no route available the old agent keeps running.
 pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotState> {
+    restart_with_session(herdr, slug, state, None).await
+}
+
+async fn restart_with_session(
+    herdr: &Client,
+    slug: &str,
+    state: BotState,
+    restored: Option<&Value>,
+) -> Result<BotState> {
     let bot = home::load_bot(slug)?;
     let class = bot.class.as_deref().unwrap_or("default");
-    route::resolve(&route::table()?, class, slug, None)?;
+    let resume = restored.and_then(|agent| {
+        Some((
+            agent["agent_session"]["agent"]
+                .as_str()
+                .or_else(|| agent["agent"].as_str())?,
+            agent["agent_session"]["value"].as_str()?,
+        ))
+    });
+    let explicit = resume
+        .filter(|(kind, _)| state.route.split(':').next() == Some(*kind))
+        .map(|_| state.route.clone());
+    route::resolve(&route::table()?, class, slug, explicit.as_deref())?;
     let pane = split(herdr, &state.root_pane, slug, None, &home::cwd(slug, &bot)).await?;
+    if restored.is_some()
+        && !matches!(
+            status(herdr, &state.agent).await.as_deref(),
+            Some("idle" | "done")
+        )
+    {
+        let _ = herdr.pane_close(&pane).await;
+        return Ok(state);
+    }
     // Closing the pane ends its agent and frees the name for reuse (checked on herdr,
     // 2026-10-20).
     let _ = herdr.pane_close(&state.root_pane).await;
     let mut state = BotState {
         root_pane: pane,
+        terminal_id: None,
         ..state
     };
     // Save the new pane first: if the start fails, the next `up` splits from a live pane.
@@ -112,9 +196,10 @@ pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotS
         &state.agent,
         &state.root_pane,
         class,
+        explicit.as_deref(),
         None,
         None,
-        None,
+        resume,
     )
     .await;
     state.route = match started {
@@ -132,6 +217,7 @@ pub async fn restart(herdr: &Client, slug: &str, state: BotState) -> Result<BotS
             }
         }
     };
+    state.terminal_id = home::load_state(slug).and_then(|saved| saved.terminal_id);
     home::save_state(slug, &state)?;
     Ok(state)
 }
@@ -189,6 +275,7 @@ async fn start(
     explicit_model: Option<&str>,
     run: Option<&str>,
     task: Option<&str>,
+    resume: Option<(&str, &str)>,
 ) -> Result<route::Route> {
     let table = route::table()?;
     let route = route::resolve(&table, class, slug, explicit_model)?;
@@ -220,7 +307,7 @@ async fn start(
     if let Some(run) = run {
         tool_args.extend(["--run".to_owned(), run.to_owned()]);
     }
-    let launch = route::launch(
+    let mut launch = route::launch(
         &table,
         &route,
         agent,
@@ -231,6 +318,7 @@ async fn start(
         home::codex_unsandboxed(),
         class,
     )?;
+    launch.args.extend(resume_args(launch.kind, resume));
     let started = herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
         .await;
@@ -242,7 +330,13 @@ async fn start(
             return Err(Box::new(StartBlocked { route, card }));
         }
     }
-    started?;
+    let started = started?;
+    if run.is_none() {
+        let terminal_id = started["terminal_id"].as_str().ok_or("agent.start: no terminal_id")?;
+        let mut state = home::load_state(slug).ok_or("main agent has no bot state")?;
+        state.terminal_id = Some(terminal_id.to_owned());
+        home::save_state(slug, &state)?;
+    }
     // The launch turn's READY is not conversation: `consume_events` drops the turn end this
     // marker marks. Every launch clears an older mark first, so a relaunch without a READY
     // prompt must not swallow a real turn.
@@ -407,6 +501,7 @@ pub async fn spawn(
         explicit_model,
         Some(&id),
         Some(&task),
+        None,
     )
     .await;
     run = home::load_run(&id).unwrap_or(run);
@@ -516,6 +611,56 @@ fn blocked_card(
 #[cfg(test)]
 mod tests {
     use super::{marks_launch_ready, prompt_taken, requested_route};
+
+    #[test]
+    fn legacy_bot_state_has_no_launch_identity() {
+        let state: crate::home::BotState = serde_json::from_value(serde_json::json!({
+            "workspace_id": "w1", "root_pane": "w1:p1", "agent": "helper", "route": "codex:gpt-6-luna"
+        }))
+        .unwrap();
+        assert_eq!(state.terminal_id, None);
+    }
+
+    #[test]
+    fn restored_launch_decision() {
+        use super::LaunchIdentity::*;
+        assert_eq!(
+            super::launch_identity(Some("t1"), Some("t1"), Some("idle")),
+            Keep
+        );
+        assert_eq!(
+            super::launch_identity(Some("t1"), Some("t2"), Some("done")),
+            Recover
+        );
+        assert_eq!(
+            super::launch_identity(None, Some("t2"), Some("idle")),
+            Recover
+        );
+        for status in ["working", "blocked", "unknown"] {
+            assert_eq!(
+                super::launch_identity(None, Some("t2"), Some(status)),
+                Defer
+            );
+        }
+        assert_eq!(super::launch_identity(None, None, Some("idle")), Defer);
+    }
+
+    #[test]
+    fn resume_arguments_preserve_harness_identity() {
+        for (harness, expected) in [
+            ("codex", vec!["resume", "session"]),
+            ("claude", vec!["--resume", "session"]),
+            ("pi", vec!["--session", "session"]),
+            ("cursor", vec![]),
+        ] {
+            assert_eq!(
+                super::resume_args(harness, Some((harness, "session"))),
+                expected
+            );
+            assert!(super::resume_args(harness, Some(("other", "session"))).is_empty());
+            assert!(super::resume_args(harness, None).is_empty());
+        }
+    }
 
     #[test]
     fn explicit_request_is_retained_for_exact_and_fallback_routes() {
