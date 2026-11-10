@@ -1,5 +1,9 @@
 # Open tasks
 
+## Codex resume lock modal (2026-11-09)
+
+- [x] Recognize the exact conversation-open modal as an operator card; retry resumed Codex launches with `r` at most three times, preserve blocked/unaccepted queue batches for redelivery, and share startup acceptance/retry checks with queue delivery. Exact modal regression failed first; disabling retries and modal recognition also made the recovery and queue regressions fail. Socket tests cover retry exhaustion/release, main-agent queue preservation and redelivery, idle resend, and fast hook completion. Workspace build, 225 tests, clippy with warnings denied, and `git diff --check` pass. README updated; no commit or live activation.
+
 ## Errored hook turns (2026-11-09)
 
 - [x] Prevent Pi error/aborted or empty final hook turns from settling successfully: forward final assistant metadata, emit `turn_error`, settle as `failed` with `result_source: hook`, and notify the parent that the task can be resumed in a new run. Wire Claude `StopFailure`; Codex 0.167.0 notify has no error field. Pi extension, error/empty-turn parsing/decision, Claude wiring and failure-result/notice regressions pass; the original Pi/empty/Claude/wiring regressions failed before the fix. Workspace build/tests/clippy, Node extension test, isolated hook CLI emission and `git diff --check` passed. No commit, installed-app/daemon activation, or live pane changes.

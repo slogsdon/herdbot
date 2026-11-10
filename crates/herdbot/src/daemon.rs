@@ -266,8 +266,19 @@ async fn flush_queues(
         if status != "idle" && status != "done" {
             continue;
         }
+        let state = home::load_state(&agent);
+        let run = home::list_runs().into_iter().find(|run| run.agent == agent);
+        let route = state.as_ref().map(|state| state.route.as_str())
+            .or_else(|| run.as_ref().map(|run| run.route.as_str())).unwrap_or_default();
+        let harness = route.split(':').next().unwrap_or_default();
+        let bot = run.as_ref().map(|run| run.bot.as_str()).unwrap_or(&agent);
+        let run_id = run.as_ref().map(|run| run.id.as_str());
+        let tail = run::tail(herdr, &agent, 60).await;
+        if let Some(card) = crate::adapters::recognize_prompt(&tail, harness, bot, &agent, run_id) {
+            herdbot_core::cards::write_card(&card)?;
+            continue;
+        }
         if fm::available() {
-            let tail = run::tail(herdr, &agent, 60).await;
             let times = held.get(&agent).copied().unwrap_or(0);
             let verdict = fm::classify_tail(&tail).await;
             if fm::hold(verdict.as_ref(), &tail, times) {
@@ -297,7 +308,11 @@ async fn flush_queues(
         let texts: Vec<String> = items.iter().map(|item| item.text.clone()).collect();
         if !texts.is_empty() {
             let text = texts.join("\n\n");
-            herdr.agent_prompt(&agent, &text, None).await?;
+            if let Some(card) = run::deliver_prompt(herdr, harness, bot, &agent, run_id, &text).await? {
+                herdbot_core::cards::write_card(&card)?;
+                delivered_at.insert(agent.clone(), home::now());
+                continue;
+            }
             delivered_at.insert(agent.clone(), home::now());
             // A reply can come back inside one tick (a quota notice does), so count the
             // delivery as the start of a turn for `watch_bots`.
@@ -890,6 +905,71 @@ fn fire_schedules(last_fired: &mut HashMap<String, i64>, started: i64) -> Result
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn codex_modal_keeps_main_messages_queued_until_accepted() {
+        // Isolate home and PATH in a child so parallel tests cannot touch real bot state or fm.
+        if std::env::var_os("GA1A7P_QUEUE_CHILD").is_none() {
+            let dir = std::env::temp_dir().join(format!("ga1a7p-queue-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "daemon::tests::codex_modal_keeps_main_messages_queued_until_accepted", "--nocapture"])
+                .env("GA1A7P_QUEUE_CHILD", "1").env("HERDBOT_HOME", &dir).env("PATH", "/nonexistent")
+                .output().unwrap();
+            std::fs::remove_dir_all(dir).unwrap();
+            assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+            return;
+        }
+        use serde_json::json;
+        let modal = include_str!("../fixtures/panes/codex-conversation-open.txt");
+        home::save_bot("test", &home::Bot { name: "test".into(), ..Default::default() }).unwrap();
+        home::save_state("test", &home::BotState {
+            workspace_id: "w-test".into(), root_pane: "p-test".into(), terminal_id: Some("t-test".into()),
+            agent: "test".into(), route: "codex:test".into(),
+        }).unwrap();
+        home::enqueue_with_id("test", "message-1", "test-source", "do the task").unwrap();
+        let idle = json!({"agent": {"terminal_id": "t-test", "agent_status": "idle"}});
+        let mut script = Vec::new();
+        for phase in 0..3 {
+            script.extend([
+                ("workspace.get", json!({})), ("agent.get", idle.clone()), ("agent.get", idle.clone()),
+                ("agent.read", json!({"read": {"text": if phase == 0 { modal } else { "ready" }}})),
+            ]);
+            if phase > 0 {
+                script.extend([
+                    ("agent.read", json!({"read": {"text": "ready"}})),
+                    ("agent.prompt", json!({})),
+                    ("agent.get", if phase == 1 { idle.clone() } else { json!({"agent": {"agent_status": "working"}}) }),
+                    ("agent.read", json!({"read": {"text": if phase == 1 { modal } else { "working" }}})),
+                ]);
+            }
+        }
+        let (client, server) = crate::run::tests::scripted_herdr(script).await;
+        let mut delivered_at = HashMap::new();
+        let mut mains = MainAgents::default();
+        let mut held = HashMap::new();
+        for phase in 0..3 {
+            delivered_at.clear();
+            flush_queues(&client, &mut delivered_at, &mut mains, &mut held).await.unwrap();
+            let queued = home::queue_dir().join(if phase == 0 { "test.jsonl" } else { "test.taking" });
+            if phase < 2 {
+                assert!(queued.exists());
+                assert!(std::fs::read_to_string(&queued).unwrap().contains("message-1"));
+                assert!(home::read_inflight("test").is_none());
+                assert!(mains.delivered.is_empty());
+                let cards = herdbot_core::cards::read_cards();
+                assert_eq!(cards.len(), 1);
+                assert_eq!(cards[0].kind, "operator_prompt");
+            } else {
+                assert!(!queued.exists());
+                let inflight = home::read_inflight("test").unwrap();
+                assert_eq!(inflight.prompt, "do the task");
+                assert_eq!(inflight.messages[0].id.as_deref(), Some("message-1"));
+                assert_eq!(inflight.messages[0].source, "test-source");
+            }
+        }
+        server.await.unwrap();
+    }
 
     #[test]
     fn prune_keeps_a_card_while_the_same_prompt_is_visible() {

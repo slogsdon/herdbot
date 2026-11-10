@@ -319,9 +319,23 @@ async fn start(
         class,
     )?;
     launch.args.extend(resume_args(launch.kind, resume));
-    let started = herdr
+    let mut started = herdr
         .agent_start(agent, launch.kind, pane, &launch.args, 60_000)
         .await;
+    let resumed_screen = if launch.kind == "codex" && resume.is_some_and(|(kind, _)| kind == "codex") {
+        let screen = retry_codex_resume(herdr, agent).await;
+        if let Some(screen) = &screen
+            && started.is_err() && !crate::adapters::codex_conversation_open(screen)
+        {
+            let found = herdr.agent_get(agent).await?;
+            if found["agent"]["interactive_ready"] == true && found["agent"]["launch_pending"] != true {
+                started = Ok(found["agent"].clone());
+            }
+        }
+        screen
+    } else {
+        None
+    };
     if let Err(HerdrError::Api { code, .. }) = &started {
         let screen = tail(herdr, agent, 60).await;
         if let Some(mut card) = blocked_card(launch.kind, code, &screen, slug, agent) {
@@ -347,6 +361,11 @@ async fn start(
         state.terminal_id = Some(terminal_id.to_owned());
         home::save_state(slug, &state)?;
     }
+    if let Some(screen) = resumed_screen
+        && let Some(card) = crate::adapters::recognize_prompt(&screen, &route.harness, slug, agent, run)
+    {
+        return Err(Box::new(StartBlocked { route, card }));
+    }
     // The launch turn's READY is not conversation: `consume_events` drops the turn end this
     // marker marks. Every launch clears an older mark first, so a relaunch without a READY
     // prompt must not swallow a real turn.
@@ -366,36 +385,66 @@ async fn start(
         )),
         (None, task) => task.map(str::to_owned),
     };
-    if let Some(text) = first {
-        // A ready agent can still drop its first prompt (seen once with codex: splash
-        // screen, empty input, no turn). An idle agent has no turn to steer, so one resend
-        // is safe; past that, fail instead of letting the daemon harvest the splash.
-        for _ in 0..2 {
-            let before = tail(herdr, agent, 40).await;
-            if let Some(card) = crate::adapters::recognize_prompt(
-                &before, &route.harness, slug, agent, run,
-            ) {
-                return Err(Box::new(StartBlocked { route, card }));
-            }
-            if let Err(error) = herdr.agent_prompt(agent, &text, None).await {
-                let screen = tail(herdr, agent, 60).await;
-                if let Some(card) = crate::adapters::recognize_prompt(&screen, &route.harness, slug, agent, run) {
-                    return Err(Box::new(StartBlocked { route, card }));
-                }
-                return Err(Box::new(error));
-            }
-            match wait_for_prompt(herdr, &route.harness, slug, agent, run, &before).await {
-                PromptWait::Accepted => return Ok(route),
-                PromptWait::Blocked(card) => return Err(Box::new(StartBlocked { route, card: *card })),
-                PromptWait::Idle => {}
-            }
-            eprintln!("{agent}: first prompt not picked up; sending again");
-        }
-        let screen = tail(herdr, agent, 60).await;
-        let card = crate::adapters::input_timeout_card(&screen, &route.harness, slug, agent, run);
+    if let Some(text) = first
+        && let Some(card) = deliver_prompt(herdr, &route.harness, slug, agent, run, &text).await?
+    {
         return Err(Box::new(StartBlocked { route, card }));
     }
     Ok(route)
+}
+
+/// Retry only the resume lock; never fork or exit a conversation automatically.
+async fn retry_codex_resume(herdr: &Client, agent: &str) -> Option<String> {
+    let mut screen = tail(herdr, agent, 60).await;
+    if !crate::adapters::codex_conversation_open(&screen) {
+        return None;
+    }
+    for _ in 0..3 {
+        if !crate::adapters::codex_conversation_open(&screen) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        screen = tail(herdr, agent, 60).await;
+        if !crate::adapters::codex_conversation_open(&screen) {
+            break;
+        }
+        if let Err(error) = herdr.agent_send_keys(agent, &["r"]).await {
+            eprintln!("{agent}: could not retry Codex resume: {error}");
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        screen = tail(herdr, agent, 60).await;
+    }
+    Some(screen)
+}
+
+/// A successful socket write is not acceptance. Leave queued batches intact on a card.
+pub(crate) async fn deliver_prompt(
+    herdr: &Client, harness: &str, bot: &str, agent: &str, run: Option<&str>, text: &str,
+) -> Result<Option<herdbot_core::cards::Card>> {
+    for _ in 0..2 {
+        let before = tail(herdr, agent, 60).await;
+        if let Some(card) = crate::adapters::recognize_prompt(&before, harness, bot, agent, run) {
+            return Ok(Some(card));
+        }
+        let events = crate::hook::events_dir().join(format!("{agent}.jsonl"));
+        let offset = std::fs::metadata(&events).map(|meta| meta.len() as usize).unwrap_or(0);
+        if let Err(error) = herdr.agent_prompt(agent, text, None).await {
+            let screen = tail(herdr, agent, 60).await;
+            if let Some(card) = crate::adapters::recognize_prompt(&screen, harness, bot, agent, run) {
+                return Ok(Some(card));
+            }
+            return Err(Box::new(error));
+        }
+        match wait_for_prompt(herdr, harness, bot, agent, run, &before, (&events, offset)).await {
+            PromptWait::Accepted => return Ok(None),
+            PromptWait::Blocked(card) => return Ok(Some(*card)),
+            PromptWait::Idle => {}
+        }
+        eprintln!("{agent}: prompt not picked up; sending again");
+    }
+    let screen = tail(herdr, agent, 60).await;
+    Ok(Some(crate::adapters::input_timeout_card(&screen, harness, bot, agent, run)))
 }
 
 /// Whether a prompt was picked up: the agent left `idle`, or Pi's screen changed.
@@ -414,7 +463,7 @@ enum PromptWait {
 }
 
 /// Wait up to 15 seconds for accepted input or a screen that needs the operator.
-async fn wait_for_prompt(herdr: &Client, harness: &str, bot: &str, agent: &str, run_id: Option<&str>, before: &str) -> PromptWait {
+async fn wait_for_prompt(herdr: &Client, harness: &str, bot: &str, agent: &str, run_id: Option<&str>, before: &str, events: (&std::path::Path, usize)) -> PromptWait {
     for _ in 0..15 {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         let status = status(herdr, agent).await;
@@ -425,7 +474,12 @@ async fn wait_for_prompt(herdr: &Client, harness: &str, bot: &str, agent: &str, 
         if status.as_deref() == Some("blocked") {
             return PromptWait::Blocked(Box::new(crate::adapters::blocked_status_card(&after, harness, bot, agent, run_id)));
         }
-        if prompt_taken(harness, status.as_deref(), before, &after) {
+        // A fast hooked turn can finish between polls and already be idle again.
+        let completed = std::fs::read_to_string(events.0).unwrap_or_default();
+        let completed = completed.get(events.1..).unwrap_or_default().lines()
+            .filter_map(|line| serde_json::from_str::<crate::hook::Event>(line).ok())
+            .any(|event| event.agent == agent && matches!(event.kind.as_str(), "turn_end" | "turn_error"));
+        if completed || prompt_taken(harness, status.as_deref(), before, &after) {
             return PromptWait::Accepted;
         }
     }
@@ -611,6 +665,9 @@ fn blocked_card(
     bot: &str,
     agent: &str,
 ) -> Option<herdbot_core::cards::Card> {
+    if harness == "codex" && crate::adapters::codex_conversation_open(screen) {
+        return crate::adapters::recognize_prompt(screen, harness, bot, agent, None);
+    }
     if !error_code.contains("blocked") && !error_code.contains("approval") {
         return None;
     }
@@ -619,8 +676,106 @@ fn blocked_card(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{marks_launch_ready, prompt_taken, requested_route};
+
+    pub(crate) async fn scripted_herdr(script: Vec<(&'static str, serde_json::Value)>) -> (herdr_client::Client, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!("ga1a7p-{}-{}.sock", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let client = herdr_client::Client::new(&path);
+        let server = tokio::spawn(async move {
+            for (method, result) in script {
+                let (stream, _) = tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept()).await.unwrap().unwrap();
+                let (read, mut write) = stream.into_split();
+                let line = BufReader::new(read).lines().next_line().await.unwrap().unwrap();
+                let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                assert_eq!(request["method"], method);
+                if method == "agent.send_keys" {
+                    assert_eq!(request["params"]["keys"], serde_json::json!(["r"]));
+                }
+                let response = serde_json::json!({"id": request["id"], "result": result});
+                write.write_all(format!("{response}\n").as_bytes()).await.unwrap();
+            }
+            std::fs::remove_file(path).unwrap();
+        });
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn codex_resume_retries_only_the_lock_and_stops_when_clear() {
+        use serde_json::json;
+        let modal = include_str!("../fixtures/panes/codex-conversation-open.txt").trim();
+        for attempts in [0, 2, 3] {
+            let mut script = vec![("agent.read", json!({"read": {"text": if attempts == 0 { "ready" } else { modal }}}))];
+            for attempt in 0..attempts {
+                script.push(("agent.read", json!({"read": {"text": modal}})));
+                script.push(("agent.send_keys", json!({})));
+                script.push(("agent.read", json!({"read": {"text": if attempts == 2 && attempt == 1 { "ready" } else { modal }}})));
+            }
+            let (client, server) = scripted_herdr(script).await;
+            let screen = super::retry_codex_resume(&client, "test").await;
+            assert_eq!(screen.as_deref(), match attempts { 0 => None, 3 => Some(modal), _ => Some("ready") });
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_resume_does_not_type_r_if_the_lock_clears_during_delay() {
+        use serde_json::json;
+        let modal = include_str!("../fixtures/panes/codex-conversation-open.txt");
+        let (client, server) = scripted_herdr(vec![
+            ("agent.read", json!({"read": {"text": modal}})),
+            ("agent.read", json!({"read": {"text": "ready"}})),
+        ]).await;
+        assert_eq!(super::retry_codex_resume(&client, "test").await.as_deref(), Some("ready"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delivery_retries_an_idle_prompt_once_before_acceptance() {
+        use serde_json::json;
+        let mut script = Vec::new();
+        for attempt in 0..2 {
+            script.extend([
+                ("agent.read", json!({"read": {"text": "ready"}})),
+                ("agent.prompt", json!({})),
+            ]);
+            for _ in 0..if attempt == 0 { 15 } else { 1 } {
+                script.extend([
+                    ("agent.get", json!({"agent": {"agent_status": if attempt == 0 { "idle" } else { "working" }}})),
+                    ("agent.read", json!({"read": {"text": "ready"}})),
+                ]);
+            }
+        }
+        let (client, server) = scripted_herdr(script).await;
+        assert!(super::deliver_prompt(&client, "codex", "test", "ga1a7p-idle-test", None, "task").await.unwrap().is_none());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fast_hook_turn_is_accepted_even_if_the_agent_is_idle_again() {
+        use serde_json::json;
+        let path = std::env::temp_dir().join(format!("ga1a7p-event-{}.jsonl", std::process::id()));
+        let old = "old event\n";
+        std::fs::write(&path, format!("{old}{}\n", json!({"agent": "test", "at": 1, "kind": "turn_end", "harness": "codex"}))).unwrap();
+        let (client, server) = scripted_herdr(vec![
+            ("agent.get", json!({"agent": {"agent_status": "idle"}})),
+            ("agent.read", json!({"read": {"text": "ready"}})),
+        ]).await;
+        let result = super::wait_for_prompt(&client, "codex", "test", "test", None, "ready", (&path, old.len())).await;
+        std::fs::remove_file(path).unwrap();
+        assert!(matches!(result, super::PromptWait::Accepted));
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn codex_lock_is_a_card_even_when_launch_times_out() {
+        let modal = include_str!("../fixtures/panes/codex-conversation-open.txt");
+        let card = super::blocked_card("codex", "timeout", modal, "test", "test").unwrap();
+        assert_eq!(card.kind, "operator_prompt");
+    }
 
     #[test]
     fn legacy_bot_state_has_no_launch_identity() {

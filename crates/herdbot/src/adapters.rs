@@ -52,6 +52,11 @@ pub fn recognize(tail: &str, bot: &str, agent: &str) -> Option<Card> {
     })
 }
 
+pub fn codex_conversation_open(tail: &str) -> bool {
+    tail.contains("This conversation is open in another app")
+        && tail.contains("Close it there and press R to continue here.")
+}
+
 /// Recognize a harness prompt for display. Only the Claude trust adapter has answer keys;
 /// other dialogs are operator-only cards and must be handled in the pane.
 pub fn recognize_prompt(tail: &str, harness: &str, bot: &str, agent: &str, run_id: Option<&str>) -> Option<Card> {
@@ -61,13 +66,14 @@ pub fn recognize_prompt(tail: &str, harness: &str, bot: &str, agent: &str, run_i
         return Some(card);
     }
     let lower = tail.to_lowercase();
+    let conversation_open = harness == "codex" && codex_conversation_open(tail);
     let codex_hooks = lower.contains("hooks need review")
         && (lower.contains("trust all") || lower.contains("review hooks"));
     let permission = lower.contains("permission required")
         || lower.contains("approval required")
         || lower.contains("waiting for your approval")
         || lower.contains("permissionrequest");
-    if !(codex_hooks || permission) || tail.trim().is_empty() {
+    if !(conversation_open || codex_hooks || permission) || tail.trim().is_empty() {
         return None;
     }
     let body = tail.lines().rev().take(30).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
@@ -75,7 +81,7 @@ pub fn recognize_prompt(tail: &str, harness: &str, bot: &str, agent: &str, run_i
     Some(Card {
         id: card_id(agent, &body), kind: "operator_prompt".into(), adapter: "display-only".into(),
         bot: bot.to_owned(), agent: agent.to_owned(),
-        title: if codex_hooks { "Codex hooks need review" } else { "Harness is waiting for input" }.into(),
+        title: if conversation_open { "Codex conversation is open in another app" } else if codex_hooks { "Codex hooks need review" } else { "Harness is waiting for input" }.into(),
         body, options: choices, at: home::now(),
         harness: Some(harness.to_owned()), run_id: run_id.map(str::to_owned),
     })
@@ -211,6 +217,17 @@ mod tests {
         assert_eq!(card.run_id.as_deref(), Some("r1"));
         assert_eq!(card.options.len(), 3);
         assert!(keys(&card.adapter, &card.options[1].id).is_none());
+    }
+
+    #[test]
+    fn codex_conversation_lock_is_an_operator_prompt() {
+        let screen = include_str!("../fixtures/panes/codex-conversation-open.txt");
+        let card = recognize_prompt(screen, "codex", "alpha", "alpha", None).unwrap();
+        assert_eq!(card.kind, "operator_prompt");
+        assert_eq!(card.title, "Codex conversation is open in another app");
+        assert_eq!(card.adapter, "display-only");
+        assert!(card.options.is_empty());
+        assert!(recognize_prompt(screen, "pi", "alpha", "alpha", None).is_none());
     }
 
     #[test]
