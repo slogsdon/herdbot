@@ -16,6 +16,7 @@ mod service;
 mod setup;
 mod shellenv;
 mod tools;
+mod template;
 
 use std::io::{Read, Write};
 
@@ -32,6 +33,7 @@ const USAGE: &str = "usage:
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
   herdbot service install|disable|enable|uninstall|status   control the launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
+  herdbot import-template <url> [--name NAME] [--cwd DIR] [--class CLASS] [--paste FILE] [--dry-run] [--json]
   herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] [--json]
   herdbot list | runs
   herdbot config list [--bot BOT] [--json]    supported settings, values and apply timing
@@ -64,16 +66,16 @@ fn flag(args: &mut Vec<String>, name: &str) -> Option<String> {
 }
 
 /// Consume creation options in order so an option's value is never parsed as another flag.
-fn creation_options(args: &mut Vec<String>, value_flags: &[&str]) -> Result<std::collections::HashMap<String, String>> {
+fn creation_options(args: &mut Vec<String>, value_flags: &[&str], bool_flags: &[&str]) -> Result<std::collections::HashMap<String, String>> {
     let mut options = std::collections::HashMap::new();
     let mut names = Vec::new();
     let mut input = args.iter();
     while let Some(arg) = input.next() {
-        if arg == "--json" {
+        if bool_flags.contains(&arg.as_str()) {
             options.insert(arg.clone(), String::new());
         } else if value_flags.contains(&arg.as_str()) {
             let value = input.next().ok_or_else(|| format!("{arg} needs a value"))?;
-            if arg != "--instructions" && (value_flags.contains(&value.as_str()) || value == "--json") {
+            if arg != "--instructions" && (value_flags.contains(&value.as_str()) || bool_flags.contains(&value.as_str())) {
                 return Err(format!("{arg} needs a value").into());
             }
             if options.insert(arg.clone(), value.clone()).is_some() {
@@ -110,7 +112,7 @@ struct NewBotArgs {
 }
 
 fn parse_new_args(args: &mut Vec<String>) -> Result<NewBotArgs> {
-    let mut options = creation_options(args, &["--cwd", "--class", "--instructions"])?;
+    let mut options = creation_options(args, &["--cwd", "--class", "--instructions"], &["--json"])?;
     let json = options.remove("--json").is_some();
     let cwd = options.remove("--cwd");
     let class = options.remove("--class");
@@ -152,7 +154,7 @@ struct NewRoomArgs {
 }
 
 fn parse_room_new_args(args: &mut Vec<String>) -> Result<NewRoomArgs> {
-    let mut options = creation_options(args, &["--members", "--mode", "--moderator"])?;
+    let mut options = creation_options(args, &["--members", "--mode", "--moderator"], &["--json"])?;
     let json = options.remove("--json").is_some();
     let member_text = options.remove("--members")
         .ok_or("herdbot room new needs --members a,b[,c] (at least two existing bots)")?;
@@ -282,6 +284,27 @@ async fn cli() -> Result<()> {
         }
         "import-grok" => {
             println!("{}", grok::import()?);
+            Ok(())
+        }
+        "import-template" => {
+            let mut options = creation_options(&mut args, &["--name", "--cwd", "--class", "--paste"], &["--dry-run", "--json"])?;
+            if args.len() != 1 {
+                return Err("import-template needs one URL: https://x.ai/bot/<id> or https://x.ai/bot/marketplace/bots/<slug>".into());
+            }
+            let paste = options.remove("--paste");
+            if options.remove("--dry-run").is_some() {
+                println!("{}", serde_json::to_string_pretty(&template::preview(&args[0], paste.as_deref())?)?);
+            } else {
+                let (slug, dir) = template::create(
+                    &args[0], options.remove("--name"), options.remove("--cwd"),
+                    options.remove("--class"), paste.as_deref(),
+                )?;
+                if options.remove("--json").is_some() {
+                    println!("{}", serde_json::to_string(&CreatedBot { slug, path: dir.display().to_string() })?);
+                } else {
+                    println!("imported {} (local copy; edit BOT.md for its instructions)", dir.display());
+                }
+            }
             Ok(())
         }
         "new" => {
@@ -819,6 +842,21 @@ mod create_tests {
 
     fn args(items: &[&str]) -> Vec<String> {
         items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn import_options_keep_values_literal_and_reject_missing_or_unknown_options() {
+        let values = &["--name", "--cwd", "--class", "--paste"];
+        let booleans = &["--dry-run", "--json"];
+        let mut input = args(&["https://x.ai/bot/id", "--paste", "/tmp/paste file", "--dry-run", "--json"]);
+        let options = creation_options(&mut input, values, booleans).unwrap();
+        assert_eq!(input, ["https://x.ai/bot/id"]);
+        assert_eq!(options["--paste"], "/tmp/paste file");
+        assert!(options.contains_key("--dry-run"));
+        for input in [vec!["--paste"], vec!["--paste", "--dry-run"], vec!["--bad"], vec!["--name", "A", "--name", "B"]] {
+            assert!(creation_options(&mut args(&input), values, booleans).is_err());
+        }
+        assert!(creation_options(&mut args(&["--dry-run"]), &["--instructions"], &["--json"]).is_err());
     }
 
     #[test]

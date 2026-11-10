@@ -11,6 +11,31 @@ final class FakeCreateCLI: CreateCLI, @unchecked Sendable {
         let instructions: String
     }
 
+    struct ImportCall: Equatable {
+        let url: String
+        let name: String
+        let cwd: String?
+        let taskClass: String?
+        let paste: String
+    }
+    nonisolated(unsafe) var previewURLs: [String] = []
+    nonisolated(unsafe) var importCalls: [ImportCall] = []
+    nonisolated(unsafe) var template = TemplatePreview(name: "Alfred", description: "A helper", memories: ["Remember this"], components: ["skills", "routines"], notImported: ["skills", "routines"])
+
+    func previewTemplate(url: String) async throws -> TemplatePreview {
+        previewURLs.append(url)
+        if let beforeAnswering { await beforeAnswering() }
+        if let failure { throw CLIError.failed(failure) }
+        return template
+    }
+
+    func importTemplate(url: String, name: String, cwd: String?, taskClass: String?, paste: String) async throws -> CreatedBot {
+        importCalls.append(ImportCall(url: url, name: name, cwd: cwd, taskClass: taskClass, paste: paste))
+        if let beforeAnswering { await beforeAnswering() }
+        if let failure { throw CLIError.failed(failure) }
+        return CreatedBot(slug: CreateForm.slug(for: name), path: "/tmp/import")
+    }
+
     struct RoomCall: Equatable {
         let name: String
         let members: [String]
@@ -257,5 +282,122 @@ final class FakeCreateCLI: CreateCLI, @unchecked Sendable {
         #expect(state.bot.name.isEmpty)
         #expect(state.failure == nil)
         #expect(state.created == nil)
+    }
+}
+
+@MainActor
+@Suite struct TemplateImport {
+    @Test func previewThenImportUsesTheDraft() async {
+        let cli = FakeCreateCLI()
+        let state = CreateState(cli: cli)
+        state.present(.template)
+        #expect(!state.canPreview)
+        #expect(!state.canCreate)
+        state.templateURL = "  https://x.ai/bot/example  "
+        await state.previewTemplate()
+        #expect(cli.previewURLs == ["https://x.ai/bot/example"])
+        #expect(state.preview == cli.template)
+        #expect(state.bot.name == "Alfred")
+        #expect(state.canCreate)
+        state.bot.name = " My Alfred "
+        state.bot.cwd = " /tmp/two words "
+        state.bot.taskClass = "code"
+        state.paste = "## Routine: Hello\nEvery day"
+        await state.create()
+        #expect(cli.importCalls == [.init(url: "https://x.ai/bot/example", name: "My Alfred", cwd: "/tmp/two words", taskClass: "code", paste: "## Routine: Hello\nEvery day")])
+        #expect(state.created == .bot("my-alfred"))
+        #expect(!state.isPresented)
+    }
+
+    @Test func anotherPreviewKeepsACustomNameButUpdatesTheSuggestedName() async {
+        let cli = FakeCreateCLI()
+        let state = CreateState(cli: cli)
+        state.present(.template)
+        state.templateURL = "https://x.ai/bot/example"
+        await state.previewTemplate()
+        state.bot.name = "My Alfred"
+        state.bot.cwd = "/tmp/repo"
+        state.bot.taskClass = "code"
+        state.paste = "## Memories\nKeep me"
+        state.templateURL = "https://x.ai/bot/other"
+        cli.template = TemplatePreview(name: "Other Alfred", description: "Helper", memories: [], components: [], notImported: [])
+        await state.previewTemplate()
+        #expect(state.bot.name == "My Alfred")
+        #expect(state.bot.cwd == "/tmp/repo")
+        #expect(state.bot.taskClass == "code")
+        #expect(state.paste == "## Memories\nKeep me")
+        state.bot.name = "Other Alfred"
+        cli.template = TemplatePreview(name: "Third Alfred", description: "Helper", memories: [], components: [], notImported: [])
+        await state.previewTemplate()
+        #expect(state.bot.name == "Third Alfred")
+        state.dismiss()
+        state.present(.template)
+        #expect(state.bot.name.isEmpty)
+    }
+
+    @Test func failuresKeepTheDraftAndCanRetry() async {
+        let cli = FakeCreateCLI()
+        let state = CreateState(cli: cli)
+        state.present(.template)
+        state.templateURL = "https://x.ai/bot/example"
+        state.paste = "## Memories\nKeep me"
+        cli.failure = "the template page has changed; paste the template instead"
+        await state.previewTemplate()
+        #expect(state.failure == cli.failure)
+        #expect(state.paste == "## Memories\nKeep me")
+        #expect(!state.canCreate)
+        #expect(state.canPreview)
+        cli.failure = nil
+        await state.previewTemplate()
+        cli.failure = "pick another name"
+        await state.create()
+        #expect(state.isPresented)
+        #expect(state.failure == cli.failure)
+        #expect(state.preview == cli.template)
+        #expect(state.paste == "## Memories\nKeep me")
+        state.bot.name = "Other Alfred"
+        #expect(state.failure == nil)
+        #expect(state.canCreate)
+        state.templateURL = "https://x.ai/bot/other"
+        #expect(state.preview == nil)
+        #expect(!state.canCreate)
+    }
+
+    @Test func aPreviewInFlightDisablesActionsAndCancellationDropsItsAnswer() async {
+        let gate = Gate()
+        let cli = FakeCreateCLI()
+        cli.beforeAnswering = { await gate.block() }
+        let state = CreateState(cli: cli)
+        state.present(.template)
+        state.templateURL = "https://x.ai/bot/example"
+        let running = Task { await state.previewTemplate() }
+        await gate.waitUntilBlocked()
+        #expect(state.status == .previewing)
+        #expect(!state.canPreview)
+        #expect(!state.canCreate)
+        await state.previewTemplate()
+        #expect(cli.previewURLs.count == 1)
+        state.dismiss()
+        await gate.release()
+        await running.value
+        #expect(!state.isPresented)
+        #expect(state.preview == nil)
+    }
+
+    @Test func aChangedURLDropsAnOldPreview() async {
+        let gate = Gate()
+        let cli = FakeCreateCLI()
+        cli.beforeAnswering = { await gate.block() }
+        let state = CreateState(cli: cli)
+        state.present(.template)
+        state.templateURL = "https://x.ai/bot/example"
+        let running = Task { await state.previewTemplate() }
+        await gate.waitUntilBlocked()
+        state.templateURL = "https://x.ai/bot/other"
+        await gate.release()
+        await running.value
+        #expect(state.preview == nil)
+        #expect(state.bot.name.isEmpty)
+        #expect(state.canPreview)
     }
 }

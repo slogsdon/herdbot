@@ -87,6 +87,7 @@ herdbot --version                       print the installed version
 herdbot doctor [--json]                 first-run and health checks (exit 1 if any fail)
 herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
 herdbot uninstall [--purge]             remove the service and the herdbot link; --purge also deletes the home
+herdbot import-template <url> [--name NAME] [--cwd DIR] [--class CLASS] [--paste FILE] [--dry-run] [--json]
 herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] [--json]
 herdbot list | runs                    bots and subagent runs
 herdbot config list [--bot BOT] [--json]   supported settings, values and when they apply
@@ -161,7 +162,7 @@ A bot's instructions are a short herdbot preamble followed by `BOT.md` and `BOT.
 
 Pi keeps `--no-extensions` and explicitly loads herdr's lifecycle extension at `~/.pi/agent/extensions/herdr-agent-state.ts` when installed, so its status does not depend on the pane width. A missing extension is silently skipped; install it with `herdr integration install pi`.
 
-In the chat window sidebar, **+ → New Bot… / New Room…** opens the creation form. Bot fields are name, optional working directory (with a folder picker), task class and multi-line instructions. Rooms pick at least two existing bots, a mode and, for moderated rooms, a moderator from the selected members. Create is disabled for incomplete forms and while saving; CLI errors stay inline with the draft intact. Success closes the sheet and opens the new conversation; the existing watch stream updates the sidebar. Return submits (the instructions editor uses Return for newlines); Escape cancels. Cancelling a running request closes the sheet but does not undo creation. Template/URL import is not included.
+In the chat window sidebar, **+ → New Bot… / New Room…** opens the creation form. Bot fields are name, optional working directory (with a folder picker), task class and multi-line instructions. Rooms pick at least two existing bots, a mode and, for moderated rooms, a moderator from the selected members. Create is disabled for incomplete forms and while saving; CLI errors stay inline with the draft intact. Success closes the sheet and opens the new conversation; the existing watch stream updates the sidebar. Return submits (the instructions editor uses Return for newlines); Escape cancels. Cancelling a running request closes the sheet but does not undo creation. **+ → Import Template…** previews a public Grok Bot URL, shows the fetched content and components withheld by the page, accepts pasted content, then uses the same name, working directory and task class fields. Preview and Create show progress; failures keep the draft. Changing the URL requires another preview.
 
 `herdbot new --instructions TEXT` writes TEXT verbatim to `BOT.md`, including newlines; quote it as one shell argument. `-` is literal text, not stdin. Omit the option for an empty file. `--json` prints only `{"slug":"helper","path":"/path/to/home/helper"}` for a bot or `{"slug":"crew"}` for a room; without it the existing human-readable output is retained. For example:
 
@@ -170,6 +171,37 @@ herdbot new helper --class explore --instructions 'Review the repository and rep
 herdbot new reviewer --class review --json
 herdbot room new crew --members helper,reviewer --mode moderated --moderator helper --json
 ```
+
+Import a public Grok Bot template or marketplace detail page:
+
+```sh
+herdbot import-template https://x.ai/bot/marketplace/bots/alfred --dry-run
+herdbot import-template https://x.ai/bot/p7Gh6HIrfv4AGzIow6-9X --name 'Alfred Copy' --paste template.txt --json
+```
+
+Only `https://x.ai/bot/<id>` and `https://x.ai/bot/marketplace/bots/<slug>` are accepted. Fetches use `/usr/bin/curl`, HTTPS only, no redirects, no cookies or cache, a 20-second timeout and a 5 MiB limit. `--dry-run` prints preview JSON and writes nothing; successful `--json` returns `{ "slug", "path" }`. A changed or incomplete page fails with “the template page has changed; paste the template instead”. The URL remains required for provenance; paste supplements a readable preview. If the page cannot be parsed, make a manual copy through **New Bot → Instructions** or `herdbot new NAME --instructions TEXT`.
+
+The public share page supplies name and description; marketplace pages also supply rendered memories. Skills, routines and integrations may be labels only: the preview names what was not imported. Copy the missing prose from the source app into the paste field, or a UTF-8 file for `--paste`. Use explicit headings (one skill/routine per heading):
+
+```text
+## Instructions
+Instructions to use verbatim.
+## Memories
+Facts to retain.
+## Skill: Review
+Description: Review a change.
+Read the diff and report concrete findings.
+## Routine: Weekly review
+Cron: 0 9 * * 1
+Review this week's work.
+## Integrations
+Calendar (configure separately).
+```
+
+`Description:` and `Cron:` are optional. A routine without a cron stays prose in `BOT.md`; a supplied valid cron creates a disabled schedule. Unsupported headings and fenced code are rejected. Paste prose only; do not paste credentials, executable code or scripts. Nothing installs integrations or executes pasted content during import.
+
+Imports are local copies (`source = "local"`), with `template_url`, `template_source = "grok"`, `template_fetched_at` and `template_components` in `bot.toml`. Instructions/description precede provenance in `BOT.md`; the file also indexes imported `skills/*.md` and preserves routines as prose. Memories go to `memory/imported-YYYY-MM-DD.md`, never OptChat's `.state/memory`; OptChat memory remains off. Existing bots are never overwritten. Grok roster sync preserves the template copy; a same-name roster bot receives a separate `-grok` (or numbered) slug. There is no URL refresh or private API access.
+
 
 A bot's `cwd` defaults to its own folder. You can point it at a repo instead, for example `herdbot new herdbot-dev --cwd ~/Code/herdbot`.
 
@@ -415,13 +447,13 @@ herdbot started as a local take on Grok Bot, so it borrows Grok Bot's concepts (
 
 **Import is one-way.** Grok Bot caches its roster in `~/Library/Application Support/Grok Bot/sand-client-persistence/`. Each row's `description` is the bot's full system prompt. `herdbot import-grok` creates or refreshes one bot per row, and the daemon re-imports whenever that file changes. `BOT.md` is written verbatim, and nothing is ever written back to Grok Bot.
 
-**Schedules, skills and memory aren't on disk.** Grok Bot keeps them server-side, so they'll have to come from an exported bot template or from asking each bot to list its routines. herdbot doesn't call Grok Bot's private API.
+**Schedules, skills and memory aren't in the roster cache.** `import-template` reads public preview HTML and accepts pasted prose for components the page withholds. It does not call Grok Bot's private API or fetch the app-only template payload.
 
 **Running both apps at once** works because imported schedules start disabled, so a routine never fires in both. Turn a schedule on in herdbot only after you've turned it off in Grok Bot. Grok Bot's group bots aren't imported. Make the room with `herdbot room new`.
 
 ## Roadmap
 
-- **Schedule and skill import** from Grok Bot templates.
+- **Template refresh and additional open file formats** beyond Grok Bot URL preview plus paste.
 - **The desktop UI is built; what is left is polish and more cards.** A SwiftUI menu bar app (`ui/macos`, installed with the cask) has a status menu, a ⌥Space quick-entry panel, a chat window, notifications, a first-run setup window and approval cards. Not built: other prompts as cards (claude's per-tool permission prompts, codex's trust modal; each needs an adapter written from a captured screen), markdown lists and headings in the chat, and usability improvements still to be collected. See the [UI layer design](docs/superpowers/specs/2026-10-21-ui-layer-design.md), the [chat app design](docs/superpowers/specs/2026-10-22-chat-app-design.md) and the [approval cards design](docs/superpowers/specs/2026-10-22-approval-cards-design.md).
 - **pi code mode: verified on pi 1.2.0 (2026-10-20).** Three unisolated `deepseek-v4-flash` runs called `list_bots` from scripts and exited 0 in 5.48, 6.25, and 9.80 seconds; `kimi-k2.7-code` also passed in 13.08 seconds. Disabling global `rea` was unnecessary. Code mode is enabled; model-generated script errors were recovered within the gate.
 - **A durable harness on Pi Durable.** Earendil's [Pi Durable](https://earendil.com/posts/pi-durable/) (experimental, TypeScript) checkpoints every model call and tool call, so a new process picks up unfinished work after a crash. It also makes submissions exactly-once, lets a conversation fork without copying its transcript, and lets several clients watch and steer one conversation. Those cover herdbot's weakest spots, which are scraping pane text for status and quota errors, and losing an answer when a busy agent gets prompted. A `durable` harness, a small Node host per bot that runs in a herdr pane, would hand herdbot real status and results for pi-driven bots instead of screen reads. The API may still change, so this stays an experiment next to the pane-based harnesses.

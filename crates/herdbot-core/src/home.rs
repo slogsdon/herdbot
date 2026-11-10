@@ -57,6 +57,15 @@ pub struct Bot {
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grok_id: Option<String>,
+    /// Original public template; a template copy remains locally owned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template_fetched_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub template_components: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<Schedule>,
     /// OptChat memory (see memory.rs). Off unless set.

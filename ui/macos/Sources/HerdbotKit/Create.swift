@@ -116,8 +116,32 @@ public struct CreatedRoom: Codable, Hashable, Sendable {
     }
 }
 
-/// `herdbot new` and `herdbot room new`: the only way this app creates a bot or a room.
+/// The public parts of a template returned by `import-template --dry-run`.
+public struct TemplatePreview: Codable, Equatable, Sendable {
+    public let name: String
+    public let description: String
+    public let memories: [String]
+    public let components: [String]
+    public let notImported: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case name, description, memories, components
+        case notImported = "not_imported"
+    }
+
+    public init(name: String, description: String, memories: [String], components: [String], notImported: [String]) {
+        self.name = name
+        self.description = description
+        self.memories = memories
+        self.components = components
+        self.notImported = notImported
+    }
+}
+
+/// The CLI is the only writer for bots, rooms and imported templates.
 public protocol CreateCLI: Sendable {
+    func previewTemplate(url: String) async throws -> TemplatePreview
+    func importTemplate(url: String, name: String, cwd: String?, taskClass: String?, paste: String) async throws -> CreatedBot
     /// `herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] --json`.
     func createBot(name: String, cwd: String?, taskClass: String?, instructions: String) async throws -> CreatedBot
     /// `herdbot room new <name> --members a,b[,c] [--mode MODE] [--moderator BOT] --json`.

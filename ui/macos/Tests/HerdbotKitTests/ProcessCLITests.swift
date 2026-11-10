@@ -229,6 +229,59 @@ printf '%s\\n' '\(response)'
         }
     }
 
+    @Test func templatePreviewUsesDryRunAndDecodesThePublicParts() async throws {
+        let script = try fakeHerdbot(##"""
+[ "$#" = 3 ] && [ "$1" = import-template ] && [ "$2" = 'https://x.ai/bot/example' ] && [ "$3" = --dry-run ] || exit 2
+echo '{"name":"Alfred","description":"Helper","memories":["a fact"],"components":["skills","routines"],"not_imported":["skills","routines"],"extra":true}'
+"""##)
+        let result = try await ProcessCLI(binary: script).previewTemplate(url: "https://x.ai/bot/example")
+        #expect(result.name == "Alfred")
+        #expect(result.memories == ["a fact"])
+        #expect(result.notImported == ["skills", "routines"])
+    }
+
+    @Test func templateImportPassesLiteralFieldsAndCleansItsPasteFile() async throws {
+        let capture = FileManager.default.temporaryDirectory.appendingPathComponent("paste-path-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: capture) }
+        let script = try fakeHerdbot(##"""
+[ "$#" = 11 ] && [ "$1" = import-template ] && [ "$2" = 'https://x.ai/bot/example' ] || exit 2
+[ "$3" = --name ] && [ "$4" = 'Alfred "quoted" $(false)' ] && [ "$5" = --paste ] && [ "$7" = --json ] || exit 3
+[ "$8" = --cwd ] && [ "$9" = '/tmp/two words' ] && [ "${10}" = --class ] && [ "${11}" = code ] || exit 4
+[ "$(cat "$6")" = "$(printf '## Memories\nKeep "quotes" and $(false)')" ] || exit 5
+printf '%s' "$6" > "$PASTE_CAPTURE"
+echo '{"slug":"alfred","path":"/tmp/alfred"}'
+"""##)
+        let cli = ProcessCLI(binary: script, environment: ["PASTE_CAPTURE": capture.path])
+        let result = try await cli.importTemplate(url: "https://x.ai/bot/example", name: #"Alfred "quoted" $(false)"#, cwd: "/tmp/two words", taskClass: "code", paste: "## Memories\nKeep \"quotes\" and $(false)")
+        #expect(result.slug == "alfred")
+        let pastePath = try String(contentsOf: capture, encoding: .utf8)
+        #expect(!FileManager.default.fileExists(atPath: pastePath))
+        #expect(!FileManager.default.fileExists(atPath: URL(fileURLWithPath: pastePath).deletingLastPathComponent().path))
+    }
+
+    @Test func templateImportCleansItsPasteFileAfterFailure() async throws {
+        let capture = FileManager.default.temporaryDirectory.appendingPathComponent("paste-path-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: capture) }
+        let script = try fakeHerdbot(#"[ "$#" = 7 ] || exit 2; printf '%s' "$6" > "$PASTE_CAPTURE"; echo 'bad paste' >&2; exit 1"#)
+        let cli = ProcessCLI(binary: script, environment: ["PASTE_CAPTURE": capture.path])
+        await #expect(throws: CLIError.failed("bad paste")) {
+            _ = try await cli.importTemplate(url: "https://x.ai/bot/example", name: "Alfred", cwd: nil, taskClass: nil, paste: "")
+        }
+        let pastePath = try String(contentsOf: capture, encoding: .utf8)
+        #expect(!FileManager.default.fileExists(atPath: pastePath))
+    }
+
+    @Test func malformedTemplateJSONAndFetchErrorsStayActionable() async throws {
+        let malformed = try fakeHerdbot("echo '{}'")
+        await #expect(throws: CLIError.failed("herdbot import-template printed a result this app cannot read; update herdbot or this app")) {
+            _ = try await ProcessCLI(binary: malformed).previewTemplate(url: "https://x.ai/bot/example")
+        }
+        let failed = try fakeHerdbot("echo 'the template page has changed; paste the template instead' >&2; exit 1")
+        await #expect(throws: CLIError.failed("the template page has changed; paste the template instead")) {
+            _ = try await ProcessCLI(binary: failed).previewTemplate(url: "https://x.ai/bot/example")
+        }
+    }
+
     @Test func createBotPassesLiteralFieldsAndDecodesTheResult() async throws {
         let script = try fakeHerdbot(##"""
 [ "$#" = 9 ] && [ "$1" = new ] && [ "$2" = 'Helper "quoted" $(false)' ] && [ "$3" = --json ] || exit 2

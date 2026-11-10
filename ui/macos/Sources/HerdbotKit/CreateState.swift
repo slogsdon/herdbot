@@ -1,20 +1,21 @@
 import Foundation
 import Observation
 
-/// The sheet behind the sidebar's "+": one draft per form, the checks that gate Create, and the two
-/// CLI calls. Everything the CLI writes is reported back through `created`, so the window can open
+/// The sheet behind the sidebar's "+": drafts, template previews and the checks that gate Create. Everything the CLI writes is reported back through `created`, so the window can open
 /// the new bot or room; this type never reads or writes a file itself.
 @MainActor @Observable
 public final class CreateState {
     public enum Kind: Hashable, Sendable {
         case bot
         case room
+        case template
     }
 
     /// What the last Create did. A failure never discards the draft, so the fix can be made in place.
     public enum Status: Equatable, Sendable {
         case idle
         case creating
+        case previewing
         case failed(String)
     }
 
@@ -26,6 +27,18 @@ public final class CreateState {
     public var room = NewRoomDraft() {
         didSet { if room != oldValue { clearFailure() } }
     }
+    public var templateURL = "" {
+        didSet {
+            if templateURL != oldValue {
+                preview = nil
+                attempt = UUID()
+                if status == .previewing { status = .idle }
+                clearFailure()
+            }
+        }
+    }
+    public var paste = "" { didSet { if paste != oldValue { clearFailure() } } }
+    public private(set) var preview: TemplatePreview?
     public private(set) var status: Status = .idle
     /// The conversation to open after a successful Create; nil until there is one.
     public private(set) var created: Recipient?
@@ -34,6 +47,7 @@ public final class CreateState {
     @ObservationIgnored private let menu: MenuState?
     /// Identifies the create in flight, so a result that arrives after Cancel cannot reopen the sheet.
     @ObservationIgnored private var attempt = UUID()
+    @ObservationIgnored private var suggestedName: String?
 
     /// A nil `cli` means herdbot was not found: the form still opens, and Create stays disabled.
     public init(menu: MenuState? = nil, cli: (any CreateCLI)? = nil) {
@@ -55,6 +69,18 @@ public final class CreateState {
     }
 
     public var isCreating: Bool { status == .creating }
+    public var isBusy: Bool { isCreating || status == .previewing }
+    public var canPreview: Bool {
+        cli != nil && !isBusy && !templateURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var heading: String {
+        switch kind {
+        case .bot: "New Bot"
+        case .room: "New Room"
+        case .template: "Import Template"
+        }
+    }
 
     /// What is wrong with the draft on screen, or nil. Shown under the form, and why Create is off.
     public var problem: String? {
@@ -62,6 +88,7 @@ public final class CreateState {
         return switch kind {
         case .bot: CreateForm.problem(for: bot)
         case .room: CreateForm.problem(for: room)
+        case .template: preview == nil ? "Preview a template URL before creating the bot." : CreateForm.problem(for: bot)
         }
     }
 
@@ -71,7 +98,7 @@ public final class CreateState {
     }
 
     public var canCreate: Bool {
-        cli != nil && !isCreating && problem == nil
+        cli != nil && !isBusy && problem == nil
     }
 
     // MARK: - Navigation
@@ -81,6 +108,10 @@ public final class CreateState {
         self.kind = kind
         bot = NewBotDraft()
         room = NewRoomDraft()
+        templateURL = ""
+        paste = ""
+        preview = nil
+        suggestedName = nil
         status = .idle
         created = nil
         attempt = UUID()
@@ -116,6 +147,29 @@ public final class CreateState {
         if mode == .moderated, room.moderator == nil { room.moderator = room.members.first }
     }
 
+    // MARK: - Template preview
+
+    public func previewTemplate() async {
+        guard let cli, canPreview else { return }
+        let id = UUID()
+        attempt = id
+        preview = nil
+        status = .previewing
+        do {
+            let result = try await cli.previewTemplate(url: templateURL.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard attempt == id else { return }
+            preview = result
+            if bot.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bot.name == suggestedName {
+                bot.name = result.name
+            }
+            suggestedName = result.name
+            status = .idle
+        } catch {
+            guard attempt == id else { return }
+            status = .failed(error.localizedDescription)
+        }
+    }
+
     // MARK: - Creating
 
     /// Run `herdbot new` or `herdbot room new` for the draft on screen. On success the sheet closes
@@ -134,6 +188,13 @@ public final class CreateState {
                 let created = try await cli.createBot(
                     name: name, cwd: cwd.isEmpty ? nil : cwd,
                     taskClass: bot.taskClass, instructions: bot.instructions)
+                recipient = .bot(created.slug)
+            case .template:
+                let cwd = bot.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+                let created = try await cli.importTemplate(
+                    url: templateURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                    name: bot.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    cwd: cwd.isEmpty ? nil : cwd, taskClass: bot.taskClass, paste: paste)
                 recipient = .bot(created.slug)
             case .room:
                 let created = try await cli.createRoom(

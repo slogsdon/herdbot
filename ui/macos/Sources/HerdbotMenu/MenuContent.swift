@@ -12,6 +12,7 @@ struct MenuContent: View {
     let openChatForBot: (String) -> Void
     /// Opens the chat window at Settings, optionally for one bot.
     let openSettings: (String?) -> Void
+    let importTemplate: () -> Void
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -77,6 +78,7 @@ struct MenuContent: View {
             openWindow(id: "chat")
         }
         Button(hotkeyRegistered ? "Quick entry (⌥Space)" : "Quick entry (⌥Space is taken by another app)") { openQuickEntry() }
+        Button("Import Template…") { importTemplate() }
         Button("Settings…") {
             NSApp.activate(ignoringOtherApps: true)
             openSettings(nil)

@@ -77,16 +77,17 @@ struct SidebarView: View {
                 Menu {
                     Button("New Bot…") { create.present(.bot) }
                     Button("New Room…") { create.present(.room) }
+                    Button("Import Template…") { create.present(.template) }
                 } label: {
-                    Label("New Bot or Room…", systemImage: "plus")
+                    Label("New Bot, Room or Template…", systemImage: "plus")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .buttonStyle(.plain)
-                .help("Create a bot or a room")
-                .accessibilityLabel("New bot or room")
+                .help("Create a bot or room, or import a template")
+                .accessibilityLabel("New bot, room or template")
                 Button { Task { await settings.present(.global) } } label: {
                     Label("Settings", systemImage: "gearshape")
                         .font(.body.weight(settings.isPresented ? .semibold : .regular))

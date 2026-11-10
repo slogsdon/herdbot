@@ -264,6 +264,23 @@ extension ProcessCLI: SetupCLI {
 }
 
 extension ProcessCLI: CreateCLI {
+    public func previewTemplate(url: String) async throws -> TemplatePreview {
+        try payload(TemplatePreview.self, from: await output(["import-template", url, "--dry-run"]), command: "import-template")
+    }
+
+    public func importTemplate(url: String, name: String, cwd: String?, taskClass: String?, paste: String) async throws -> CreatedBot {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdbot-template-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("paste.md")
+        try Data(paste.utf8).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        var arguments = ["import-template", url, "--name", name, "--paste", file.path, "--json"]
+        if let cwd, !cwd.isEmpty { arguments += ["--cwd", cwd] }
+        if let taskClass { arguments += ["--class", taskClass] }
+        return try payload(CreatedBot.self, from: await output(arguments), command: "import-template")
+    }
+
     /// The name and the instructions are one argv entry each, so spaces and newlines reach herdbot
     /// untouched. Empty options are left out, so the CLI's defaults apply.
     public func createBot(name: String, cwd: String?, taskClass: String?, instructions: String) async throws -> CreatedBot {

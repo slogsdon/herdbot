@@ -65,6 +65,11 @@ pub fn import() -> Result<String> {
     let rows = roster["value"]["rows"]
         .as_array()
         .ok_or("roster: no rows")?;
+    import_rows(rows)
+}
+
+/// Shared with recorded-roster checks; no account cache is needed to exercise sync ownership.
+pub(crate) fn import_rows(rows: &[Value]) -> Result<String> {
     let mut report = Vec::new();
     for row in rows {
         let (Some(id), Some(name)) = (row["id"].as_str(), row["name"].as_str()) else {
@@ -77,7 +82,16 @@ pub fn import() -> Result<String> {
         let existing = home::list_bots()
             .into_iter()
             .find(|s| home::load_bot(s).ok().and_then(|b| b.grok_id).as_deref() == Some(id));
-        let slug = existing.clone().unwrap_or_else(|| home::slug(name));
+        let mut slug = existing.clone().unwrap_or_else(|| home::slug(name));
+        // A template is a local copy, so a real roster bot needs a separate, stable folder.
+        if existing.is_none() && home::load_bot(&slug).is_ok_and(|bot| bot.source == "local" && bot.template_url.is_some()) {
+            let base = slug.clone();
+            for suffix in 1.. {
+                let ending = if suffix == 1 { "-grok".to_owned() } else { format!("-grok-{suffix}") };
+                slug = format!("{}{}", &base[..base.len().min(20 - ending.len())], ending);
+                if !home::bot_dir(&slug).exists() { break; }
+            }
+        }
         let mut bot = match existing {
             Some(_) => home::load_bot(&slug)?,
             None if home::bot_dir(&slug).join("bot.toml").exists() => {
@@ -119,5 +133,29 @@ mod tests {
             .as_deref(),
             Some("sand.client.slice.first-run.device-onboarded")
         );
+    }
+}
+
+#[cfg(test)]
+mod template_sync_tests {
+    use super::*;
+
+    #[test]
+    fn roster_sync_keeps_a_template_copy_and_imports_the_real_bot_separately() {
+        crate::with_temp_home(|| {
+            let dir = crate::setup::create_bot("Alfred", None, None, "Local template instructions").unwrap();
+            let mut bot = home::load_bot("alfred").unwrap();
+            bot.template_url = Some("https://x.ai/bot/p7Gh6HIrfv4AGzIow6-9X".into());
+            home::save_bot("alfred", &bot).unwrap();
+            let rows = [serde_json::json!({"id":"real-alfred", "name":"Alfred", "description":"Roster instructions"})];
+            let report = import_rows(&rows).unwrap();
+            assert!(!report.contains("skipped"), "{report}");
+            assert_eq!(std::fs::read_to_string(dir.join("BOT.md")).unwrap(), "Local template instructions");
+            assert_eq!(home::load_bot("alfred").unwrap().source, "local");
+            assert_eq!(home::load_bot("alfred-grok").unwrap().grok_id.as_deref(), Some("real-alfred"));
+            assert_eq!(std::fs::read_to_string(home::bot_dir("alfred-grok").join("BOT.md")).unwrap(), "Roster instructions");
+            assert!(import_rows(&rows).unwrap().is_empty());
+            assert_eq!(home::list_bots().len(), 2);
+        });
     }
 }

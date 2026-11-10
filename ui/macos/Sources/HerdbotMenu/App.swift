@@ -96,6 +96,10 @@ struct HerdbotMenuApp: App {
                 Task { await settings.present(slug.map(SettingsState.Scope.bot) ?? .global) }
                 NSApp.activate(ignoringOtherApps: true)
                 opener.open()
+            }, importTemplate: {
+                create.present(.template)
+                NSApp.activate(ignoringOtherApps: true)
+                opener.open()
             })
         } label: {
             MenuIcon(icon: state.icon.with(attention: setup.needsAttention)).modifier(OpenerCapture(opener: opener, onReady: { autoOpenSetup() }))

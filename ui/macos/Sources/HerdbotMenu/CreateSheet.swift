@@ -2,8 +2,7 @@ import AppKit
 import HerdbotKit
 import SwiftUI
 
-/// The sheet behind the sidebar's "+": one form for a new bot or a new room. Nothing is written
-/// here; Create asks `CreateState`, which runs `herdbot new` or `herdbot room new`.
+/// Bot, room and template forms. Create asks `CreateState`; the CLI owns every bot write.
 ///
 /// States: the form defaults to the kind the "+" menu asked for; Create is disabled while the draft
 /// is incomplete, while a create is running and when herdbot is missing, and the reason is always
@@ -16,8 +15,8 @@ struct CreateSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(state.kind == .bot ? "New Bot" : "New Room").font(.title3.weight(.semibold))
-                Text(state.kind == .bot
+                Text(state.heading).font(.title3.weight(.semibold))
+                Text(state.kind == .template ? "Preview a Grok Bot URL, then paste any components the page withholds." : state.kind == .bot
                      ? "Creates a folder under the herdbot home with its instructions in BOT.md."
                      : "Creates a room from bots that already exist.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -25,6 +24,7 @@ struct CreateSheet: View {
             switch state.kind {
             case .bot: BotForm(state: state)
             case .room: RoomForm(state: state)
+            case .template: TemplateForm(state: state)
             }
             message
             footer
@@ -32,7 +32,7 @@ struct CreateSheet: View {
         .padding(20)
         .frame(width: 520)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(state.kind == .bot ? "New bot" : "New room")
+        .accessibilityLabel(state.heading)
     }
 
     /// Why Create is off, or what the CLI said. Never both: a rejection is the more urgent message.
@@ -54,8 +54,8 @@ struct CreateSheet: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if state.isCreating {
-                ProgressView().controlSize(.small).accessibilityLabel("Creating")
+            if state.isBusy {
+                ProgressView().controlSize(.small).accessibilityLabel(state.status == .previewing ? "Loading preview" : "Creating")
             }
             Spacer()
             Button("Cancel") { state.dismiss() }
@@ -64,7 +64,7 @@ struct CreateSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!state.canCreate)
                 .help(state.problem ?? (state.isCreating ? "Creating…" : "Create it"))
-                .accessibilityLabel(state.kind == .bot ? "Create bot" : "Create room")
+                .accessibilityLabel(state.kind == .room ? "Create room" : "Create bot")
         }
     }
 }
@@ -97,7 +97,7 @@ private struct BotForm: View {
                 TextField("Helper", text: binding(\.name))
                     .textFieldStyle(.roundedBorder)
                     .focused($nameFocused)
-                    .disabled(state.isCreating)
+                    .disabled(state.isBusy)
                     .accessibilityLabel("Bot name")
             }
             Field(label: "Working directory", note: "Leave empty for the bot's own folder under the herdbot home.") {
@@ -105,10 +105,10 @@ private struct BotForm: View {
                     TextField("Bot folder", text: binding(\.cwd))
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
-                        .disabled(state.isCreating)
+                        .disabled(state.isBusy)
                         .accessibilityLabel("Working directory")
                     Button("Choose…") { chooseFolder() }
-                        .disabled(state.isCreating)
+                        .disabled(state.isBusy)
                         .accessibilityLabel("Choose working directory")
                 }
             }
@@ -121,27 +121,29 @@ private struct BotForm: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 .frame(maxWidth: 280, alignment: .leading)
-                .disabled(state.isCreating)
+                .disabled(state.isBusy)
                 .accessibilityLabel("Task class")
             }
-            Field(label: "Instructions", note: "Written to BOT.md. Leave empty and edit the file later.") {
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: binding(\.instructions))
-                        .font(.body)
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .frame(height: 110)
-                        .disabled(state.isCreating)
-                        .accessibilityLabel("Bot instructions")
-                    if state.bot.instructions.isEmpty {
-                        Text("What this bot is for and how it should answer.")
-                            .foregroundStyle(.tertiary)
-                            .padding(.top, 12).padding(.leading, 11)
-                            .allowsHitTesting(false)
+            if state.kind != .template {
+                Field(label: "Instructions", note: "Written to BOT.md. Leave empty and edit the file later.") {
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: binding(\.instructions))
+                            .font(.body)
+                            .scrollContentBackground(.hidden)
+                            .padding(6)
+                            .frame(height: 110)
+                            .disabled(state.isBusy)
+                            .accessibilityLabel("Bot instructions")
+                        if state.bot.instructions.isEmpty {
+                            Text("What this bot is for and how it should answer.")
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 12).padding(.leading, 11)
+                                .allowsHitTesting(false)
+                        }
                     }
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
                 }
-                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
             }
         }
         // A sheet has one obvious starting point; the rest of the fields follow with Tab.
@@ -176,7 +178,7 @@ private struct RoomForm: View {
                 TextField("Crew", text: Binding(get: { state.room.name }, set: { state.room.name = $0 }))
                     .textFieldStyle(.roundedBorder)
                     .focused($nameFocused)
-                    .disabled(state.isCreating)
+                    .disabled(state.isBusy)
                     .accessibilityLabel("Room name")
             }
             Field(label: "Members", note: memberNote) {
@@ -188,7 +190,7 @@ private struct RoomForm: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .disabled(state.isCreating)
+                .disabled(state.isBusy)
                 .accessibilityLabel("Room mode")
             }
             if state.room.mode == .moderated {
@@ -204,7 +206,7 @@ private struct RoomForm: View {
                         .pickerStyle(.menu)
                         .labelsHidden()
                         .frame(maxWidth: 300, alignment: .leading)
-                        .disabled(state.isCreating)
+                        .disabled(state.isBusy)
                         .accessibilityLabel("Moderator")
                     }
                 }
@@ -229,7 +231,7 @@ private struct RoomForm: View {
                                 .lineLimit(1)
                         }
                         .toggleStyle(.checkbox)
-                        .disabled(state.isCreating)
+                        .disabled(state.isBusy)
                         .accessibilityLabel("Member \(bot.title.isEmpty ? bot.slug : bot.title)")
                     }
                 }
@@ -247,5 +249,55 @@ private struct RoomForm: View {
         let picked = state.room.members.map { state.title(for: $0) }
         guard !picked.isEmpty else { return "Pick at least two bots." }
         return "In turn order: \(picked.joined(separator: " → "))"
+    }
+}
+
+private struct TemplateForm: View {
+    let state: CreateState
+    @FocusState private var urlFocused: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Field(label: "Template URL", note: "https://x.ai/bot/<id> or https://x.ai/bot/marketplace/bots/<slug>") {
+                    HStack {
+                        TextField("https://x.ai/bot/…", text: Binding(get: { state.templateURL }, set: { state.templateURL = $0 }))
+                            .textFieldStyle(.roundedBorder)
+                            .focused($urlFocused)
+                            .disabled(state.isBusy)
+                            .accessibilityLabel("Template URL")
+                            .onSubmit { Task { await state.previewTemplate() } }
+                        Button("Preview") { Task { await state.previewTemplate() } }
+                            .disabled(!state.canPreview)
+                            .accessibilityLabel("Preview template")
+                    }
+                }
+                if let preview = state.preview {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(preview.name).font(.headline)
+                        Text(preview.description)
+                        ForEach(Array(preview.memories.enumerated()), id: \.offset) { _, memory in
+                            Text(memory)
+                        }
+                        Text("Components: " + (preview.components.isEmpty ? "none listed" : preview.components.joined(separator: ", ")))
+                            .font(.callout).foregroundStyle(.secondary)
+                        Text("Not imported: " + (preview.notImported.isEmpty ? "none" : preview.notImported.joined(separator: ", ") + " — open the template in Grok Bot and paste them below."))
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    .textSelection(.enabled)
+                    Field(label: "Paste components", note: "Use ## Memories, ## Skill: Name (optional Description:), or ## Routine: Name (optional Cron:). Schedules start disabled; no cron keeps prose only.") {
+                        TextEditor(text: Binding(get: { state.paste }, set: { state.paste = $0 }))
+                            .font(.body)
+                            .frame(height: 110)
+                            .disabled(state.isBusy)
+                            .accessibilityLabel("Pasted template components")
+                    }
+                    BotForm(state: state)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 540)
+        .task { urlFocused = true }
     }
 }
