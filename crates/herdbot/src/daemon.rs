@@ -890,15 +890,51 @@ mod tests {
     #[test]
     fn liveness_probes_never_fill_the_lock_backlog() {
         use std::os::unix::net::{UnixListener, UnixStream};
+        use std::time::{Duration, Instant};
+        // A refused probe is only tolerable while the drain thread is descheduled: the backlog
+        // must recover. A drain that stalls (the bug this guards) never recovers, so it fails.
+        const DEADLINE: Duration = Duration::from_secs(5);
+        // Generous, but bounds the whole burst: a drain that only trickles must not pass.
+        const BURST: Duration = Duration::from_secs(20);
+        fn connect_within(
+            path: &std::path::Path,
+            deadline: Duration,
+        ) -> std::result::Result<(), String> {
+            let started = Instant::now();
+            let mut refused = 0u32;
+            loop {
+                match UnixStream::connect(path) {
+                    Ok(_) => return Ok(()),
+                    Err(e) => {
+                        if started.elapsed() >= deadline {
+                            return Err(format!("refused {refused} times in {deadline:?}: {e}"));
+                        }
+                        refused += 1;
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+            }
+        }
+
         let path =
             std::env::temp_dir().join(format!("herdbot-lock-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
         drain_in_background(&listener).unwrap();
         // More than the 128-entry backlog; each probe is dropped, as `status` and `doctor` do.
+        let burst = Instant::now();
         for n in 0..400 {
-            assert!(UnixStream::connect(&path).is_ok(), "probe {n} refused");
+            if let Err(e) = connect_within(&path, DEADLINE) {
+                panic!("probe {n} {e}");
+            }
         }
+        assert!(
+            burst.elapsed() < BURST,
+            "400 dropped probes took {:?}: the drain is not keeping up",
+            burst.elapsed()
+        );
+        // The drain kept up: nothing is queued, so a final probe is accepted just as fast.
+        connect_within(&path, DEADLINE).expect("the drain thread stopped accepting probes");
         let _ = std::fs::remove_file(&path);
     }
 
