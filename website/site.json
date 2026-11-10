@@ -1,0 +1,8 @@
+{
+  "slug": "herdbot",
+  "name": "Herdbot",
+  "origin": "https://projects.logsdon.io",
+  "description": "Runs a team of persistent AI bots on your own Mac through herdr, routing each task to a harness and model from the coding-agent subscriptions you already pay for.",
+  "lastmod": "2026-10-22",
+  "source": "https://github.com/slogsdon/herdbot"
+}
