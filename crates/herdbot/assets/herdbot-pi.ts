@@ -7,20 +7,16 @@
 import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-type Message = { role?: string; content?: unknown };
+type Message = { role?: string; content?: unknown; stopReason?: string; errorMessage?: string };
 
 /** The text of the last assistant message: its text items, without thinking or tool calls. */
-function lastAssistantText(messages: Message[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m.role !== "assistant") continue;
-		if (typeof m.content === "string") return m.content;
-		if (Array.isArray(m.content)) {
-			return m.content
-				.filter((c): c is { type: "text"; text: string } => c?.type === "text" && typeof c.text === "string")
-				.map((c) => c.text)
-				.join("");
-		}
+function lastAssistantText(message?: Message): string {
+	if (typeof message?.content === "string") return message.content;
+	if (Array.isArray(message?.content)) {
+		return message.content
+			.filter((c): c is { type: "text"; text: string } => c?.type === "text" && typeof c.text === "string")
+			.map((c) => c.text)
+			.join("");
 	}
 	return "";
 }
@@ -32,7 +28,10 @@ function hook(payload: object) {
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("agent_end", (event) => hook({ event: "agent_end", text: lastAssistantText(event.messages as Message[]) }));
+	pi.on("agent_end", (event) => {
+		const message = (event.messages as Message[]).findLast((message) => message.role === "assistant");
+		hook({ event: "agent_end", text: lastAssistantText(message), stopReason: message?.stopReason, errorMessage: message?.errorMessage });
+	});
 	pi.on("ui_prompt_start", (event) => hook({ event: "ui_prompt_start", title: event.title ?? event.kind }));
 
 	const args = ["mcp", "--bot", process.env.HERDBOT_BOT ?? ""];

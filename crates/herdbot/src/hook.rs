@@ -18,6 +18,7 @@ pub fn installed(harness: &str) -> bool {
 #[derive(Debug, PartialEq)]
 pub enum Parsed {
     TurnEnd(String),
+    TurnError(String),
     Blocked(String),
 }
 
@@ -44,6 +45,10 @@ pub fn parse_hook(harness: &str, payload: &Value) -> Option<Parsed> {
         "claude" => match str_at(payload, "hook_event_name") {
             "Stop" if payload["stop_hook_active"] != Value::Bool(true) => Some(Parsed::TurnEnd(
                 str_at(payload, "last_assistant_message").to_owned(),
+            )),
+            "StopFailure" => Some(Parsed::TurnError(
+                [str_at(payload, "error"), str_at(payload, "error_details")]
+                    .into_iter().filter(|part| !part.trim().is_empty()).collect::<Vec<_>>().join(": "),
             )),
             "PermissionRequest" => Some(Parsed::Blocked(format!(
                 "{}: {}",
@@ -81,6 +86,13 @@ pub fn parse_hook(harness: &str, payload: &Value) -> Option<Parsed> {
             _ => None,
         },
         "pi" => match str_at(payload, "event") {
+            "agent_end" if matches!(str_at(payload, "stopReason"), "error" | "aborted")
+                || !str_at(payload, "errorMessage").trim().is_empty() => {
+                let error = str_at(payload, "errorMessage");
+                Some(Parsed::TurnError(if error.trim().is_empty() {
+                    format!("Pi stopped with stopReason {}", str_at(payload, "stopReason"))
+                } else { error.to_owned() }))
+            }
             "agent_end" => Some(Parsed::TurnEnd(str_at(payload, "text").to_owned())),
             "ui_prompt_start" => Some(Parsed::Blocked(str_at(payload, "title").to_owned())),
             _ => None,
@@ -136,6 +148,7 @@ pub fn codex_notify(config_toml: &str) -> Option<Vec<String>> {
 pub enum Action {
     /// A run's turn ended without report_result: finish it with this reply.
     FinishRun(String),
+    FailRun(String),
     BlockRun(String),
     /// Not yet decidable (the run's route is not recorded): keep the event for a later tick.
     Defer,
@@ -153,12 +166,15 @@ pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
     match (run, event.kind.as_str()) {
         (Some(r), _) if r.pane_closed || !matches!(r.status.as_str(), "running" | "blocked") => Action::Ignore,
         (Some(r), _) if r.route.is_empty() => Action::Defer,
+        (Some(_), "turn_error") => Action::FailRun(if reason().trim().is_empty() { "Worker reported an unspecified error.".into() } else { reason() }),
+        (Some(_), "turn_end") if text().trim().is_empty() => Action::FailRun("Worker ended its turn without a final assistant reply.".into()),
         // A compactor answers many jobs in one run; the daemon's memory tick ends it.
         (Some(r), "turn_end") if r.class == "compact" => Action::Ignore,
         (Some(_), "turn_end") => Action::FinishRun(text()),
         (Some(r), "blocked") if !r.notified_blocked => Action::BlockRun(reason()),
         (Some(_), _) => Action::Ignore,
         (None, "turn_end") if is_main => Action::LogTurn(text()),
+        (None, "turn_error") if is_main => Action::LogTurn(format!("Worker stopped on an error: {}", reason())),
         (None, "blocked") if is_main => Action::LogBlocked(reason()),
         (None, _) if is_main => Action::Ignore,
         (None, _) => Action::Drop,
@@ -274,6 +290,7 @@ fn handle(harness: &str, args: &[String]) -> Result<()> {
     }
     let (kind, text, reason) = match parsed {
         Parsed::TurnEnd(text) => ("turn_end", Some(cap(&text)), None),
+        Parsed::TurnError(reason) => ("turn_error", None, Some(cap(&reason))),
         Parsed::Blocked(reason) => ("blocked", None, Some(cap(&reason))),
     };
     let at = home::now();
@@ -397,6 +414,59 @@ mod tests {
         assert!(codex_root_thread(&dir, "missing").is_err());
         assert!(codex_root_thread(&dir, "").is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn pi_error_is_not_a_successful_turn_even_with_partial_text() {
+        for text in ["", "partial reply"] {
+            let parsed = parse_hook("pi", &json!({
+                "event": "agent_end", "text": text,
+                "stopReason": "error", "errorMessage": "Request timed out"
+            }));
+            assert_eq!(parsed, Some(Parsed::TurnError("Request timed out".into())));
+        }
+    }
+
+    #[test]
+    fn empty_hook_turn_does_not_finish_a_run_successfully() {
+        for text in ["", " \n\t"] {
+            let mut empty = event("turn_end");
+            empty.text = Some(text.into());
+            assert_eq!(decide(&empty, Some(&running()), false), Action::FailRun("Worker ended its turn without a final assistant reply.".into()));
+        }
+    }
+
+    #[test]
+    fn claude_stop_failure_is_not_ignored() {
+        assert_eq!(parse_hook("claude", &json!({
+            "hook_event_name": "StopFailure", "error": "server_error",
+            "error_details": "503 Service Unavailable"
+        })), Some(Parsed::TurnError("server_error: 503 Service Unavailable".into())));
+    }
+
+    #[test]
+    fn errors_fail_running_blocked_and_compact_runs_but_not_settled_runs() {
+        let mut error = event("turn_error");
+        error.reason = Some("Request timed out".into());
+        for run in [running(), home::Run { status: "blocked".into(), ..running() }, home::Run { class: "compact".into(), ..running() }] {
+            assert_eq!(decide(&error, Some(&run), false), Action::FailRun("Request timed out".into()));
+        }
+        for status in ["done", "failed", "cancelled"] {
+            assert_eq!(decide(&error, Some(&home::Run { status: status.into(), ..running() }), false), Action::Ignore);
+        }
+        assert_eq!(decide(&error, Some(&home::Run { route: String::new(), ..running() }), false), Action::Defer);
+        assert_eq!(decide(&error, None, true), Action::LogTurn("Worker stopped on an error: Request timed out".into()));
+        assert_eq!(decide(&error, None, false), Action::Drop);
+    }
+
+    #[test]
+    fn pi_aborted_or_missing_error_text_still_fails() {
+        for reason in ["error", "aborted"] {
+            assert_eq!(parse_hook("pi", &json!({"event":"agent_end", "text":"partial", "stopReason":reason})),
+                Some(Parsed::TurnError(format!("Pi stopped with stopReason {reason}"))));
+        }
+        assert_eq!(parse_hook("pi", &json!({"event":"agent_end", "text":"partial", "errorMessage":"failed request"})),
+            Some(Parsed::TurnError("failed request".into())));
     }
 
     #[test]

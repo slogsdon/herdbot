@@ -291,13 +291,14 @@ Each harness's own hook reports two things to herdbot: a finished turn with its 
 
 | Harness | Turn end (reply) | Blocked | Installed by |
 |---|---|---|---|
-| claude | `Stop`, reply from `last_assistant_message` | `PermissionRequest` (seen live). `Notification` for permission or input is wired but not seen live | `--settings .state/launch/<agent>.settings.json` |
+| claude | `Stop`, reply from `last_assistant_message`; `StopFailure` reports API errors | `PermissionRequest` (seen live). `Notification` for permission or input is wired but not seen live | `--settings .state/launch/<agent>.settings.json` |
 | codex | `notify` `agent-turn-complete`, reply from `last-assistant-message` | none. `approval-requested` never reached `notify` in a live capture, so herdr's status is used | `-c notify=[<herdbot>, hook, codex]` |
-| pi | `agent_end`, reply from the last assistant text | `ui_prompt_start` is wired but not seen live | `herdbot-pi.ts`, which pipes each event to `herdbot hook pi` |
+| pi | `agent_end`, reply from the last assistant text with `stopReason` / `errorMessage` | `ui_prompt_start` is wired but not seen live | `herdbot-pi.ts`, which pipes each event to `herdbot hook pi` |
 
 cursor-agent is wired via `<cwd>/.cursor/hooks.json` from verified captures; the end-to-end run has not yet been verified live.
 
 - `herdbot hook` always exits 0 and prints nothing. Its own errors go to `.state/events/hook-errors.log`. Each payload becomes at most one line in `.state/events/<agent>.jsonl`, which the daemon drains on each tick. Text is capped at 64 KB, keeping the head and tail.
+- Errored or empty final hook turns settle subagent runs as `failed` with `result_source: hook`, an explanatory result, and a parent notice that the task can be resumed in a new run. Pi errors/aborts and Claude `StopFailure` carry explicit failure signals; Codex notify has no error field. Older Pi text-only payloads remain accepted. Pi extension regression: `node --test crates/herdbot/assets/herdbot-pi.test.ts` (Node 22.18+).
 - Codex side turns are filtered. Notify identifies the notifying `thread-id` and `turn-id` but omits ancestry. Herdbot verifies root CLI identity against the first `session_meta` record in `$CODEX_HOME/sessions` (default `~/.codex/sessions`), rejecting nested agents even when they finish first. Missing or unreadable metadata leaves the run open and records a hook error. Title-generation turns are skipped too.
 - A late `report_result` after hook completion replaces the stored hook result and delivers a separate report notice to the parent; already reported or cancelled runs still reject reports.
 - codex: herdbot's hook re-runs your own `notify` from `~/.codex/config.toml` with the same payload appended, detached. Whether that chained notify still receives its payload is not checked live.

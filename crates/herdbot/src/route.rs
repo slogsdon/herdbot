@@ -560,7 +560,7 @@ fn cursor_hook_config(mut config: serde_json::Value, exe: &str) -> Option<serde_
 fn claude_hook_settings(exe: &str) -> serde_json::Value {
     let command = format!("'{}' hook claude", exe.replace('\'', r"'\''"));
     let entry = serde_json::json!([{ "hooks": [{ "type": "command", "command": command }] }]);
-    serde_json::json!({ "hooks": { "Stop": entry, "PermissionRequest": entry, "Notification": entry } })
+    serde_json::json!({ "hooks": { "Stop": entry, "StopFailure": entry, "PermissionRequest": entry, "Notification": entry } })
 }
 
 /// codex `-c` override: herdbot's hook as notify (it chains Shane's own notify itself).
@@ -913,6 +913,7 @@ code = ["codex:bot:low"]
             "command"
         );
         assert!(s["hooks"].get("Notification").is_some());
+        assert_eq!(s["hooks"]["StopFailure"], s["hooks"]["Stop"]);
         assert_eq!(
             codex_notify_arg("/Users/x/herdbot"),
             r#"notify=["/Users/x/herdbot","hook","codex"]"#

@@ -397,6 +397,14 @@ async fn consume_events(herdr: &Client, mains: &mut MainAgents) -> Result<()> {
                     if !event.id.is_empty() && !r.event_ids.contains(&event.id) { r.event_ids.push(event.id.clone()); home::save_run(&r)?; }
                     println!("run {} done (hook)", r.id);
                 }
+                hook::Action::FailRun(reason) => {
+                    let mut r = run.expect("decide only fails known runs");
+                    let notice = apply_hook_failure(&mut r, &reason, event.at);
+                    let notice_id = format!("run:{}:failed", r.id);
+                    if !event.id.is_empty() { r.event_ids.push(event.id.clone()); }
+                    home::enqueue_run_notice(&mut r, &notice_id, &notice)?;
+                    println!("run {} failed (hook)", r.id);
+                }
                 hook::Action::BlockRun(reason) => {
                     let mut r = run.expect("decide only blocks known runs");
                     let tail = run::tail(herdr, &r.agent, 60).await;
@@ -646,6 +654,20 @@ fn apply_tail_fallback(run: &mut Run, text: &str, now: i64) {
     }
 }
 
+/// A failed hook turn settles the run without inventing a successful worker result.
+fn apply_hook_failure(run: &mut Run, reason: &str, at: i64) -> String {
+    let result = format!("Worker stopped on an error: {reason}\nThe task can be resumed in a new run.");
+    run.status = "failed".into();
+    run.result_source = "hook".into();
+    run.summary = Some(home::first_line_preview(&result));
+    run.result = Some(result.clone());
+    run.events.push(home::RunEvent {
+        id: format!("run:{}:failed", run.id), at, kind: "failed".into(),
+        summary: run.summary.clone().unwrap(), detail: Some(result.clone()),
+    });
+    format!("[subagent {} \"{}\" stopped]\n{result}", run.id, run.description)
+}
+
 /// Advance active-time accounting; blocked intervals are excluded and never consume the card.
 fn update_active_budget(run: &mut home::Run, blocked: bool, now: i64) -> bool {
     let Some(limit) = run.wall_clock_limit else { return false };
@@ -868,6 +890,25 @@ mod tests {
         assert!(
             matches!(prune_decision(&card, Some("blocked"), &moved), Prune::Replace(c) if c.id != card.id)
         );
+    }
+
+    #[test]
+    fn hook_failure_records_error_and_resumable_parent_notice() {
+        let mut run = home::Run {
+            id: "r1".into(), description: "test task".into(), status: "running".into(),
+            ..Default::default()
+        };
+        let notice = apply_hook_failure(&mut run, "Request timed out", 42);
+        assert_eq!(run.status, "failed");
+        assert_eq!(run.result_source, "hook");
+        assert_eq!(run.result.as_deref(), Some("Worker stopped on an error: Request timed out\nThe task can be resumed in a new run."));
+        assert_eq!(run.summary.as_deref(), Some("Worker stopped on an error: Request timed out"));
+        assert_eq!(run.events[0].id, "run:r1:failed");
+        assert_eq!(run.events[0].kind, "failed");
+        assert_eq!(run.events[0].at, 42);
+        assert_eq!(run.events[0].detail, run.result);
+        assert!(!run.pane_closed);
+        assert_eq!(notice, format!("[subagent r1 \"test task\" stopped]\n{}", run.result.unwrap()));
     }
 
     #[test]

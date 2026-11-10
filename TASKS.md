@@ -1,5 +1,9 @@
 # Open tasks
 
+## Errored hook turns (2026-11-09)
+
+- [x] Prevent Pi error/aborted or empty final hook turns from settling successfully: forward final assistant metadata, emit `turn_error`, settle as `failed` with `result_source: hook`, and notify the parent that the task can be resumed in a new run. Wire Claude `StopFailure`; Codex 0.167.0 notify has no error field. Pi extension, error/empty-turn parsing/decision, Claude wiring and failure-result/notice regressions pass; the original Pi/empty/Claude/wiring regressions failed before the fix. Workspace build/tests/clippy, Node extension test, isolated hook CLI emission and `git diff --check` passed. No commit, installed-app/daemon activation, or live pane changes.
+
 ## Nested hook settlement (2026-11-09)
 
 - [x] Prevent Codex nested-agent notify from settling the root run: merged in `a38a93d`; rollout metadata rejects nested threads before event emission, and late hook-settled reports replace the result with a distinct parent notice. Both regressions failed before and passed after; workspace build, 206 tests, clippy, and isolated CLI checks with the actual incident root/child metadata passed. Live-validated 2026-11-09 on the installed app built from main: run `stsb2q` spawned sub-agent thread `…7f8da079` (parent `…bfca4639`), which finished first without settling the run; the run ended via `report_result` (`NESTED-OK 409`).
