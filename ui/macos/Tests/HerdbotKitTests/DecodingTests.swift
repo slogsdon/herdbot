@@ -3,6 +3,13 @@ import Testing
 @testable import HerdbotKit
 
 @Suite struct Decoding {
+    @Test func decodesHerdrSessionSupportAndRunningChoices() throws {
+        let report = try JSONDecoder().decode(HerdrSessionList.self, from: Data(herdrSessionsJSON.utf8))
+        #expect(report.sessions.map(\.name) == ["default", "work", "stopped"])
+        #expect(report.running.map(\.name) == ["default", "work"])
+        #expect(report.sessions.first?.default == true)
+    }
+
     @Test func snapshotLineDecodes() throws {
         let parsed = try #require(try StreamParser.parse(snapshotLine))
         #expect(parsed.type == "snapshot")

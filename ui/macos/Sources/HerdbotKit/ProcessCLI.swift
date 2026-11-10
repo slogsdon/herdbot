@@ -270,6 +270,19 @@ extension ProcessCLI: CardCLI {
 }
 
 extension ProcessCLI: SettingsCLI {
+    public func createSession(name: String) async throws {
+        _ = try await output(["session", "create", name])
+    }
+
+    public func listSessions() async throws -> HerdrSessionList {
+        let data = try await output(["config", "sessions", "--json"])
+        do {
+            return try JSONDecoder().decode(HerdrSessionList.self, from: data)
+        } catch {
+            throw CLIError.failed("herdbot config sessions printed session data this app cannot read; update herdbot or this app")
+        }
+    }
+
     public func listSettings(bot: String?) async throws -> [SettingDescriptor] {
         let data = try await output(settingsArguments(["config", "list", "--json"], bot: bot))
         return try settings(SettingsList.self, from: data, command: "config list").settings

@@ -22,14 +22,26 @@ struct SettingsView: View {
                 .padding(12)
                 Divider()
             }
+            if let problem = state.sessionProblem {
+                Label("Herdr session list unavailable: \(problem). The selection is still \(state.selectedSession ?? "unchanged").", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 20) {
                     if state.scope == .global {
                         LifecycleSection(setup: setup)
                         Divider()
                     }
+                    if state.scope == .global, state.sessionSupportReported,
+                       let setting = state.descriptor("herdr.session") {
+                        SessionSettingRow(state: state, setting: setting)
+                    }
                     ForEach(state.settings) { setting in
-                        SettingRow(state: state, setting: setting)
+                        if setting.key != "herdr.session" {
+                            SettingRow(state: state, setting: setting)
+                        }
                     }
                     if state.loading && state.settings.isEmpty {
                         ProgressView().controlSize(.small)
@@ -72,6 +84,75 @@ struct SettingsView: View {
         var slugs = (menu.snapshot?.bots ?? []).map(\.slug)
         if let current = state.scope.bot, !slugs.contains(current) { slugs.append(current) }
         return slugs
+    }
+}
+
+private struct SessionSettingRow: View {
+    let state: SettingsState
+    let setting: SettingDescriptor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Herdr session").font(.headline)
+            Text("Choose a running Herdr session for future Herdbot work.")
+                .font(.callout).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                TextField("New session name", text: Binding(get: { state.newSessionName }, set: { state.newSessionName = $0 }))
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("New Herdr session name")
+                    .onSubmit { Task { await state.createSession() } }
+                    .disabled(state.creatingSession)
+                Button("Create") { Task { await state.createSession() } }
+                    .disabled(state.creatingSession || state.newSessionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if state.creatingSession {
+                ProgressView("Creating session…").controlSize(.small)
+            } else if let problem = state.createSessionProblem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.red).textSelection(.enabled)
+            } else if let name = state.createdSessionName {
+                Label("Session \(name) is running. Save to use it.", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
+            }
+            Picker("Herdr session", selection: Binding(
+                get: { state.draft(for: setting.key) },
+                set: { state.edit(setting.key, to: $0) }
+            )) {
+                ForEach(state.sessionChoices) { session in
+                    Text(session.name).tag(session.name)
+                }
+                if let selected = state.selectedSession,
+                   !state.sessionChoices.contains(where: { $0.name == selected }) {
+                    Text("\(selected) (not running)").tag(selected).disabled(true)
+                }
+            }
+            .frame(maxWidth: 280, alignment: .leading)
+            Text("Changing this does not move existing workspaces. A home already used with another socket requires a separate HERDBOT_HOME. Restart the daemon to apply.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button("Save") { Task { await state.save(setting.key) } }
+                    .disabled(!state.canSave(setting.key))
+                Button("Use default") { Task { await state.unset(setting.key) } }
+                    .disabled(state.saveStatus(setting.key) == .saving)
+                Spacer()
+                switch state.saveStatus(setting.key) {
+                case .saving:
+                    ProgressView().controlSize(.small).accessibilityLabel("Saving Herdr session")
+                case .saved:
+                    Label("Saved; restart daemon or reinstall", systemImage: "checkmark.circle.fill")
+                        .font(.caption).foregroundStyle(.green)
+                case .failed(let message):
+                    Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                case .idle:
+                    if state.isDirty(setting.key) {
+                        Text("Unsaved changes").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -158,6 +158,8 @@ A bot's `cwd` defaults to its own folder. You can point it at a repo instead, fo
 ```bash
 herdbot config list                     # global settings
 herdbot config list --bot helper        # one bot's settings
+herdbot config sessions --json          # Herdr session state and socket paths
+herdbot session create work --json      # start or reuse a named headless session
 herdbot config get approvals.mode       # one global setting
 herdbot config get memory --bot helper  # one bot setting
 herdbot config list --json              # the versioned contract below
@@ -169,6 +171,10 @@ herdbot config unset class --bot helper --json      # the updated setting as JSO
 ```
 
 Global settings live in `$HERDBOT_HOME/herdbot.toml`; bot settings live in `$HERDBOT_HOME/<slug>/bot.toml`. `--bot` selects the bot scope and only accepts an existing, normalised slug (lowercase letters, digits and `-`, at most 20 characters), so an id cannot escape the home. A missing `herdbot.toml` is not an error: `list` reports the metadata defaults without creating it, and `set` creates the file (and any missing section) on the first write. A missing bot, an unknown key, malformed TOML, or a wrong type or value exits 1 with the file and the expected value named.
+
+`herdr.session` is a global setting that defaults to `default`. `herdbot config sessions --json` reports Herdr's session state and socket paths; a named session must be running before the daemon can use it. Set the session explicitly, then restart the daemon with `herdbot setup --only restart-daemon`. Changing sessions does not move existing bot workspaces. Once this home is bound to a socket (`.state/herdr-socket`), a different socket is rejected; use a separate `HERDBOT_HOME` for another session. Legacy homes with workspace state are conservatively treated as belonging to the default socket, including when a new override is supplied. An explicit `HERDR_SOCKET` environment variable continues to override the setting.
+
+`herdbot session create <name> [--json]` starts a named Herdr server without attaching a terminal, or succeeds unchanged when that session is already running. It reports success only after `herdr session list --json` shows the session running with a socket path. The name `default` is rejected so this command cannot start or alter the default session.
 
 `set` takes the value as plain text: `ask`/`auto` for approvals, `default`/`none` for the codex sandbox, `true`/`false` for `memory`, a decimal integer for the numeric settings, one word for `class`, `cua.host` and `cua.command`, and `FROM=TO` for one `paths` entry. Quote anything with spaces. Every value is validated before the file is opened, so a rejected value leaves the file byte-for-byte unchanged. Accepted writes preserve comments, key order, inline comments and unrelated sections: the source is edited with a format-preserving TOML editor and replaced atomically through a sibling temp file and a rename, keeping the original permissions, so a crash or a failed write cannot leave truncated TOML. A comment directly above a key that `unset` removes goes with that key; an emptied `[section]` header stays.
 
@@ -186,12 +192,13 @@ With `--json`, `list` prints one line:
 {"version":1,"scope":"bot","setting":{"key":"memory","type":"boolean","description":"…","default":false,"value":false,"apply":"next-bot-start"}}
 ```
 
-`version` is `1` and new fields are additive. `type` is `enum`, `string`, `integer`, `boolean` or `map`; `choices` is absent for types without a fixed set; `default` is the built-in fallback and `value` is what the file resolves to now. `apply` is `immediate`, `next-bot-start` or `daemon-restart`. No current setting needs a daemon restart, but the vocabulary is reserved for one that will.
+`version` is `1` and new fields are additive. `type` is `enum`, `string`, `integer`, `boolean` or `map`; `choices` is absent for types without a fixed set; `default` is the built-in fallback and `value` is what the file resolves to now. `apply` is `immediate`, `next-bot-start` or `daemon-restart`. `herdr.session` requires a daemon restart.
 
 Supported settings and their defaults:
 
 | Scope | Key | Type | Default | Applies |
 |---|---|---|---|---|
+| global | `herdr.session` | string | `default` | daemon restart |
 | global | `approvals.mode` | enum: `ask`, `auto` | `ask` | next bot start |
 | global | `codex.sandbox` | enum: `default`, `none` | `default` | next bot start |
 | global | `memory.max_compactors` | integer ≥ 0 | `2` | immediately (the daemon reads it each pass) |

@@ -38,6 +38,8 @@ const USAGE: &str = "usage:
   herdbot config get <key> [--bot BOT] [--json]   one setting
   herdbot config set <key> <value> [--bot BOT] [--json]   validate and write one setting
   herdbot config unset <key> [--bot BOT] [--json]         remove one setting (its default applies)
+  herdbot config sessions --json                   herdr sessions and their reported availability
+  herdbot session create <name> [--json]     create or start a named headless herdr session
   herdbot status --json                  one snapshot of bots, runs, cooldowns and blocked agents
   herdbot watch --json                   NDJSON: a snapshot line, then changes (for UIs)
   herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation, newest page first
@@ -70,12 +72,22 @@ fn ctx(args: &mut Vec<String>) -> Result<tools::Ctx> {
     Ok(tools::Ctx { bot, run })
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(e) = cli().await {
+fn main() {
+    let command = std::env::args().nth(1).unwrap_or_default();
+    let result = (|| -> Result<()> {
+        if uses_herdr(&command) {
+            configure_herdr_socket(!matches!(command.as_str(), "doctor" | "status" | "watch"))?;
+        }
+        tokio::runtime::Runtime::new()?.block_on(cli())
+    })();
+    if let Err(e) = result {
         eprintln!("herdbot: {e}");
         std::process::exit(1);
     }
+}
+
+fn uses_herdr(command: &str) -> bool {
+    matches!(command, "daemon" | "up" | "down" | "focus" | "room" | "task" | "tool" | "mcp" | "doctor" | "card")
 }
 
 async fn cli() -> Result<()> {
@@ -124,6 +136,19 @@ async fn cli() -> Result<()> {
                 _ => return Err(USAGE.into()),
             };
             println!("{out}");
+            Ok(())
+        }
+        "session" => {
+            let (name, json) = parse_session_create_args(&args)?;
+            let session = create_session(&name)?;
+            if json {
+                println!("{}", serde_json::to_string(&session)?);
+            } else {
+                println!(
+                    "session {} running at {}",
+                    session.name, session.socket_path
+                );
+            }
             Ok(())
         }
         "import-grok" => {
@@ -502,6 +527,162 @@ fn collaborate(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+struct ReadySession {
+    name: String,
+    socket_path: String,
+}
+
+fn parse_session_create_args(args: &[String]) -> Result<(String, bool)> {
+    if args.first().map(String::as_str) != Some("create")
+        || !(args.len() == 2 || (args.len() == 3 && args[2] == "--json"))
+    {
+        return Err(USAGE.into());
+    }
+    Ok((args[1].clone(), args.len() == 3))
+}
+
+fn validate_session_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name == "default"
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(
+            "session name must be 1-64 ASCII letters, digits, '_' or '-', and cannot be 'default'"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn ready_session(sessions: &serde_json::Value, name: &str) -> Option<ReadySession> {
+    sessions["sessions"].as_array()?.iter().find_map(|session| {
+        (session["name"].as_str() == Some(name) && session["running"].as_bool() == Some(true))
+            .then(|| {
+                session["socket_path"]
+                    .as_str()
+                    .filter(|path| !path.is_empty())
+            })
+            .flatten()
+            .map(|socket_path| ReadySession {
+                name: name.to_owned(),
+                socket_path: socket_path.to_owned(),
+            })
+    })
+}
+
+fn create_session(name: &str) -> Result<ReadySession> {
+    create_session_with(
+        name,
+        || herdr_client::list_sessions().map_err(|error| error.to_string()),
+        |name| {
+            std::process::Command::new("herdr")
+                .args(["--session", name, "server"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+        std::thread::sleep,
+    )
+}
+
+fn create_session_with<L, S, W>(
+    name: &str,
+    mut list: L,
+    mut spawn: S,
+    mut wait: W,
+) -> Result<ReadySession>
+where
+    L: FnMut() -> std::result::Result<serde_json::Value, String>,
+    S: FnMut(&str) -> std::result::Result<(), String>,
+    W: FnMut(std::time::Duration),
+{
+    validate_session_name(name)?;
+    let sessions = list().map_err(|error| format!("could not list Herdr sessions: {error}"))?;
+    if let Some(ready) = ready_session(&sessions, name) {
+        return Ok(ready);
+    }
+    spawn(name).map_err(|error| format!("could not start Herdr session {name:?}: {error}"))?;
+    for _ in 0..40 {
+        wait(std::time::Duration::from_millis(250));
+        if let Ok(sessions) = list()
+            && let Some(ready) = ready_session(&sessions, name)
+        {
+            return Ok(ready);
+        }
+    }
+    Err(
+        format!("Herdr session {name:?} did not report running with socket_path within 10 seconds")
+            .into(),
+    )
+}
+
+/// Keep the default socket behavior and explicit operator override unchanged.
+fn configure_herdr_socket(bind: bool) -> Result<()> {
+    let default_socket = home::home_dir().join(".config/herdr/herdr.sock");
+    let explicit = std::env::var_os("HERDR_SOCKET");
+    let socket = if let Some(socket) = explicit.as_ref() {
+        std::path::PathBuf::from(socket)
+    } else {
+        let selected = config::get(&home::root(), None, "herdr.session")?;
+        match selected.value.as_str().unwrap_or("default") {
+            "default" => default_socket.clone(),
+            session => herdr_client::session_socket(session)?,
+        }
+    };
+    if bind {
+        bind_session_socket(&home::root(), &socket.to_string_lossy(), &default_socket.to_string_lossy())?;
+    }
+    // This runs before the Tokio runtime starts any worker threads.
+    unsafe { std::env::set_var("HERDR_SOCKET", socket) };
+    Ok(())
+}
+
+/// Workspace ids belong to one server; a socket switch must never recreate them elsewhere.
+fn bind_session_socket(root: &std::path::Path, socket: &str, legacy: &str) -> Result<()> {
+    let state = root.join(".state");
+    let binding = state.join("herdr-socket");
+    let previous = match std::fs::read_to_string(&binding) {
+        Ok(previous) => previous,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => legacy.to_owned(),
+        Err(error) => return Err(error.into()),
+    };
+    if previous != socket {
+        if binding.exists() || std::os::unix::net::UnixStream::connect(state.join("daemon.lock")).is_ok() {
+            return Err("This HERDBOT_HOME is bound to another Herdr socket; restore the previous session/socket or use a separate HERDBOT_HOME. No workspaces were migrated.".into());
+        }
+        for directory in [state.clone(), state.join("rooms")] {
+            let entries = match std::fs::read_dir(directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            for entry in entries {
+                if entry?.path().extension().is_some_and(|extension| extension == "json" || extension == "workspace") {
+                    return Err("Herdr socket changed while workspace state exists; restore the previous session/socket or use a separate HERDBOT_HOME. No workspaces were migrated.".into());
+                }
+            }
+        }
+    }
+    std::fs::create_dir_all(state)?;
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&binding) {
+        Ok(mut file) => file.write_all(socket.as_bytes())?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::fs::read_to_string(binding)? != socket {
+                return Err("Herdr socket binding changed concurrently; retry with the original session/socket".into());
+            }
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod collaboration_tests {
     use super::*;
@@ -512,5 +693,157 @@ mod collaboration_tests {
         let room = CollaborationTarget { kind: "room".into(), slug: "alpha".into() };
         assert_eq!(unique_collaboration_targets(vec![bot.clone(), bot.clone(), room.clone()]), [bot.clone(), room]);
         assert_eq!(collaboration_target_id("r-1", &bot), "collab:r-1:bot:alpha");
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    fn running(name: &str, socket_path: &str) -> serde_json::Value {
+        serde_json::json!({"sessions":[{"name":name,"running":true,"socket_path":socket_path}]})
+    }
+
+    #[test]
+    fn switching_socket_rejects_existing_bot_and_room_state_without_changes() {
+        let root = std::env::current_dir().unwrap().join(".superpowers/session-guard-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".state/rooms")).unwrap();
+        for state in [".state/helper.json", ".state/rooms/team.json", ".state/rooms/team.workspace"] {
+            let path = root.join(state);
+            std::fs::write(&path, "{\"workspace_id\":\"w1\"}").unwrap();
+            assert!(bind_session_socket(&root, "/named.sock", "/default.sock").is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"workspace_id\":\"w1\"}");
+            std::fs::remove_file(path).unwrap();
+        }
+        bind_session_socket(&root, "/named.sock", "/default.sock").unwrap();
+        assert!(bind_session_socket(&root, "/other.sock", "/default.sock").is_err());
+        std::fs::write(root.join(".state/helper.json"), "state").unwrap();
+        bind_session_socket(&root, "/named.sock", "/default.sock").unwrap();
+        assert!(bind_session_socket(&root, "/default.sock", "/default.sock").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn socket_commands_include_card_answers_but_exclude_lifecycle_and_config() {
+        assert!(uses_herdr("card"));
+        assert!(uses_herdr("daemon"));
+        for command in ["config", "session", "service", "setup", "--version", "status", "watch"] {
+            assert!(!uses_herdr(command));
+        }
+    }
+
+    #[test]
+    fn validates_named_sessions_without_allowing_default() {
+        for name in [
+            "",
+            "default",
+            "bad name",
+            "../escape",
+            "x".repeat(65).as_str(),
+        ] {
+            assert!(validate_session_name(name).is_err(), "accepted {name:?}");
+        }
+        assert!(validate_session_name("work_2").is_ok());
+    }
+
+    #[test]
+    fn validates_session_create_arguments() {
+        assert_eq!(
+            parse_session_create_args(&["create".into(), "work".into()]).unwrap(),
+            ("work".into(), false)
+        );
+        assert_eq!(
+            parse_session_create_args(&["create".into(), "work".into(), "--json".into()]).unwrap(),
+            ("work".into(), true)
+        );
+        for args in [
+            vec![],
+            vec!["list".into()],
+            vec!["create".into()],
+            vec!["create".into(), "work".into(), "--other".into()],
+            vec![
+                "create".into(),
+                "work".into(),
+                "--json".into(),
+                "extra".into(),
+            ],
+        ] {
+            assert!(
+                parse_session_create_args(&args).is_err(),
+                "accepted {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn running_session_is_idempotent_and_does_not_spawn() {
+        let result = create_session_with(
+            "work",
+            || Ok(running("work", "/tmp/work.sock")),
+            |_| panic!("running session must not be spawned"),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            ReadySession {
+                name: "work".into(),
+                socket_path: "/tmp/work.sock".into()
+            }
+        );
+    }
+
+    #[test]
+    fn launch_failure_is_reported() {
+        let error = create_session_with(
+            "work",
+            || Ok(serde_json::json!({"sessions":[]})),
+            |_| Err("executable missing".into()),
+            |_| {},
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("could not start Herdr session"));
+        assert!(error.contains("executable missing"));
+    }
+
+    #[test]
+    fn success_waits_for_running_session_with_socket_path() {
+        let mut polls = 0;
+        let mut launches = Vec::new();
+        let result = create_session_with(
+            "work",
+            || {
+                polls += 1;
+                if polls == 1 {
+                    Ok(serde_json::json!({"sessions":[]}))
+                } else {
+                    Ok(running("work", "/tmp/work.sock"))
+                }
+            },
+            |name| {
+                launches.push(name.to_owned());
+                Ok(())
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(launches, ["work"]);
+        assert_eq!(polls, 2);
+        assert_eq!(result.socket_path, "/tmp/work.sock");
+    }
+
+    #[test]
+    fn running_without_socket_is_not_reported_as_ready() {
+        let error = create_session_with(
+            "work",
+            || Ok(serde_json::json!({"sessions":[{"name":"work","running":true}]})),
+            |_| Ok(()),
+            |_| {},
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("did not report running with socket_path"));
     }
 }

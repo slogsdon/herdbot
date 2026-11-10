@@ -28,3 +28,11 @@ For every UI plan, record the adapted principle or why none applies, review defa
 
 - [ ] Diagnose why the Herdbot MCP `task` tool started Codex Luna sessions when Pi / DeepSeek was requested, then fix and verify harness dispatch. The committed source includes routing/fallback tracking, but the installed helper is still 0.1.2; a Pi request from this session started Codex without a surfaced fallback reason.
 - [x] Move the desktop Swift package to `ui/macos/` and update tracked package, build, release, and documentation references. The executable target remains `HerdbotMenu`; the user-facing app name remains `Herdbot`. Verified with 156 Swift tests, app build/signature checks, `scripts/test-release.sh` (universal dry run), `cargo build`, 144 Herdbot tests, clippy, and `git diff --check`.
+
+## Settings session salvage (2026-11-09)
+
+- [x] Salvage and recheck named-session spike read-only.
+- [x] Salvage CLI/UI in order and reconcile lifecycle/collaboration changes.
+- [x] Add workspace ownership and command-routing regression checks; fresh review fixes.
+- [x] Complete final Rust build/tests/clippy, 197 Swift tests, arm64 app/signature checks and report uncommitted diff. One unchanged daemon backlog test failed once, then full rerun passed.
+- [ ] Shane: manual UI, disposable-session lifecycle and installed daemon socket verification.

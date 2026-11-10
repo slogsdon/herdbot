@@ -165,6 +165,8 @@ let botMemorySettingJSON = """
 {"version":1,"scope":"bot","setting":{"key":"memory","type":"boolean","description":"Keep an OptChat memory log and add a view of it to the bot instructions.","default":false,"value":true,"apply":"next-bot-start"}}
 """
 
+let herdrSessionsJSON = #"{"sessions":[{"name":"default","default":true,"running":true},{"name":"work","default":false,"running":true},{"name":"stopped","default":false,"running":false}]}"#
+
 /// The settings from a `config list --json` payload.
 func settings(from json: String) throws -> [SettingDescriptor] {
     try JSONDecoder().decode(SettingsList.self, from: Data(json.utf8)).settings

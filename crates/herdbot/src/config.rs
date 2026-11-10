@@ -24,7 +24,8 @@ pub const USAGE: &str = "usage:
   herdbot config list [--bot BOT] [--json]       supported settings, values and apply timing
   herdbot config get <key> [--bot BOT] [--json]  one setting
   herdbot config set <key> <value> [--bot BOT] [--json]  validate and write one setting
-  herdbot config unset <key> [--bot BOT] [--json]        remove one setting (its default applies)";
+  herdbot config unset <key> [--bot BOT] [--json]        remove one setting (its default applies)
+  herdbot config sessions --json                         herdr sessions";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
@@ -84,6 +85,17 @@ struct Definition {
 }
 
 const GLOBAL_SETTINGS: &[Definition] = &[
+    Definition {
+        key: "herdr.session",
+        kind: "string",
+        description: "Herdr session used by the daemon and new bot starts. Changing it does not move existing workspaces; a different socket requires a separate HERDBOT_HOME once bound. Restart the daemon to apply.",
+        choices: &[],
+        fallback: Fallback::Text("default"),
+        apply: "daemon-restart",
+        min: None,
+        inherits_global_approvals: false,
+        text: Text::Word,
+    },
     Definition {
         key: "approvals.mode",
         kind: "enum",
@@ -1180,6 +1192,11 @@ fn parse(args: Vec<String>) -> Result<Invocation> {
 }
 
 pub fn run(args: Vec<String>) -> Result<()> {
+    if args == ["sessions", "--json"] {
+        let sessions = herdr_client::list_sessions().map_err(|error| error.to_string())?;
+        println!("{sessions}");
+        return Ok(());
+    }
     let invocation = parse(args)?;
     let home_dir = home::root();
     let bot = invocation.bot.as_deref();
@@ -1294,6 +1311,30 @@ mod tests {
     }
 
     #[test]
+    fn herdr_session_defaults_to_default_and_changes_without_touching_bots() {
+        let home = TempHome::new("session-setting");
+        let bot = home.write("herdbot-dev/BOT.md", "keep bot instructions\n");
+        let state = home.write("herdbot-dev/state.json", "keep workspace state\n");
+        assert_eq!(
+            get(&home.path, None, "herdr.session").unwrap().value,
+            json!("default")
+        );
+        set(&home.path, None, "herdr.session", "work").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(bot).unwrap(),
+            "keep bot instructions\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(state).unwrap(),
+            "keep workspace state\n"
+        );
+        assert_eq!(
+            get(&home.path, None, "herdr.session").unwrap().value,
+            json!("work")
+        );
+    }
+
+    #[test]
     fn registry_inventory_matches_the_current_parsers() {
         assert_eq!(
             definitions(Scope::Global)
@@ -1301,6 +1342,7 @@ mod tests {
                 .map(|definition| definition.key)
                 .collect::<Vec<_>>(),
             [
+                "herdr.session",
                 "approvals.mode",
                 "codex.sandbox",
                 "memory.max_compactors",
@@ -1457,7 +1499,8 @@ future = true
         .unwrap();
         assert_eq!(report["version"], json!(1));
         assert_eq!(report["scope"], json!("global"));
-        let first = &report["settings"][0];
+        let first = report["settings"].as_array().unwrap().iter()
+            .find(|setting| setting["key"] == json!("approvals.mode")).unwrap();
         assert_eq!(first["key"], json!("approvals.mode"));
         for field in ["key", "type", "description", "default", "value", "choices", "apply"] {
             assert!(first.get(field).is_some(), "missing {field}: {first}");
@@ -1710,6 +1753,13 @@ future = true
 
     fn samples() -> Vec<Sample> {
         vec![
+            Sample {
+                bot: false,
+                key: "herdr.session",
+                value: "work",
+                expected: json!("work"),
+                rejected: "two words",
+            },
             Sample { bot: false, key: "approvals.mode", value: "auto", expected: json!("auto"), rejected: "yolo" },
             Sample { bot: false, key: "codex.sandbox", value: "none", expected: json!("none"), rejected: "danger" },
             Sample { bot: false, key: "memory.max_compactors", value: "7", expected: json!(7), rejected: "two" },

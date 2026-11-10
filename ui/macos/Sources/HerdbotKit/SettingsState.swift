@@ -42,6 +42,22 @@ public final class SettingsState {
     /// leaves the previous form (and its unsaved values) intact.
     public private(set) var scope: Scope = .global
     public private(set) var settings: [SettingDescriptor] = []
+    /// Only sessions from a successful CLI support report are selectable.
+    public private(set) var sessionChoices: [HerdrSession] = []
+    public private(set) var sessionSupportReported = false
+    public private(set) var sessionProblem: String?
+    public var newSessionName = "" {
+        didSet {
+            if newSessionName != oldValue {
+                createSessionProblem = nil
+                createdSessionName = nil
+            }
+        }
+    }
+    public private(set) var creatingSession = false
+    public private(set) var createSessionProblem: String?
+    public private(set) var createdSessionName: String?
+    public var selectedSession: String? { descriptor("herdr.session") == nil ? nil : draft(for: "herdr.session") }
     /// Why the settings could not be loaded; saving failures live on their own key instead.
     public private(set) var problem: String?
     public private(set) var loading = false
@@ -93,6 +109,24 @@ public final class SettingsState {
             problem = nil
             status = [:]
             seedDrafts(for: requested, from: loaded)
+            if requested == .global, loaded.contains(where: { $0.key == "herdr.session" }) {
+                do {
+                    let report = try await cli.listSessions()
+                    guard id == loadID else { return }
+                    sessionChoices = report.running
+                    sessionSupportReported = true
+                    sessionProblem = nil
+                } catch {
+                    guard id == loadID else { return }
+                    sessionChoices = []
+                    sessionSupportReported = false
+                    sessionProblem = error.localizedDescription
+                }
+            } else {
+                sessionChoices = []
+                sessionSupportReported = false
+                sessionProblem = nil
+            }
         } catch {
             guard id == loadID else { return }
             problem = error.localizedDescription
@@ -154,6 +188,36 @@ public final class SettingsState {
 
     public func canSave(_ key: String) -> Bool {
         descriptor(key) != nil && status[key] != .saving && isDirty(key)
+    }
+
+    /// Create a running Herdr session, refresh the choices, and leave its name as an unsaved draft.
+    public func createSession() async {
+        let name = newSessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let cli, scope == .global, !name.isEmpty, !creatingSession else { return }
+        let targetLoadID = loadID
+        creatingSession = true
+        createSessionProblem = nil
+        createdSessionName = nil
+        defer { creatingSession = false }
+        do {
+            try await cli.createSession(name: name)
+            guard scope == .global, loadID == targetLoadID else { return }
+            let report = try await cli.listSessions()
+            guard scope == .global, loadID == targetLoadID else { return }
+            sessionChoices = report.running
+            sessionSupportReported = true
+            sessionProblem = nil
+            guard sessionChoices.contains(where: { $0.name == name }) else {
+                createSessionProblem = "Session \(name) was created, but herdbot did not report it as running."
+                return
+            }
+            edit("herdr.session", to: name)
+            newSessionName = ""
+            createdSessionName = name
+        } catch {
+            guard scope == .global, loadID == targetLoadID else { return }
+            createSessionProblem = error.localizedDescription
+        }
     }
 
     public func saveStatus(_ key: String) -> SaveStatus {

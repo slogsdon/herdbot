@@ -309,6 +309,65 @@ impl Client {
     }
 }
 
+/// List sessions using herdr's supported JSON interface.
+pub fn list_sessions() -> Result<Value> {
+    let output = std::process::Command::new("herdr")
+        .args(["session", "list", "--json"])
+        .output()?;
+    if !output.status.success() {
+        return Err(Error::Protocol(format!(
+            "herdr session list --json failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    let text = String::from_utf8(output.stdout).map_err(|error| {
+        Error::Protocol(format!(
+            "herdr session list returned non-UTF-8 JSON: {error}"
+        ))
+    })?;
+    let value: Value = serde_json::from_str(&text)?;
+    if !value.get("sessions").is_some_and(Value::is_array) {
+        return Err(Error::Protocol(
+            "herdr session list JSON has no sessions array".into(),
+        ));
+    }
+    Ok(value)
+}
+
+/// Resolve a listed session to the socket path herdr reported.
+pub fn session_socket_from_json(json_text: &str, session: &str) -> Result<PathBuf> {
+    let value: Value = serde_json::from_str(json_text)?;
+    let sessions = value
+        .get("sessions")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Error::Protocol("herdr session list JSON has no sessions array".into()))?;
+    let entry = sessions
+        .iter()
+        .find(|entry| entry.get("name").and_then(Value::as_str) == Some(session))
+        .ok_or_else(|| {
+            Error::Protocol(format!(
+                "herdr session {session:?} is not available; run `herdr session list`"
+            ))
+        })?;
+    if !entry.get("running").and_then(Value::as_bool).unwrap_or(false) {
+        return Err(Error::Protocol(format!(
+            "herdr session {session:?} is not running; start it with `herdr session attach {session}`"
+        )));
+    }
+    let socket = entry
+        .get("socket_path")
+        .and_then(Value::as_str)
+        .filter(|socket| !socket.is_empty())
+        .ok_or_else(|| Error::Protocol(format!("herdr session {session:?} has no socket_path")))?;
+    Ok(PathBuf::from(socket))
+}
+
+/// Resolve a session through herdr's supported list command.
+pub fn session_socket(session: &str) -> Result<PathBuf> {
+    let sessions = list_sessions()?;
+    session_socket_from_json(&sessions.to_string(), session)
+}
+
 /// A global subscription: `on("pane.created")`.
 pub fn on(event_type: &str) -> Value {
     json!({ "type": event_type })
@@ -408,5 +467,47 @@ mod tests {
         assert_eq!(agent_name("SEO Chief"), "seo-chief");
         assert_eq!(agent_name("1st-bot"), "a1st-bot");
         assert_eq!(agent_name(&"x".repeat(40)).len(), 32);
+    }
+
+    #[test]
+    fn session_json_resolves_only_reported_sessions() {
+        let json = r#"{"sessions":[{"default":true,"name":"default","running":true,"session_dir":"/tmp/herdr","socket_path":"/tmp/herdr/herdr.sock"},{"default":false,"name":"work","running":true,"session_dir":"/tmp/herdr/sessions/work","socket_path":"/tmp/herdr/sessions/work/herdr.sock"}]}"#;
+        assert_eq!(
+            session_socket_from_json(json, "default").unwrap(),
+            PathBuf::from("/tmp/herdr/herdr.sock")
+        );
+        assert_eq!(
+            session_socket_from_json(json, "work").unwrap(),
+            PathBuf::from("/tmp/herdr/sessions/work/herdr.sock")
+        );
+        assert!(
+            session_socket_from_json(json, "missing")
+                .unwrap_err()
+                .to_string()
+                .contains("not available")
+        );
+    }
+
+    #[test]
+    fn stopped_sessions_are_not_resolved_as_available() {
+        let json = r#"{"sessions":[{"default":false,"name":"work","running":false,"session_dir":"/tmp/herdr/sessions/work","socket_path":"/tmp/herdr/sessions/work/herdr.sock"}]}"#;
+        assert!(
+            session_socket_from_json(json, "work")
+                .unwrap_err()
+                .to_string()
+                .contains("is not running")
+        );
+    }
+
+    #[test]
+    fn malformed_or_incomplete_session_json_is_rejected() {
+        assert!(session_socket_from_json("{", "default").is_err());
+        assert!(
+            session_socket_from_json(
+                r#"{"sessions":[{"name":"default","running":true,"session_dir":"/tmp"}]}"#,
+                "default"
+            )
+            .is_err()
+        );
     }
 }

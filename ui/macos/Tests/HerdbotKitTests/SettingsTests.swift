@@ -14,6 +14,10 @@ final class FakeSettingsCLI: SettingsCLI, @unchecked Sendable {
     /// `config list` answers keyed by bot slug; `""` is the global scope.
     nonisolated(unsafe) var lists: [String: [SettingDescriptor]] = [:]
     nonisolated(unsafe) var listFailure: String?
+    nonisolated(unsafe) var sessions: HerdrSessionList = try! JSONDecoder().decode(HerdrSessionList.self, from: Data(herdrSessionsJSON.utf8))
+    nonisolated(unsafe) var sessionsFailure: String?
+    nonisolated(unsafe) var createSessionFailure: String?
+    nonisolated(unsafe) var beforeCreatingSession: (@Sendable () async -> Void)?
     /// A rejection per command: `"set"`, `"unset"` or `"list"`.
     nonisolated(unsafe) var failures: [String: String] = [:]
     nonisolated(unsafe) var calls: [Call] = []
@@ -43,6 +47,18 @@ final class FakeSettingsCLI: SettingsCLI, @unchecked Sendable {
         if let beforeAnswering { await beforeAnswering() }
         let base = try descriptor(key, bot: bot, as: "unset")
         return with(base, value: base.defaultValue)
+    }
+
+    func listSessions() async throws -> HerdrSessionList {
+        if let sessionsFailure { throw CLIError.failed(sessionsFailure) }
+        return sessions
+    }
+
+    func createSession(name: String) async throws {
+        calls.append(Call(command: "createSession", key: name, value: nil, bot: nil))
+        if let beforeCreatingSession { await beforeCreatingSession() }
+        if let createSessionFailure { throw CLIError.failed(createSessionFailure) }
+        sessions = HerdrSessionList(sessions: sessions.sessions + [HerdrSession(name: name, default: false, running: true)])
     }
 
     private func descriptor(_ key: String, bot: String?, as command: String) throws -> SettingDescriptor {
@@ -129,6 +145,101 @@ actor Gate {
         // A map edits one entry at a time, so its field starts empty.
         #expect(state.draft(for: "paths") == "")
         #expect(cli.calls == [FakeSettingsCLI.Call(command: "list", key: "", value: nil, bot: nil)])
+    }
+
+    @Test func sessionSettingDefaultsToDefaultAndOffersOnlyRunningSessions() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("default"), apply: .daemonRestart))
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+
+        #expect(state.draft(for: "herdr.session") == "default")
+        #expect(state.sessionChoices.map(\.name) == ["default", "work"])
+        #expect(state.selectedSession == "default")
+    }
+
+    @Test func sessionListFailurePreservesConfiguredSelection() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("work"), apply: .daemonRestart))
+        cli.sessionsFailure = "herdr unavailable"
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+
+        #expect(state.sessionProblem == "herdr unavailable")
+        #expect(state.draft(for: "herdr.session") == "work")
+        #expect(state.selectedSession == "work")
+    }
+
+    @Test func sessionSaveFailureRetainsSelection() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("default"), apply: .daemonRestart))
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+        state.edit("herdr.session", to: "work")
+        cli.failures["set"] = "config is read-only"
+        await state.save("herdr.session")
+
+        #expect(state.saveStatus("herdr.session") == .failed("config is read-only"))
+        #expect(state.draft(for: "herdr.session") == "work")
+        #expect(state.selectedSession == "work")
+    }
+
+    @Test func creatingSessionRefreshesChoicesAndOnlyChangesTheUnsavedDraft() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("default"), apply: .daemonRestart))
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+        state.newSessionName = "research"
+
+        await state.createSession()
+
+        #expect(state.sessionChoices.map(\.name) == ["default", "work", "research"])
+        #expect(state.draft(for: "herdr.session") == "research")
+        #expect(state.isDirty("herdr.session"))
+        #expect(state.createdSessionName == "research")
+        #expect(cli.calls.filter { $0.command == "set" }.isEmpty)
+        #expect(cli.calls.last == FakeSettingsCLI.Call(command: "createSession", key: "research", value: nil, bot: nil))
+
+        state.newSessionName = "another"
+        #expect(state.createdSessionName == nil)
+    }
+
+    @Test func createFailureShowsErrorAndRetainsEnteredName() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("default"), apply: .daemonRestart))
+        cli.createSessionFailure = "session name is invalid"
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+        state.newSessionName = "bad name"
+
+        await state.createSession()
+
+        #expect(state.createSessionProblem == "session name is invalid")
+        #expect(state.newSessionName == "bad name")
+        #expect(state.draft(for: "herdr.session") == "default")
+    }
+
+    @Test func lateSessionCreationDoesNotChangeAFormAfterSwitchingScopes() async throws {
+        let cli = try fake()
+        cli.lists[""]?.append(SettingDescriptor(key: "herdr.session", type: .string, description: "Herdr session", defaultValue: .text("default"), value: .text("default"), apply: .daemonRestart))
+        let state = SettingsState(cli: cli)
+        await state.select(.global)
+        state.newSessionName = "research"
+
+        let gate = Gate()
+        cli.beforeCreatingSession = { await gate.block() }
+        let creating = Task { await state.createSession() }
+        await gate.waitUntilBlocked()
+
+        await state.select(.bot("helper"))
+        await gate.release()
+        await creating.value
+
+        #expect(state.scope == .bot("helper"))
+        #expect(state.descriptor("herdr.session") == nil)
+        #expect(state.draft(for: "herdr.session").isEmpty)
+        #expect(state.sessionChoices.isEmpty)
+        #expect(!state.sessionSupportReported)
     }
 
     @Test func withoutTheCLITheFormSaysHerdbotIsMissing() async {

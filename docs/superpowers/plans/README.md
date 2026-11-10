@@ -49,8 +49,8 @@ Written 2026-10-20 for the roadmap items in the top-level README.
 | Settings CLI ([spec](../specs/2026-10-22-settings-design.md)) | implementation and Rust validation complete | typed registry, read/list, and format-preserving set/unset |
 | Settings app ([spec](../specs/2026-10-22-settings-design.md)) | Tasks 1–2 implemented; manual UI check pending | typed models/CLI seam, global and per-bot forms, sidebar and status-menu entry points; session control follows its spike |
 | Settings lifecycle ([spec](../specs/2026-10-22-settings-design.md)) | implementation and automated checks complete; manual UI checks pending | setup rerun, daemon disable/enable, uninstall |
-| Herdr named-session spike ([spec](../specs/2026-10-22-settings-design.md)) | planned before session setting | session creation and socket-resolution research |
-| Herdr session setting ([spec](../specs/2026-10-22-settings-design.md)) | planned; blocked on spike | `2026-10-22-settings-session.md`; defaults to `default`, no automatic workspace migration |
+| Herdr named-session spike ([spec](../specs/2026-10-22-settings-design.md)) | spike salvaged; discovery reverified 2026-11-09; manual attach pending | supported JSON discovery; ownership guard required; lifecycle evidence historical |
+| Herdr session setting ([spec](../specs/2026-10-22-settings-design.md)) | CLI/UI salvaged; automated checks recorded in plan; manual UI/live service pending | `2026-10-22-settings-session.md`; defaults to `default`, persistent home/socket binding, no automatic workspace migration |
 | Terminal focus spike ([spec](../specs/2026-10-22-terminal-focus-design.md)) | static spike complete and re-verified 2026-11-09 ([report](../research/2026-10-22-terminal-focus-spike.md)); manual live/permission gates 1–4 block the implementation plan | Terminal.app, iTerm2, Ghostty attach behavior and permissions |
 | Grok Bot schedule/skill import | blocked: no data on disk | — |
 

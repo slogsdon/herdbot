@@ -162,6 +162,21 @@ printf '%s\\n' '\(response)'
         #expect(settings.first?.apply == .nextBotStart)
     }
 
+    @Test func listSessionsUsesTheSessionSupportCommand() async throws {
+        let script = try fakeHerdbot("[ \"$*\" = 'config sessions --json' ] || { echo \"config sessions args: $*\" >&2; exit 2; }\necho '\(herdrSessionsJSON)'")
+        let report = try await ProcessCLI(binary: script).listSessions()
+        #expect(report.running.map(\.name) == ["default", "work"])
+    }
+
+    @Test func createSessionPassesNameAsOneArgument() async throws {
+        let script = try fakeHerdbot("[ \"$#\" = 3 ] && [ \"$1\" = session ] && [ \"$2\" = create ] && [ \"$3\" = 'two words' ]")
+        try await ProcessCLI(binary: script).createSession(name: "two words")
+        let bad = try fakeHerdbot("echo 'cannot start session' >&2; exit 1")
+        await #expect(throws: CLIError.failed("cannot start session")) {
+            try await ProcessCLI(binary: bad).createSession(name: "broken")
+        }
+    }
+
     @Test func listSettingsAsksForOneBot() async throws {
         let script = try fakeHerdbot("[ \"$*\" = 'config list --json --bot helper' ] || { echo \"config list args: $*\" >&2; exit 2; }\necho '\(botSettingsJSON)'")
         let settings = try await ProcessCLI(binary: script).listSettings(bot: "helper")

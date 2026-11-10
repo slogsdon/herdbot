@@ -76,6 +76,22 @@ public protocol SettingsCLI: Sendable {
     func setSetting(key: String, value: String, bot: String?) async throws -> SettingDescriptor
     /// Removes the setting, so its default applies again.
     func unsetSetting(key: String, bot: String?) async throws -> SettingDescriptor
+    /// `herdbot config sessions --json`; rows describe sessions known to herdr.
+    func listSessions() async throws -> HerdrSessionList
+    /// `herdbot session create <name>`; completion means the session is running.
+    func createSession(name: String) async throws
+}
+
+public struct HerdrSession: Codable, Hashable, Sendable, Identifiable {
+    public let name: String
+    public let `default`: Bool
+    public let running: Bool
+    public var id: String { name }
+}
+
+public struct HerdrSessionList: Codable, Hashable, Sendable {
+    public let sessions: [HerdrSession]
+    public var running: [HerdrSession] { sessions.filter(\.running) }
 }
 
 /// Mirrors the `herdbot config --json` contract version; bump with `config::CONTRACT_VERSION`.
