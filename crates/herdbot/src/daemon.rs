@@ -562,7 +562,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
             _ => {}
         }
         let harness = r.route.split(':').next().unwrap_or_default().to_owned();
-        let grace_over = hook::grace_over(&harness, r.settled_at, now);
+        let tail_fallback_allowed = hook::tail_fallback_allowed(&harness);
         match (r.status.as_str(), status.as_deref()) {
             // agent.get fails until launch completes (agent_start allows 60s), so only a
             // missing agent past that window counts as an exit.
@@ -602,7 +602,7 @@ async fn watch_runs(herdr: &Client) -> Result<()> {
             }
             ("running", _)
                 if settled
-                    && grace_over
+                    && tail_fallback_allowed
                     && r.class != "compact"
                     && now - r.unblocked_at.unwrap_or(r.started_at) > HARVEST_AFTER =>
             {

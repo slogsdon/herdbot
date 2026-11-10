@@ -1,5 +1,9 @@
 # Open tasks
 
+## Pi premature harvest
+
+- [x] Reproduce herdr 0.9.1 idle classification on both captured Pi tails (`default_known_agent_idle_fallback`); require hooked runs to finish via turn-end events or `report_result`, preserving unhooked tail fallback. Regression failed before the fix; workspace build, 192 tests, clippy, and release build passed. The worktree release binary wrote the expected agent-scoped Pi `turn_end` event in an isolated fixture home. Live daemon harvest verification skipped: it requires the new daemon; the installed app daemon must remain untouched.
+
 ## EasyUI-inspired UI review
 
 EasyUI's current [introduction](https://easyui.site/docs/introduction) names source ownership, tactile spring physics, and accessible/type-safe controls, including keyboard accessibility and reduced-motion support. For Herdbot's native SwiftUI/AppKit surfaces, keep implementation locally source-owned and use native controls; add motion only when it clarifies an interaction, and honor Reduce Motion whenever custom motion is used.

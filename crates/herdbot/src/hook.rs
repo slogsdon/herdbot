@@ -10,9 +10,6 @@ use crate::home::{self, Result};
 
 const MAX_TEXT: usize = 64 * 1024;
 
-/// Seconds a hooked run may sit settled before the daemon falls back to the pane tail.
-pub const HOOK_GRACE: i64 = 5;
-
 /// Harnesses whose launch installs a hook (see route::launch). Others use the pane tail.
 pub fn installed(harness: &str) -> bool {
     matches!(harness, "claude" | "codex" | "pi" | "cursor")
@@ -168,9 +165,9 @@ pub fn decide(event: &Event, run: Option<&home::Run>, is_main: bool) -> Action {
     }
 }
 
-/// Whether the tail harvest may run: always for unhooked harnesses, else after HOOK_GRACE.
-pub fn grace_over(harness: &str, settled_at: Option<i64>, now: i64) -> bool {
-    !installed(harness) || settled_at.is_some_and(|t| now - t >= HOOK_GRACE)
+/// Hooked harnesses finish through turn-end events; pane idle is not completion evidence.
+pub fn tail_fallback_allowed(harness: &str) -> bool {
+    !installed(harness)
 }
 
 /// `<slug>/turns.jsonl`: one line per main-agent turn, with source event and queue identities.
@@ -490,11 +487,16 @@ mod tests {
     }
 
     #[test]
-    fn grace_only_for_hooked_harnesses() {
-        assert!(!grace_over("cursor", None, 100));
-        assert!(grace_over("cursor", Some(95), 100));
-        assert!(!grace_over("claude", None, 100));
-        assert!(!grace_over("claude", Some(97), 100));
-        assert!(grace_over("claude", Some(95), 100));
+    fn hooked_idle_without_turn_end_never_allows_tail_harvest() {
+        for harness in ["pi", "claude", "codex", "cursor"] {
+            assert!(!tail_fallback_allowed(harness), "{harness}");
+        }
+    }
+
+    #[test]
+    fn unhooked_harnesses_allow_tail_harvest() {
+        for harness in ["opencode", "gemini", "unknown"] {
+            assert!(tail_fallback_allowed(harness), "{harness}");
+        }
     }
 }
