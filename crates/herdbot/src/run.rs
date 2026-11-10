@@ -327,6 +327,16 @@ async fn start(
         if let Some(mut card) = blocked_card(launch.kind, code, &screen, slug, agent) {
             card.harness = Some(route.harness.clone());
             card.run_id = run.map(str::to_owned);
+            if run.is_none()
+                && let Ok(found) = herdr.agent_get(agent).await
+                && let Some(terminal_id) = found["agent"]["terminal_id"].as_str()
+                && let Some(mut state) = home::load_state(slug)
+            {
+                state.terminal_id = Some(terminal_id.to_owned());
+                if let Err(error) = home::save_state(slug, &state) {
+                    eprintln!("{slug}: could not record blocked agent terminal ID: {error}");
+                }
+            }
             return Err(Box::new(StartBlocked { route, card }));
         }
     }
