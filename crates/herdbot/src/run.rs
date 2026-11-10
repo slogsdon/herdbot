@@ -192,6 +192,14 @@ async fn start(
 ) -> Result<route::Route> {
     let table = route::table()?;
     let route = route::resolve(&table, class, slug, explicit_model)?;
+    // Keep routing evidence even if launching or delivering the first prompt fails.
+    if let Some(id) = run {
+        let mut record = home::load_run(id).ok_or("unknown run")?;
+        record.route = format!("{}:{}{}", route.harness, route.model, route.effort.as_ref().map(|effort| format!(":{effort}")).unwrap_or_default());
+        record.requested_route = requested_route(explicit_model, &route);
+        record.fallback_reason = route.fallback_reason.clone();
+        home::save_run(&record)?;
+    }
     let instructions = match run {
         None => {
             let mut text = format!(
@@ -389,7 +397,7 @@ pub async fn spawn(
             "{prompt}\n\n---\nWhen you are done, call the herdbot `report_result` tool once with your complete answer; it is delivered to whoever started you."
         )
     };
-    match start(
+    let started = start(
         herdr,
         slug,
         &bot,
@@ -400,13 +408,10 @@ pub async fn spawn(
         Some(&id),
         Some(&task),
     )
-    .await
-    {
-        Ok(route) => {
-            run = home::load_run(&id).unwrap_or(run);
-            run.route = format!("{}:{}{}", route.harness, route.model, route.effort.as_ref().map(|effort| format!(":{effort}")).unwrap_or_default());
-            run.requested_route = requested_route(explicit_model, &route);
-            run.fallback_reason = route.fallback_reason.clone();
+    .await;
+    run = home::load_run(&id).unwrap_or(run);
+    match started {
+        Ok(_) => {
             run.budget_checked_at = wall_clock_limit.map(|_| home::now());
         }
         Err(e) => {

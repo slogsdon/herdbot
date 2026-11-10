@@ -358,7 +358,7 @@ The table is in [`routing.toml`](routing.toml). For each task herdbot tries, in 
 
 The first available candidate wins. A harness is available when its binary is on `PATH` and it isn't cooling down after a quota or auth failure. Task classes are Grok Bot's subagent types (`explore, shell, bash, browser_use, computer_use, debug, media_review, custom`) plus `code, review, plan, research`, and `compact` for a memory bot's compactor runs (see [Memory](#memory)). The model IDs were listed by the installed CLIs on 2026-10-19. Which model suits which task is my judgment, so tune it.
 
-An available explicit `model` launches that exact harness, model and effort. If a valid explicit route is unavailable, herdbot may use the configured fallback and reports the requested route, actual route and reason in its acknowledgement and history. Invalid explicit routes return an actionable error.
+An available explicit `model` launches that exact harness, model and effort. If a valid explicit route is unavailable, herdbot may use the configured fallback and reports the requested route, actual route and reason in its acknowledgement and history, including when startup blocks or fails. The selected route is saved before launch. Invalid explicit routes return an actionable error.
 
 Every launched agent gets an explicit effort. A candidate without one takes its class's `effort`, then `[default] effort`, then `medium`, so a harness never falls back to your global setting.
 

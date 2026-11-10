@@ -174,6 +174,18 @@ fn find_bot(name: &str) -> Result<String> {
         })
 }
 
+fn task_response(run: &home::Run) -> String {
+    let mut response = match run.status.as_str() {
+        "failed" => format!("run {} on {} failed: {}", run.id, run.route, run.result.as_deref().unwrap_or_default()),
+        "blocked" => format!("run {} on {} is blocked on operator input in pane {}; review the chat card and answer in the harness", run.id, run.route, run.pane),
+        _ => format!("started run {} on {} in pane {}. Its result will arrive as a message.", run.id, run.route, run.pane),
+    };
+    if let (Some(requested), Some(reason)) = (&run.requested_route, &run.fallback_reason) {
+        response.push_str(&format!(" Requested route {requested} was unavailable: {reason}."));
+    }
+    response
+}
+
 pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
     let herdr = Client::from_env();
     let me = match &ctx.run {
@@ -212,14 +224,7 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 },
             )
             .await?;
-            Ok(match run.status.as_str() {
-                "failed" => format!("run {} failed: {}", run.id, run.result.unwrap_or_default()),
-                "blocked" => format!("run {} is blocked on operator input in pane {}; review the chat card and answer in the harness", run.id, run.pane),
-                _ => match (&run.requested_route, &run.fallback_reason) {
-                    (Some(requested), Some(reason)) => format!("started run {} on {} in pane {}. Requested route {} was unavailable: {}. Its result will arrive as a message.", run.id, run.route, run.pane, requested, reason),
-                    _ => format!("started run {} on {} in pane {}. Its result will arrive as a message.", run.id, run.route, run.pane),
-                },
-            })
+            Ok(task_response(&run))
         }
         "check_subagent" => {
             let run = home::load_run(arg(args, "run_id")?).ok_or("unknown run id")?;
@@ -356,6 +361,23 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_response_surfaces_fallback_for_every_launch_status() {
+        for status in ["running", "blocked", "failed"] {
+            let run = home::Run {
+                id: "test".into(), status: status.into(), pane: "test-pane".into(),
+                route: "codex:gpt-6-luna:medium".into(),
+                requested_route: Some("pi:deepseek-v4.1-flash".into()),
+                fallback_reason: Some("pi not on PATH".into()),
+                ..home::Run::default()
+            };
+            let response = task_response(&run);
+            assert!(response.contains(&run.route), "{status}: {response}");
+            assert!(response.contains(run.requested_route.as_deref().unwrap()), "{status}: {response}");
+            assert!(response.contains("pi not on PATH"), "{status}: {response}");
+        }
+    }
 
     #[test]
     fn refuse_self_only_for_a_main_agent_naming_itself() {

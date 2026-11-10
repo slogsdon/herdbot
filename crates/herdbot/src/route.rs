@@ -784,6 +784,45 @@ mod tests {
     }
 
     #[test]
+    fn explicit_pi_ignores_bot_and_class_candidates_with_or_without_effort() {
+        let table: Value = r#"
+[default]
+candidates = ["codex:default:medium"]
+[classes.code]
+effort = "high"
+candidates = ["codex:class:low"]
+[bots.bot.classes]
+code = ["codex:bot:low"]
+"#.parse::<toml::Table>().unwrap().into();
+        for (candidate, effort) in [
+            ("pi:deepseek-v4.1-flash", "high"),
+            ("pi:deepseek-v4.1-flash:low", "low"),
+        ] {
+            let route = resolve_with(&table, "code", "bot", Some(candidate), all_available).unwrap();
+            assert_eq!(route.harness, "pi");
+            assert_eq!(route.model, "deepseek-v4.1-flash");
+            assert_eq!(route.effort.as_deref(), Some(effort));
+            assert!(route.fallback_reason.is_none());
+        }
+    }
+
+    #[test]
+    fn provider_prefixed_pi_model_is_an_error_instead_of_a_fallback() {
+        fn listed(_: &Value, route: &Route) -> std::result::Result<(), AvailabilityError> {
+            if route.harness == "pi" {
+                check_pi_model_listing("opencode-go", &route.model, &["deepseek-v4.1-flash".into()])
+            } else {
+                Ok(())
+            }
+        }
+        let table: Value = "[default]\ncandidates = [\"codex:fallback:medium\"]".parse::<toml::Table>().unwrap().into();
+        for candidate in ["pi:opencode-go/deepseek-v4.1-flash", "pi:opencode-go/deepseek-v4.1-flash:low"] {
+            let error = resolve_with(&table, "code", "bot", Some(candidate), listed).unwrap_err().to_string();
+            assert!(error.contains("is not a opencode-go model"));
+        }
+    }
+
+    #[test]
     fn non_explicit_class_route_keeps_configured_candidate_order() {
         let t: Value = "[default]\ncandidates = [\"codex:default:medium\"]\n[classes.explore]\ncandidates = [\"codex:class:low\"]\n"
             .parse::<toml::Table>()
