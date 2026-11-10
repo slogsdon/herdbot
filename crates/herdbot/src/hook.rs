@@ -1,6 +1,6 @@
 //! Harness hooks normalize a payload into an event without disturbing the harness.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 
 use serde_json::Value;
 
@@ -217,6 +217,34 @@ fn stable_id(agent: &str, supplied: Option<&str>, kind: &str, payload: &str) -> 
     format!("hook:{agent}:{hash:016x}")
 }
 
+/// Notify omits ancestry; verify it in the notifying thread's durable session metadata.
+fn codex_root_thread(sessions: &std::path::Path, thread: &str) -> Result<bool> {
+    if thread.is_empty() || !thread.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-') {
+        return Err("codex notify has no valid thread-id".into());
+    }
+    fn find(dir: &std::path::Path, suffix: &str, depth: usize) -> Result<Option<Value>> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() && depth > 0 {
+                if let Some(meta) = find(&entry.path(), suffix, depth - 1)? { return Ok(Some(meta)); }
+            } else if entry.file_name().to_string_lossy().ends_with(suffix) {
+                let mut first = String::new();
+                std::io::BufReader::new(std::fs::File::open(entry.path())?).read_line(&mut first)?;
+                let record: Value = serde_json::from_str(&first)?;
+                if record["type"] == "session_meta" { return Ok(Some(record["payload"].clone())); }
+            }
+        }
+        Ok(None)
+    }
+    let meta = find(sessions, &format!("-{thread}.jsonl"), 3)?
+        .ok_or_else(|| format!("codex notify thread {thread}: rollout metadata unavailable"))?;
+    // Reject only on positive sub-agent evidence, so a root started outside the TUI still settles.
+    Ok(meta["id"] == thread && meta["source"].get("subagent").is_none()
+        && meta.get("parent_thread_id").is_none_or(Value::is_null)
+        && meta["thread_source"] != "subagent"
+        && meta.get("session_id").is_none_or(|id| id == thread))
+}
+
 fn handle(harness: &str, args: &[String]) -> Result<()> {
     let payload = if harness == "codex" {
         let payload = args.last().cloned().unwrap_or_default();
@@ -237,12 +265,19 @@ fn handle(harness: &str, args: &[String]) -> Result<()> {
     let Some(parsed) = parse_hook(harness, &value) else {
         return Ok(());
     };
+    if harness == "codex" {
+        let codex_home = std::env::var_os("CODEX_HOME").map(std::path::PathBuf::from)
+            .unwrap_or_else(|| home::home_dir().join(".codex"));
+        if !codex_root_thread(&codex_home.join("sessions"), str_at(&value, "thread-id"))? {
+            return Ok(());
+        }
+    }
     let (kind, text, reason) = match parsed {
         Parsed::TurnEnd(text) => ("turn_end", Some(cap(&text)), None),
         Parsed::Blocked(reason) => ("blocked", None, Some(cap(&reason))),
     };
     let at = home::now();
-    let supplied = ["event_id", "turn_id", "id", "eventId"]
+    let supplied = ["event_id", "turn-id", "turn_id", "id", "eventId"]
         .iter().find_map(|key| value.get(*key).and_then(Value::as_str));
     append_event(&Event {
         id: stable_id(&agent, supplied, kind, &value.to_string()),
@@ -296,6 +331,7 @@ mod tests {
             panic!("permission request is a block");
         };
         assert!(reason.starts_with("Bash: touch x && test -e x"), "{reason}");
+        assert_eq!(parse_hook("claude", &json!({"hook_event_name":"SubagentStop", "last_assistant_message":"nested"})), None);
         let mut cont = fixture("claude-stop");
         cont["stop_hook_active"] = json!(true);
         assert_eq!(parse_hook("claude", &cont), None);
@@ -342,6 +378,25 @@ mod tests {
             Some(Parsed::Blocked("Allow bash?".into()))
         );
         assert_eq!(parse_hook("nope", &json!({})), None);
+    }
+
+    #[test]
+    fn codex_nested_thread_cannot_claim_root_even_when_it_finishes_first() {
+        let dir = std::env::temp_dir().join(format!("herdbot-codex-root-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("2026/11/09")).unwrap();
+        for (id, meta) in [
+            ("child", json!({"id":"child", "session_id":"root", "thread_source":"subagent", "source":{"subagent":{}}, "parent_thread_id":"root"})),
+            ("root", json!({"id":"root", "session_id":"root", "thread_source":"user", "source":"cli"})),
+            ("exec", json!({"id":"exec", "session_id":"exec", "thread_source":"user", "source":"exec"})),
+        ] {
+            std::fs::write(dir.join(format!("2026/11/09/rollout-test-{id}.jsonl")), format!("{}\n", json!({"type":"session_meta","payload":meta}))).unwrap();
+        }
+        assert!(!codex_root_thread(&dir, "child").unwrap());
+        assert!(codex_root_thread(&dir, "root").unwrap());
+        assert!(codex_root_thread(&dir, "exec").unwrap());
+        assert!(codex_root_thread(&dir, "missing").is_err());
+        assert!(codex_root_thread(&dir, "").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

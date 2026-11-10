@@ -1,5 +1,11 @@
 # Open tasks
 
+## Nested hook settlement (2026-11-09)
+
+- [ ] Prevent Codex nested-agent notify from settling the root run: implemented and locally verified in `fix/nested-hook-settle`; rollout metadata rejects nested threads before event emission, and late hook-settled reports replace the result with a distinct parent notice. Both regressions failed before and passed after; workspace build, 206 tests, clippy, and isolated CLI checks with the actual incident root/child metadata passed. Installed-daemon validation remains open; daemon untouched.
+- [ ] `daemon::tests::liveness_probes_never_fill_the_lock_backlog` flakes under parallel machine load ("probe N refused"); pre-existing, not reproduced in this run.
+- [x] `main.rs` session test wrote under `current_dir()` (`.superpowers/session-guard-test`): switched to `std::env::temp_dir()` with a process-specific directory.
+
 ## Pi premature harvest
 
 - [x] Reproduce herdr 0.9.1 idle classification on both captured Pi tails (`default_known_agent_idle_fallback`); require hooked runs to finish via turn-end events or `report_result`, preserving unhooked tail fallback. Regression failed before the fix; workspace build, 192 tests, clippy, and release build passed. The worktree release binary wrote the expected agent-scoped Pi `turn_end` event in an isolated fixture home. Live daemon harvest verification skipped: it requires the new daemon; the installed app daemon must remain untouched.

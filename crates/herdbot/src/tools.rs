@@ -8,6 +8,16 @@ use serde_json::{Value, json};
 use crate::home::{self, Bot, Result};
 use crate::run;
 
+fn report_notice_id(run: &home::Run) -> home::Result<String> {
+    if run.status == "done" && run.result_source == "hook" {
+        return Ok(format!("run:{}:reported", run.id));
+    }
+    if !matches!(run.status.as_str(), "running" | "blocked") {
+        return Err(format!("run {} is {}, so it cannot report a result", run.id, run.status).into());
+    }
+    Ok(format!("run:{}:completed", run.id))
+}
+
 pub struct Ctx {
     pub bot: String,
     pub run: Option<String>,
@@ -307,9 +317,7 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
                 .as_deref()
                 .ok_or("report_result is only for subagent runs")?;
             let mut run = home::load_run(id).ok_or("unknown run")?;
-            if !matches!(run.status.as_str(), "running" | "blocked") {
-                return Err(format!("run {} is {}, so it cannot report a result", run.id, run.status).into());
-            }
+            let notice_id = report_notice_id(&run)?;
             let result = arg(args, "result")?.to_owned();
             let summary = args.get("summary").and_then(Value::as_str).map(str::to_owned)
                 .unwrap_or_else(|| home::first_line_preview(&result));
@@ -318,14 +326,13 @@ pub async fn call(ctx: &Ctx, name: &str, args: &Value) -> Result<String> {
             run.result_source = "report".into();
             run.summary = Some(summary.clone());
             run.events.push(home::RunEvent {
-                id: format!("run:{}:completed", run.id), at: home::now(), kind: "completed".into(),
+                id: notice_id.clone(), at: home::now(), kind: "completed".into(),
                 summary: summary.clone(), detail: Some(result.clone()),
             });
             let notice = format!(
                     "[subagent {} \"{}\" finished]\nSummary: {summary}\n\nFull result:\n{result}",
                     run.id, run.description
                 );
-            let notice_id = format!("run:{}:completed", run.id);
             home::enqueue_run_notice(&mut run, &notice_id, &notice)?;
             Ok("delivered. You can stop now.".into())
         }
@@ -377,6 +384,18 @@ mod tests {
             assert!(response.contains(run.requested_route.as_deref().unwrap()), "{status}: {response}");
             assert!(response.contains("pi not on PATH"), "{status}: {response}");
         }
+    }
+
+    #[test]
+    fn late_report_after_hook_gets_a_distinct_notice() {
+        let mut run = home::Run { id: "r1".into(), status: "done".into(), result_source: "hook".into(), ..Default::default() };
+        assert_eq!(report_notice_id(&run).unwrap(), "run:r1:reported");
+        run.result_source = "report".into();
+        assert!(report_notice_id(&run).is_err());
+        run.status = "running".into();
+        assert_eq!(report_notice_id(&run).unwrap(), "run:r1:completed");
+        run.status = "cancelled".into();
+        assert!(report_notice_id(&run).is_err());
     }
 
     #[test]

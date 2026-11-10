@@ -706,7 +706,7 @@ mod session_tests {
 
     #[test]
     fn switching_socket_rejects_existing_bot_and_room_state_without_changes() {
-        let root = std::env::current_dir().unwrap().join(".superpowers/session-guard-test");
+        let root = std::env::temp_dir().join(format!("herdbot-session-guard-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".state/rooms")).unwrap();
         for state in [".state/helper.json", ".state/rooms/team.json", ".state/rooms/team.workspace"] {
