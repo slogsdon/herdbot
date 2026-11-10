@@ -61,3 +61,14 @@ For every UI plan, record the adapted principle or why none applies, review defa
 - [x] Add workspace ownership and command-routing regression checks; fresh review fixes.
 - [x] Complete final Rust build/tests/clippy, 197 Swift tests, arm64 app/signature checks and report uncommitted diff. One unchanged daemon backlog test failed once, then full rerun passed.
 - [ ] Shane: manual UI, disposable-session lifecycle and installed daemon socket verification.
+
+
+## U2(a): create bots and rooms (2026-11-09)
+
+- [x] Review inherited work; complete CLI creation options, JSON, validation and Swift forms through ProcessCLI.
+- [x] Cover parser, filesystem validation, form/state transitions and ProcessCLI argument/error handling.
+- [x] `cargo build --workspace`; `cargo test --workspace` (213 tests); `cargo clippy --workspace -- -D warnings`; `ui/macos/scripts/test.sh` (216 tests reported, opt-in real-binary test skipped); `OUT_DIR=build/u2a ./scripts/build-app.sh` (arm64, codesign verified); `git diff --check`. Rebuilt the same bundle with the current worktree helper embedded for review. Isolated CLI smoke inspected JSON, BOT.md/bot.toml/room.toml/transcript.md, unchanged human output, actionable failures and watch-stream roster updates; temporary home removed.
+- [ ] Shane: open the locally built app and review both forms at default, invalid/disabled, loading, success and CLI-error states. Check folder picker cancellation/selection, room membership order, moderated-only picker, draft preservation/retry and watch-driven sidebar appearance/selection.
+- [ ] Shane: verify Tab/Shift-Tab traversal and visible focus, Return Create (newline in instructions), Escape Cancel, keyboard operation of + menu/member toggles/pickers, VoiceOver labels and error discovery, layout with long names/errors, and Reduce Motion. Native SwiftUI/AppKit controls are used, with no custom animation; live accessibility and visual behavior remain unverified.
+
+Design principle: use native source-owned controls, clear labels and inline validation; keep all writes behind the existing CLI seam. Create disables while invalid/unavailable/running, shows progress while running, preserves drafts on error and closes/selects the returned slug on success. Cancel during creation dismisses without undoing the CLI write. No template/URL import.

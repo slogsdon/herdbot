@@ -32,7 +32,7 @@ const USAGE: &str = "usage:
   herdbot daemon                         deliver messages, watch subagents, fire schedules, sync Grok Bot
   herdbot service install|disable|enable|uninstall|status   control the launchd agent (from ~/.cargo/bin)
   herdbot import-grok                    one-way import of Grok Bot's roster (instructions)
-  herdbot new <name> [--cwd DIR] [--class CLASS]
+  herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] [--json]
   herdbot list | runs
   herdbot config list [--bot BOT] [--json]    supported settings, values and apply timing
   herdbot config get <key> [--bot BOT] [--json]   one setting
@@ -49,7 +49,7 @@ const USAGE: &str = "usage:
   herdbot card answer <card-id> <option-id>   answer one, after checking it is still on screen
   herdbot send <bot> <text…>             queue a prompt for the bot (needs the daemon)
   herdbot collaborate --json              fan out one JSON request from stdin
-  herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT]
+  herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT] [--json]
   herdbot room send <room> <text…> | room list | room up <room>
   herdbot task <bot> <class> <prompt…>   start a subagent for the bot from the shell
   herdbot route <class> [--bot BOT]      show which harness:model a class resolves to
@@ -63,6 +63,32 @@ fn flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     (i < args.len()).then(|| args.remove(i))
 }
 
+/// Consume creation options in order so an option's value is never parsed as another flag.
+fn creation_options(args: &mut Vec<String>, value_flags: &[&str]) -> Result<std::collections::HashMap<String, String>> {
+    let mut options = std::collections::HashMap::new();
+    let mut names = Vec::new();
+    let mut input = args.iter();
+    while let Some(arg) = input.next() {
+        if arg == "--json" {
+            options.insert(arg.clone(), String::new());
+        } else if value_flags.contains(&arg.as_str()) {
+            let value = input.next().ok_or_else(|| format!("{arg} needs a value"))?;
+            if arg != "--instructions" && (value_flags.contains(&value.as_str()) || value == "--json") {
+                return Err(format!("{arg} needs a value").into());
+            }
+            if options.insert(arg.clone(), value.clone()).is_some() {
+                return Err(format!("{arg} was supplied twice; use it once").into());
+            }
+        } else if arg.starts_with("--") {
+            return Err(format!("unknown option {arg:?}; check herdbot usage").into());
+        } else {
+            names.push(arg.clone());
+        }
+    }
+    *args = names;
+    Ok(options)
+}
+
 /// `--bot` / `--run`, falling back to the pane environment (cursor's shared mcp.json).
 fn ctx(args: &mut Vec<String>) -> Result<tools::Ctx> {
     let bot = flag(args, "--bot")
@@ -70,6 +96,109 @@ fn ctx(args: &mut Vec<String>) -> Result<tools::Ctx> {
         .ok_or("--bot (or HERDBOT_BOT) is required")?;
     let run = flag(args, "--run").or_else(|| std::env::var("HERDBOT_RUN").ok());
     Ok(tools::Ctx { bot, run })
+}
+
+/// `herdbot new`. The name is every word left over, as before, so a quoted multi-word name works.
+#[derive(Debug, PartialEq, Eq)]
+struct NewBotArgs {
+    name: String,
+    cwd: Option<String>,
+    class: Option<String>,
+    /// Written verbatim; absent instructions keep the old empty `BOT.md`.
+    instructions: Option<String>,
+    json: bool,
+}
+
+fn parse_new_args(args: &mut Vec<String>) -> Result<NewBotArgs> {
+    let mut options = creation_options(args, &["--cwd", "--class", "--instructions"])?;
+    let json = options.remove("--json").is_some();
+    let cwd = options.remove("--cwd");
+    let class = options.remove("--class");
+    let instructions = options.remove("--instructions");
+    let name = args.join(" ");
+    if name.trim().is_empty() {
+        return Err("herdbot new needs a name: herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] [--json]".into());
+    }
+    Ok(NewBotArgs { name, cwd, class, instructions, json })
+}
+
+/// `herdbot new --json`: the bot's slug and the folder written.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+struct CreatedBot {
+    slug: String,
+    path: String,
+}
+
+/// Validate and write a new bot, the work `herdbot new` does once its instructions are in hand.
+fn create_bot(new: &NewBotArgs, instructions: &str) -> Result<(String, std::path::PathBuf)> {
+    let dir = setup::create_bot(&new.name, new.cwd.clone(), new.class.clone(), instructions)?;
+    Ok((home::slug(&new.name), dir))
+}
+
+/// `herdbot room new --json`: the room's slug.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+struct CreatedRoom {
+    slug: String,
+}
+
+/// `herdbot room new`.
+#[derive(Debug, PartialEq, Eq)]
+struct NewRoomArgs {
+    name: String,
+    members: Vec<String>,
+    mode: rooms::Mode,
+    moderator: Option<String>,
+    json: bool,
+}
+
+fn parse_room_new_args(args: &mut Vec<String>) -> Result<NewRoomArgs> {
+    let mut options = creation_options(args, &["--members", "--mode", "--moderator"])?;
+    let json = options.remove("--json").is_some();
+    let member_text = options.remove("--members")
+        .ok_or("herdbot room new needs --members a,b[,c] (at least two existing bots)")?;
+    if member_text.split(',').any(|member| member.trim().is_empty()) {
+        return Err("--members contains an empty member; use at least two bot names, for example --members alpha,beta".into());
+    }
+    let members = member_text.split(',').map(|member| home::slug(member.trim())).collect();
+    let mode = match options.remove("--mode").as_deref() {
+        None | Some("channel") => rooms::Mode::Channel,
+        Some("round_robin") => rooms::Mode::RoundRobin,
+        Some("moderated") => rooms::Mode::Moderated,
+        Some(other) => {
+            return Err(format!(
+                "unknown mode {other:?}; use channel, round_robin or moderated"
+            )
+            .into());
+        }
+    };
+    let moderator = options.remove("--moderator").map(|m| home::slug(&m));
+    let name = args.join(" ");
+    if name.trim().is_empty() {
+        return Err("herdbot room new needs a name: herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT] [--json]".into());
+    }
+    Ok(NewRoomArgs { name, members, mode, moderator, json })
+}
+
+/// Validate and write a new room, the work `herdbot room new` does.
+fn create_room(new: &NewRoomArgs) -> Result<(String, rooms::Room)> {
+    let slug = home::slug(&new.name);
+    if rooms::room_dir(&slug).join("room.toml").exists() {
+        return Err(format!(
+            "room {slug} already exists; run `herdbot room list` or pick another name"
+        )
+        .into());
+    }
+    let room = rooms::Room {
+        name: new.name.clone(),
+        members: new.members.clone(),
+        mode: new.mode,
+        moderator: new.moderator.clone(),
+        ..Default::default()
+    };
+    rooms::validate(&room, &home::list_bots())?;
+    rooms::save_room(&slug, &room)?;
+    std::fs::write(rooms::room_dir(&slug).join("transcript.md"), "")?;
+    Ok((slug, room))
 }
 
 fn main() {
@@ -156,17 +285,17 @@ async fn cli() -> Result<()> {
             Ok(())
         }
         "new" => {
-            let cwd = flag(&mut args, "--cwd");
-            let class = flag(&mut args, "--class");
-            let name = rest(&args, 0);
-            if name.is_empty() {
-                return Err(USAGE.into());
+            let new = parse_new_args(&mut args)?;
+            let (slug, dir) = create_bot(&new, new.instructions.as_deref().unwrap_or_default())?;
+            if new.json {
+                let created = CreatedBot { slug, path: dir.display().to_string() };
+                println!("{}", serde_json::to_string(&created)?);
+            } else {
+                println!(
+                    "created {} (edit BOT.md for its instructions)",
+                    dir.display()
+                );
             }
-            let dir = setup::create_bot(&name, cwd, class, "")?;
-            println!(
-                "created {} (edit BOT.md for its instructions)",
-                dir.display()
-            );
             Ok(())
         }
         "config" => config::run(args),
@@ -337,41 +466,17 @@ async fn cli() -> Result<()> {
             let sub = args.remove(0);
             match sub.as_str() {
                 "new" => {
-                    let members: Vec<String> = flag(&mut args, "--members")
-                        .ok_or(USAGE)?
-                        .split(',')
-                        .map(|m| home::slug(m.trim()))
-                        .collect();
-                    let mode = match flag(&mut args, "--mode").as_deref() {
-                        None | Some("channel") => rooms::Mode::Channel,
-                        Some("round_robin") => rooms::Mode::RoundRobin,
-                        Some("moderated") => rooms::Mode::Moderated,
-                        Some(other) => return Err(format!("unknown mode {other:?}").into()),
-                    };
-                    let moderator = flag(&mut args, "--moderator").map(|m| home::slug(&m));
-                    let name = rest(&args, 0);
-                    if name.is_empty() {
-                        return Err(USAGE.into());
+                    let new = parse_room_new_args(&mut args)?;
+                    let (slug, room) = create_room(&new)?;
+                    if new.json {
+                        println!("{}", serde_json::to_string(&CreatedRoom { slug })?);
+                    } else {
+                        println!(
+                            "created room {slug} ({:?}, {})",
+                            room.mode,
+                            room.members.join(", ")
+                        );
                     }
-                    let slug = home::slug(&name);
-                    if rooms::room_dir(&slug).join("room.toml").exists() {
-                        return Err(format!("room {slug} already exists").into());
-                    }
-                    let room = rooms::Room {
-                        name,
-                        members,
-                        mode,
-                        moderator,
-                        ..Default::default()
-                    };
-                    rooms::validate(&room, &home::list_bots())?;
-                    rooms::save_room(&slug, &room)?;
-                    std::fs::write(rooms::room_dir(&slug).join("transcript.md"), "")?;
-                    println!(
-                        "created room {slug} ({:?}, {})",
-                        room.mode,
-                        room.members.join(", ")
-                    );
                 }
                 "send" => {
                     let slug = args.first().ok_or(USAGE)?.clone();
@@ -681,6 +786,187 @@ fn bind_session_socket(root: &std::path::Path, socket: &str, legacy: &str) -> Re
         Err(error) => return Err(error.into()),
     }
     Ok(())
+}
+
+/// Run `f` with `HERDBOT_HOME` pointing at a fresh temp directory. Serialised because the
+/// environment is process-global, so every test in this crate that needs a home goes through it.
+#[cfg(test)]
+fn with_temp_home<F: FnOnce() -> R, R>(f: F) -> R {
+    use std::sync::Mutex;
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let tmp = std::env::temp_dir().join(format!("herdbot-create-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let old = std::env::var_os("HERDBOT_HOME");
+    // SAFETY: the lock above keeps every home-swapping test in this process apart.
+    unsafe { std::env::set_var("HERDBOT_HOME", &tmp) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    match old {
+        Some(old) => unsafe { std::env::set_var("HERDBOT_HOME", old) },
+        None => unsafe { std::env::remove_var("HERDBOT_HOME") },
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    match result {
+        Ok(r) => r,
+        Err(e) => std::panic::resume_unwind(e),
+    }
+}
+
+#[cfg(test)]
+mod create_tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    #[test]
+    fn new_args_take_flags_anywhere_and_keep_a_multi_word_name() {
+        let mut all = args(&[
+            "My Bot",
+            "--json",
+            "--cwd",
+            "/tmp",
+            "--class",
+            "explore",
+            "--instructions",
+            "Be terse.",
+        ]);
+        assert_eq!(
+            parse_new_args(&mut all).unwrap(),
+            NewBotArgs {
+                name: "My Bot".into(),
+                cwd: Some("/tmp".into()),
+                class: Some("explore".into()),
+                instructions: Some("Be terse.".into()),
+                json: true,
+            }
+        );
+        // Only flags are consumed; the name stays, as it always has for the leftover words.
+        assert_eq!(all, ["My Bot"]);
+        // `--json` never eats the word after it.
+        assert_eq!(parse_new_args(&mut args(&["--json", "helper"])).unwrap().name, "helper");
+        let error = parse_new_args(&mut args(&["--json"])).unwrap_err().to_string();
+        assert!(error.contains("needs a name"), "{error}");
+    }
+
+    #[test]
+    fn creation_options_preserve_literal_instructions_and_reject_incomplete_flags() {
+        for text in ["--json", "-", "line one\nline two", "--mode"] {
+            let parsed = parse_new_args(&mut args(&["helper", "--instructions", text, "--json"])).unwrap();
+            assert_eq!(parsed.instructions.as_deref(), Some(text));
+            assert!(parsed.json);
+        }
+        for input in [vec!["helper", "--cwd"], vec!["helper", "--class", "--json"], vec!["helper", "--instructions"], vec!["helper", "--typo"]] {
+            assert!(parse_new_args(&mut args(&input)).is_err(), "{input:?}");
+        }
+        assert!(parse_room_new_args(&mut args(&["crew", "--members", "a,b", "--mode"])).unwrap_err().to_string().contains("needs a value"));
+    }
+
+    #[test]
+    fn room_args_default_to_channel_and_reject_bad_input() {
+        let mut plain = args(&["Crew", "--members", "ann, bob,cy", "--json"]);
+        assert_eq!(
+            parse_room_new_args(&mut plain).unwrap(),
+            NewRoomArgs {
+                name: "Crew".into(),
+                members: vec!["ann".into(), "bob".into(), "cy".into()],
+                mode: rooms::Mode::Channel,
+                moderator: None,
+                json: true,
+            }
+        );
+        let mut rr = args(&["Crew", "--members", "ann,bob", "--mode", "round_robin"]);
+        assert_eq!(parse_room_new_args(&mut rr).unwrap().mode, rooms::Mode::RoundRobin);
+        let mut moderated = args(&[
+            "Crew", "--members", "ann,bob", "--mode", "moderated", "--moderator", "Ann",
+        ]);
+        let parsed = parse_room_new_args(&mut moderated).unwrap();
+        assert_eq!(parsed.mode, rooms::Mode::Moderated);
+        assert_eq!(parsed.moderator.as_deref(), Some("ann"));
+
+        let error = parse_room_new_args(&mut args(&["Crew", "--members", "ann,bob", "--mode", "debate"]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("channel, round_robin or moderated"), "{error}");
+        for members in ["", "ann,", ",bob", "ann, ,bob"] {
+            let error = parse_room_new_args(&mut args(&["Crew", "--members", members])).unwrap_err().to_string();
+            assert!(error.contains("empty member"), "{error}");
+        }
+        let error = parse_room_new_args(&mut args(&["Crew"])).unwrap_err().to_string();
+        assert!(error.contains("--members"), "{error}");
+        let error = parse_room_new_args(&mut args(&["--members", "ann,bob"])).unwrap_err().to_string();
+        assert!(error.contains("needs a name"), "{error}");
+    }
+
+    #[test]
+    fn creating_a_bot_and_a_room_writes_files_and_refuses_bad_input() {
+        with_temp_home(|| {
+            let bot = parse_new_args(&mut args(&["Helper Bot", "--class", "explore"])).unwrap();
+            let (slug, dir) = create_bot(&bot, "Be terse.").unwrap();
+            assert_eq!(slug, "helper-bot");
+            assert_eq!(dir, home::root().join("helper-bot"));
+            assert_eq!(std::fs::read_to_string(dir.join("BOT.md")).unwrap(), "Be terse.");
+            let toml = std::fs::read_to_string(dir.join("bot.toml")).unwrap();
+            assert!(toml.contains("class = \"explore\""), "{toml}");
+            let json = serde_json::to_string(&CreatedBot { slug: slug.clone(), path: dir.display().to_string() }).unwrap();
+            assert_eq!(json, format!("{{\"slug\":\"helper-bot\",\"path\":\"{}\"}}", dir.display()));
+
+            // A duplicate is refused with the file to edit instead of a second bot.
+            let error = create_bot(&bot, "").unwrap_err().to_string();
+            assert!(error.contains("bot helper-bot already exists"), "{error}");
+            assert!(error.contains("BOT.md"), "{error}");
+
+            // A name that would take one of herdbot's own home folders is refused.
+            let reserved = parse_new_args(&mut args(&["Rooms"])).unwrap();
+            assert!(create_bot(&reserved, "").unwrap_err().to_string().contains("reserved"));
+
+            let partial = home::root().join("partial");
+            std::fs::create_dir_all(&partial).unwrap();
+            std::fs::write(partial.join("BOT.md"), "Keep existing instructions").unwrap();
+            let partial_args = parse_new_args(&mut args(&["Partial"])).unwrap();
+            assert!(create_bot(&partial_args, "overwrite").is_err());
+            assert!(!partial.join("bot.toml").exists());
+            assert_eq!(std::fs::read_to_string(partial.join("BOT.md")).unwrap(), "Keep existing instructions");
+
+            let bad_cwd = parse_new_args(&mut args(&["Other", "--cwd", "/nope/not/here"])).unwrap();
+            assert!(create_bot(&bad_cwd, "").unwrap_err().to_string().contains("not a directory"));
+
+            create_bot(&parse_new_args(&mut args(&["Beta"])).unwrap(), "").unwrap();
+            let room = parse_room_new_args(&mut args(&[
+                "Crew", "--members", "helper-bot,beta", "--mode", "moderated", "--moderator", "helper-bot", "--json",
+            ]))
+            .unwrap();
+            let (room_slug, saved) = create_room(&room).unwrap();
+            assert_eq!(room_slug, "crew");
+            assert_eq!(saved.moderator.as_deref(), Some("helper-bot"));
+            assert_eq!(serde_json::to_string(&CreatedRoom { slug: room_slug }).unwrap(), "{\"slug\":\"crew\"}");
+            assert!(rooms::room_dir("crew").join("room.toml").exists());
+            assert!(rooms::room_dir("crew").join("transcript.md").exists());
+
+            let error = create_room(&room).unwrap_err().to_string();
+            assert!(error.contains("room crew already exists"), "{error}");
+
+            let unmoderated = parse_room_new_args(&mut args(&[
+                "Debate", "--members", "helper-bot,beta", "--mode", "moderated",
+            ]))
+            .unwrap();
+            assert!(create_room(&unmoderated).unwrap_err().to_string().contains("--moderator"));
+
+            let stranger = parse_room_new_args(&mut args(&["Team", "--members", "helper-bot,zed"])).unwrap();
+            let error = create_room(&stranger).unwrap_err().to_string();
+            assert!(error.contains("no bot \"zed\""), "{error}");
+            assert!(error.contains("helper-bot"), "{error}");
+
+            let solo = parse_room_new_args(&mut args(&["Solo", "--members", "helper-bot"])).unwrap();
+            assert!(create_room(&solo).unwrap_err().to_string().contains("at least two members"));
+            // None of the rejected rooms left a folder behind.
+            for slug in ["debate", "team", "solo"] {
+                assert!(!rooms::room_dir(slug).join("room.toml").exists(), "{slug} was written");
+            }
+        });
+    }
 }
 
 #[cfg(test)]

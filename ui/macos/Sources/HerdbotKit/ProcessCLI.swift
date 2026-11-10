@@ -263,6 +263,35 @@ extension ProcessCLI: SetupCLI {
     }
 }
 
+extension ProcessCLI: CreateCLI {
+    /// The name and the instructions are one argv entry each, so spaces and newlines reach herdbot
+    /// untouched. Empty options are left out, so the CLI's defaults apply.
+    public func createBot(name: String, cwd: String?, taskClass: String?, instructions: String) async throws -> CreatedBot {
+        var arguments = ["new", name, "--json"]
+        if let cwd, !cwd.isEmpty { arguments += ["--cwd", cwd] }
+        if let taskClass { arguments += ["--class", taskClass] }
+        if !instructions.isEmpty { arguments += ["--instructions", instructions] }
+        return try payload(CreatedBot.self, from: await output(arguments), command: "new")
+    }
+
+    /// `--members` is one comma-separated entry, as the CLI parses it; `--moderator` only applies to
+    /// a moderated room, so another mode never writes the field.
+    public func createRoom(name: String, members: [String], mode: RoomMode, moderator: String?) async throws -> CreatedRoom {
+        var arguments = ["room", "new", name, "--members", CreateForm.membersArgument(members), "--mode", mode.rawValue, "--json"]
+        if mode == .moderated, let moderator { arguments += ["--moderator", moderator] }
+        return try payload(CreatedRoom.self, from: await output(arguments), command: "room new")
+    }
+
+    /// A payload this build cannot read means an older or newer herdbot, not a created bot.
+    private func payload<T: Decodable>(_ type: T.Type, from data: Data, command: String) throws -> T {
+        do {
+            return try JSONDecoder().decode(type, from: data)
+        } catch {
+            throw CLIError.failed("herdbot \(command) printed a result this app cannot read; update herdbot or this app")
+        }
+    }
+}
+
 extension ProcessCLI: CardCLI {
     public func answerCard(id: String, option: String) async throws {
         _ = try await output(["card", "answer", id, option])

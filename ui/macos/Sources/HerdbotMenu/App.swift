@@ -14,6 +14,7 @@ struct HerdbotMenuApp: App {
     private let quickEntry: QuickEntryController
     private let chat: ChatState
     private let settings: SettingsState
+    private let create: CreateState
     private let unread: UnreadTracker
     private let answers: CardAnswers
     private let opener = WindowOpener()
@@ -46,6 +47,8 @@ struct HerdbotMenuApp: App {
         self.chat = chat
         let settings = SettingsState(cli: cli)
         self.settings = settings
+        let create = CreateState(menu: state, cli: cli)
+        self.create = create
         let answers = CardAnswers()
         self.answers = answers
         unread = UnreadTracker(menu: state)
@@ -68,7 +71,7 @@ struct HerdbotMenuApp: App {
     var body: some Scene {
         // Opened from the menu, not at launch.
         Window("herdbot", id: "chat") {
-            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers, settings: settings, setup: setup)
+            ChatWindow(menu: state, chat: chat, unread: unread, cli: cli, answers: answers, settings: settings, setup: setup, create: create)
         }
         .commands {
             CommandGroup(replacing: .appTermination) {

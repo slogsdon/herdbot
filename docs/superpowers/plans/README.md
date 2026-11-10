@@ -54,7 +54,7 @@ Written 2026-10-20 for the roadmap items in the top-level README.
 | Terminal focus spike ([spec](../specs/2026-10-22-terminal-focus-design.md)) | static spike complete and re-verified 2026-11-09 ([report](../research/2026-10-22-terminal-focus-spike.md)); manual live/permission gates 1–4 block the implementation plan | Terminal.app, iTerm2, Ghostty attach behavior and permissions |
 | Grok Bot schedule/skill import | blocked: no data on disk | — |
 
-Approval-card adapters for Claude per-tool prompts and the Codex trust modal remain unplanned until Shane supplies real screen captures, as required by the approval-card design. U2 (create bots/rooms and import templates) remains open and outside this usability batch.
+Approval-card adapters for Claude per-tool prompts and the Codex trust modal remain unplanned until Shane supplies real screen captures, as required by the approval-card design. U2(a), plain bot/room creation from the sidebar + menu, is implemented in the uncommitted `feature/u2a-create-bots-rooms` worktree; automated checks and manual UI review are tracked in `TASKS.md`. U2(b/c), template URL research and import, remain open.
 
 Run them one after another, in the order **pi → fm → rooms → turn hooks → OptChat memory → cua**, each starting from the previous one's merge. cua goes last because its live checks wait on Shane installing cua-driver and granting it permissions. All six edit `README.md`, and turn hooks also edits `route::launch` and the daemon loop. pi and cua both edit `route::launch`. pi, fm and rooms touch `main.rs` and `tools.rs`. fm and rooms both add to the daemon loop. Running them in parallel only trades the waiting for merge conflicts.
 

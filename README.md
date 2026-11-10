@@ -87,6 +87,7 @@ herdbot --version                       print the installed version
 herdbot doctor [--json]                 first-run and health checks (exit 1 if any fail)
 herdbot setup [--yes] [--only home|cli-link|service|restart-daemon]   fix what doctor reports
 herdbot uninstall [--purge]             remove the service and the herdbot link; --purge also deletes the home
+herdbot new <name> [--cwd DIR] [--class CLASS] [--instructions TEXT] [--json]
 herdbot list | runs                    bots and subagent runs
 herdbot config list [--bot BOT] [--json]   supported settings, values and when they apply
 herdbot config get <key> [--bot BOT] [--json]   one setting
@@ -98,7 +99,8 @@ herdbot history <bot|room:NAME> --json [--before N] [--limit L]   a conversation
 herdbot collaborate --json              accept one stable-ID multi-target request on stdin
 herdbot focus <agent>                  focus an agent's pane in herdr
 herdbot up <bot> | down <bot>          start or stop a bot's workspace
-herdbot room new | send | list | up    group conversations between bots and you
+herdbot room new <name> --members a,b[,c] [--mode channel|round_robin|moderated] [--moderator BOT] [--json]
+herdbot room send | list | up           group conversations between bots and you
 herdbot task <bot> <class> <prompt…>   start a subagent from the shell
 herdbot route <class> [--bot BOT]      which harness:model a task class resolves to
 herdbot import-grok                    import the Grok Bot roster once
@@ -156,6 +158,16 @@ rooms/<slug>/transcript.jsonl / .md    # the conversation (append-only) and its 
 ```
 
 A bot's instructions are a short herdbot preamble followed by `BOT.md` and `BOT.local.md`. claude gets them through `--append-system-prompt-file` and pi through `--append-system-prompt`. codex and cursor have no flag I could verify, so they get the instructions as their first prompt.
+
+In the chat window sidebar, **+ → New Bot… / New Room…** opens the creation form. Bot fields are name, optional working directory (with a folder picker), task class and multi-line instructions. Rooms pick at least two existing bots, a mode and, for moderated rooms, a moderator from the selected members. Create is disabled for incomplete forms and while saving; CLI errors stay inline with the draft intact. Success closes the sheet and opens the new conversation; the existing watch stream updates the sidebar. Return submits (the instructions editor uses Return for newlines); Escape cancels. Cancelling a running request closes the sheet but does not undo creation. Template/URL import is not included.
+
+`herdbot new --instructions TEXT` writes TEXT verbatim to `BOT.md`, including newlines; quote it as one shell argument. `-` is literal text, not stdin. Omit the option for an empty file. `--json` prints only `{"slug":"helper","path":"/path/to/home/helper"}` for a bot or `{"slug":"crew"}` for a room; without it the existing human-readable output is retained. For example:
+
+```sh
+herdbot new helper --class explore --instructions 'Review the repository and report findings.' --json
+herdbot new reviewer --class review --json
+herdbot room new crew --members helper,reviewer --mode moderated --moderator helper --json
+```
 
 A bot's `cwd` defaults to its own folder. You can point it at a repo instead, for example `herdbot new herdbot-dev --cwd ~/Code/herdbot`.
 

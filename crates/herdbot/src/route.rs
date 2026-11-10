@@ -933,33 +933,9 @@ code = ["codex:bot:low"]
     }
 
     /// Run `f` with `HERDBOT_HOME` pointing at a fresh temp directory.
-    /// Serialised because env vars are process-global.
+    /// Serialised with every other home-swapping test in this crate (see `crate::with_temp_home`).
     fn with_temp_home<F: FnOnce() -> R, R>(f: F) -> R {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap();
-        let tmp = std::env::temp_dir().join(format!("herdbot-route-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let old = std::env::var_os("HERDBOT_HOME");
-        unsafe {
-            std::env::set_var("HERDBOT_HOME", &tmp);
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-        if let Some(old) = old {
-            unsafe {
-                std::env::set_var("HERDBOT_HOME", old);
-            }
-        } else {
-            unsafe {
-                std::env::remove_var("HERDBOT_HOME");
-            }
-        }
-        let _ = std::fs::remove_dir_all(&tmp);
-        match result {
-            Ok(r) => r,
-            Err(e) => std::panic::resume_unwind(e),
-        }
+        crate::with_temp_home(f)
     }
 
     #[test]

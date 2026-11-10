@@ -52,13 +52,14 @@ private struct Row: View {
     }
 }
 
-/// Bots, then rooms, newest activity first, with the system search field on top, and Settings
-/// pinned below the list.
+/// Bots, then rooms, newest activity first, with the system search field on top, the "+" that
+/// creates a bot or a room, and Settings pinned below the list.
 struct SidebarView: View {
     let menu: MenuState
     let chat: ChatState
     let unread: UnreadTracker
     let settings: SettingsState
+    let create: CreateState
 
     var body: some View {
         let rows = menu.snapshot.map { Sidebar.rows(from: $0, filter: chat.filter) } ?? (bots: [], rooms: [])
@@ -73,6 +74,19 @@ struct SidebarView: View {
                 Section("Rooms") { ForEach(rows.rooms) { Row(row: $0, unread: unread.unread($0.id)).tag(Optional($0.id)) } }
             }
             Section {
+                Menu {
+                    Button("New Bot…") { create.present(.bot) }
+                    Button("New Room…") { create.present(.room) }
+                } label: {
+                    Label("New Bot or Room…", systemImage: "plus")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .buttonStyle(.plain)
+                .help("Create a bot or a room")
+                .accessibilityLabel("New bot or room")
                 Button { Task { await settings.present(.global) } } label: {
                     Label("Settings", systemImage: "gearshape")
                         .font(.body.weight(settings.isPresented ? .semibold : .regular))

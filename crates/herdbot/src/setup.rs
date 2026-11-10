@@ -50,10 +50,33 @@ pub fn pending_fixes(checks: &[Check]) -> Vec<&'static str> {
     FIX_ORDER.into_iter().filter(|fix| checks.iter().any(|check| check.status != Status::Ok && check.fix == Some(*fix))).collect()
 }
 
+/// Slugs that already name something herdbot keeps in the home, so a bot may not take them
+/// (`<home>/rooms/` holds the rooms, `routing.toml` the routing table).
+const RESERVED_SLUGS: [&str; 2] = ["rooms", "routing"];
+
+/// The slug a new bot gets, or why the name can't be used.
+pub fn bot_slug(name: &str) -> Result<String> {
+    let slug = home::slug(name);
+    if name.trim().is_empty() || slug.is_empty() {
+        return Err("a bot needs a name: herdbot new <name>".into());
+    }
+    if RESERVED_SLUGS.contains(&slug.as_str()) {
+        return Err(format!(
+            "{slug:?} is reserved for herdbot's own {slug}/ in the herdbot home; pick another name"
+        )
+        .into());
+    }
+    Ok(slug)
+}
+
 fn bot_files(root: &Path, slug: &str, instructions: &str) -> Result<PathBuf> {
     let dir = root.join(slug);
     if dir.join("BOT.md").exists() {
-        return Err(format!("bot {slug} already exists").into());
+        return Err(format!(
+            "bot {slug} already exists; edit {} or pick another name",
+            dir.join("BOT.md").display()
+        )
+        .into());
     }
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("BOT.md"), instructions)?;
@@ -61,9 +84,21 @@ fn bot_files(root: &Path, slug: &str, instructions: &str) -> Result<PathBuf> {
 }
 
 pub fn create_bot(name: &str, cwd: Option<String>, class: Option<String>, instructions: &str) -> Result<PathBuf> {
-    let slug = home::slug(name);
-    if home::bot_dir(&slug).join("bot.toml").exists() {
-        return Err(format!("bot {slug} already exists").into());
+    let slug = bot_slug(name)?;
+    let dir = home::bot_dir(&slug);
+    if dir.join("bot.toml").exists() || dir.join("BOT.md").exists() {
+        return Err(format!(
+            "bot {slug} already exists; edit {} or pick another name",
+            dir.join("BOT.md").display()
+        )
+        .into());
+    }
+    // `~` is expanded when the bot launches, so expand it here too before checking.
+    if let Some(cwd) = &cwd {
+        let path = home::expand_tilde(cwd);
+        if !Path::new(&path).is_dir() {
+            return Err(format!("working directory {path} is not a directory").into());
+        }
     }
     home::save_bot(&slug, &home::Bot { name: name.to_owned(), cwd, class, source: "local".into(), ..Default::default() })?;
     bot_files(&home::root(), &slug, instructions)

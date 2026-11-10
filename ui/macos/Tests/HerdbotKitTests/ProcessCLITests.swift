@@ -229,6 +229,66 @@ printf '%s\\n' '\(response)'
         }
     }
 
+    @Test func createBotPassesLiteralFieldsAndDecodesTheResult() async throws {
+        let script = try fakeHerdbot(##"""
+[ "$#" = 9 ] && [ "$1" = new ] && [ "$2" = 'Helper "quoted" $(false)' ] && [ "$3" = --json ] || exit 2
+[ "$4" = --cwd ] && [ "$5" = '/tmp/two words' ] && [ "$6" = --class ] && [ "$7" = explore ] || exit 3
+[ "$8" = --instructions ] && [ "$9" = "$(printf 'Keep "quotes" and $(false)\nsecond line')" ] || exit 4
+echo '{"slug":"helper","path":"/tmp/Bots/helper"}'
+"""##)
+        let created = try await ProcessCLI(binary: script).createBot(
+            name: "Helper \"quoted\" $(false)", cwd: "/tmp/two words", taskClass: "explore",
+            instructions: "Keep \"quotes\" and $(false)\nsecond line")
+        #expect(created == CreatedBot(slug: "helper", path: "/tmp/Bots/helper"))
+    }
+
+    @Test func createBotOmitsEmptyOptions() async throws {
+        let script = try fakeHerdbot(##"""
+[ "$#" = 3 ] && [ "$1" = new ] && [ "$2" = Helper ] && [ "$3" = --json ] || exit 2
+echo '{"slug":"helper","path":"/tmp/Bots/helper"}'
+"""##)
+        let directories: [String?] = [nil, ""]
+        for cwd in directories {
+            _ = try await ProcessCLI(binary: script).createBot(name: "Helper", cwd: cwd, taskClass: nil, instructions: "")
+        }
+    }
+
+    @Test func createRoomPassesMembersModeAndOnlyAModeratedModerator() async throws {
+        for mode in RoomMode.allCases {
+            let script = try fakeHerdbot("""
+[ "$1" = room ] && [ "$2" = new ] && [ "$3" = 'Crew two words' ] || exit 2
+[ "$4" = --members ] && [ "$5" = 'beta,alpha' ] && [ "$6" = --mode ] && [ "$7" = '\(mode.rawValue)' ] && [ "$8" = --json ] || exit 3
+\(mode == .moderated ? "[ \"$#\" = 10 ] && [ \"$9\" = --moderator ] && [ \"${10}\" = alpha ] || exit 4" : "[ \"$#\" = 8 ] || exit 4")
+echo '{"slug":"crew-two-words"}'
+""")
+            let created = try await ProcessCLI(binary: script).createRoom(
+                name: "Crew two words", members: ["beta", "alpha"], mode: mode, moderator: "alpha")
+            #expect(created == CreatedRoom(slug: "crew-two-words"))
+        }
+    }
+
+    @Test func createFailuresKeepTheCLIMessage() async throws {
+        let script = try fakeHerdbot("echo 'pick another name' >&2; exit 1")
+        await #expect(throws: CLIError.failed("pick another name")) {
+            _ = try await ProcessCLI(binary: script).createBot(name: "Helper", cwd: nil, taskClass: nil, instructions: "")
+        }
+        await #expect(throws: CLIError.failed("pick another name")) {
+            _ = try await ProcessCLI(binary: script).createRoom(name: "Crew", members: ["alpha", "beta"], mode: .channel, moderator: nil)
+        }
+    }
+
+    @Test func unreadableCreateResultsSayToUpdate() async throws {
+        for response in ["created helper", "{}", #"{"slug":123}"#] {
+            let script = try fakeHerdbot("echo '\(response)'")
+            await #expect(throws: CLIError.failed("herdbot new printed a result this app cannot read; update herdbot or this app")) {
+                _ = try await ProcessCLI(binary: script).createBot(name: "Helper", cwd: nil, taskClass: nil, instructions: "")
+            }
+            await #expect(throws: CLIError.failed("herdbot room new printed a result this app cannot read; update herdbot or this app")) {
+                _ = try await ProcessCLI(binary: script).createRoom(name: "Crew", members: ["alpha", "beta"], mode: .channel, moderator: nil)
+            }
+        }
+    }
+
     @Test func serviceDisableAndEnableRunTheirSubcommands() async throws {
         let disable = try fakeHerdbot(#"[ "$*" = "service disable" ] || exit 2; echo 'disabled the daemon; the service stays installed, so enable starts it again'"#)
         #expect(try await ProcessCLI(binary: disable).setService(enabled: false).contains("disabled"))

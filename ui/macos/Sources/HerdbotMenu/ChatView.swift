@@ -232,11 +232,12 @@ struct ChatWindow: View {
     let answers: CardAnswers
     let settings: SettingsState
     let setup: SetupState
+    let create: CreateState
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(menu: menu, chat: chat, unread: unread, settings: settings)
+            SidebarView(menu: menu, chat: chat, unread: unread, settings: settings, create: create)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             if settings.isPresented {
@@ -246,6 +247,11 @@ struct ChatWindow: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
+        .sheet(isPresented: Binding(get: { create.isPresented }, set: { if !$0 { create.dismiss() } })) {
+            CreateSheet(state: create)
+        }
+        // A new bot or room arrives through the watch stream; open it as soon as the CLI names it.
+        .onChange(of: create.created) { openCreated() }
         .task(id: menu.snapshot) {
             await chat.observe()
             unread.sync()
@@ -265,5 +271,14 @@ struct ChatWindow: View {
     /// What is on screen counts as read: only while this window is the active one.
     private func markSelectionSeen() {
         if scenePhase == .active, let selection = chat.selection { unread.markSeen(selection) }
+    }
+
+    /// Open the conversation the sheet just created, leaving Settings and clearing a filter that
+    /// would hide it from the list it was added to.
+    private func openCreated() {
+        guard let recipient = create.created else { return }
+        settings.dismiss()
+        chat.filter = ""
+        Task { await chat.select(recipient) }
     }
 }

@@ -19,7 +19,7 @@ pub fn save_room(slug: &str, room: &Room) -> Result<()> {
 }
 
 pub fn validate(room: &Room, bots: &[String]) -> std::result::Result<(), String> {
-    if room.members.len() < 2 {
+    if room.members.iter().collect::<BTreeSet<_>>().len() < 2 {
         return Err("a room needs at least two members".into());
     }
     if let Some(m) = room.members.iter().find(|m| !bots.contains(m)) {
@@ -543,6 +543,8 @@ mod tests {
         assert_eq!(validate(&room, &bots), Ok(()));
         let solo = Room { members: vec!["ann".into()], ..room.clone() };
         assert!(validate(&solo, &bots).unwrap_err().contains("two"));
+        let duplicate = Room { members: vec!["ann".into(), "ann".into()], ..room.clone() };
+        assert!(validate(&duplicate, &bots).unwrap_err().contains("two"));
         let stranger = Room { members: vec!["ann".into(), "zed".into()], ..room.clone() };
         assert!(validate(&stranger, &bots).unwrap_err().contains("zed"));
         let unmoderated = Room { mode: Mode::Moderated, ..room.clone() };
